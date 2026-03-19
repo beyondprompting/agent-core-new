@@ -12,4 +12,5 @@ yarn-error.log*
 .next/
 .temp-pdf-images/
 .temp-*
+/docs
 
