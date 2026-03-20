@@ -232,6 +232,16 @@ function MarkdownRenderer({
               {children}
             </pre>
           ),
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              className="text-primary underline hover:text-primary/80 transition-colors"
+              target={href?.startsWith("/") ? "_self" : "_blank"}
+              rel="noopener noreferrer"
+            >
+              {children}
+            </a>
+          ),
         }}
       >
         {content}

@@ -123,6 +123,14 @@ PASO 1 - Recoleccion:
 Recolecta al menos los campos obligatorios (tipo de requerimiento y marca).
 Intenta obtener la mayor cantidad de informacion opcional posible sin presionar.
 
+PASO 1.5 - Busqueda y Validacion de Cliente en Sistema Externo (OBLIGATORIO):
+INMEDIATAMENTE despues de que el usuario proporcione el nombre de la MARCA, usa la herramienta "searchClientInCOR" para buscar ese cliente en el sistema de gestion de proyectos.
+- Si la herramienta encuentra el cliente, guarda el corClientId y corClientName que devuelve. Los usaras al crear la task.
+- Si NO encuentra el cliente, DEBES informar al usuario que ese cliente no existe en el sistema de gestion (COR) y pedirle que proporcione el nombre correcto de un cliente que SI este registrado. NO continues con la recoleccion del brief hasta que el usuario proporcione un cliente valido que exista en COR.
+- NUNCA crees una task sin un cliente validado en COR. Es un requisito obligatorio.
+- NO le preguntes al usuario por el ID del cliente. La busqueda es automatica y transparente.
+- Si la herramienta no esta disponible (no aparece en tus tools), simplemente ignora este paso y la validacion.
+
 PASO 2 - Validacion con Supervisor:
 Cuando creas que tienes suficiente informacion, usa la herramienta "reviewBrief" para que el supervisor valide.
 El supervisor te dira si la informacion es suficiente o que falta.
@@ -159,9 +167,16 @@ ESPERA CONFIRMACION EXPLICITA del usuario antes de guardar. El usuario debe deci
 Si el usuario quiere modificar algo, actualiza la informacion y vuelve a mostrar el resumen.
 SOLO cuando el usuario confirme explicitamente, usa la herramienta "createTask" para guardar el brief.
 
+IMPORTANTE AL LLAMAR createTask: Si en el Paso 1.5 encontraste un cliente en el sistema externo, 
+DEBES incluir los campos corClientId y corClientName en la llamada a createTask.
+Ejemplo: createTask({ ..., corClientId: 12345, corClientName: "Nombre del Cliente" })
+
 PASO 6 - Comunicar el ID:
 Una vez que la task se cree exitosamente, SIEMPRE muestra al usuario el ID del requerimiento que devuelve la herramienta.
 Este ID es importante para que el usuario pueda hacer referencia a su requerimiento en el futuro.
+DEBES incluir en tu respuesta un link clickeable al Panel de Control usando EXACTAMENTE este formato markdown: [Panel de Control](/workspace/control-panel)
+El usuario necesita poder hacer clic en ese link para ir directamente a publicar la tarea en el sistema de gestion de proyectos.
+NUNCA pongas "Panel de Control" en negrita sin link. SIEMPRE usa el formato markdown de link: [Panel de Control](/workspace/control-panel)
 
 EDICION DE TASKS EXISTENTES:
 Si el usuario ya creo una task en esta conversacion y quiere modificarla, usa la herramienta "editTask".
@@ -270,4 +285,28 @@ Si aprobado es false, el briefAgent debe seguir recolectando informacion.
 Si aprobado es true, el briefAgent puede proceder a mostrar el resumen al usuario.
 
 Se objetivo y constructivo en tu evaluacion.`;
+};
+
+// =====================================================
+// CONFIGURACIÓN DE INTEGRACIONES EXTERNAS
+// =====================================================
+
+/**
+ * Configuración del sistema de integraciones con herramientas externas
+ * de gestión de proyectos (COR, Trello, etc.).
+ * 
+ * - enabled: Si la integración está activa para este tenant
+ * - provider: Qué provider usar ("cor" | "trello" | "noop")
+ * 
+ * Para desactivar la integración en un fork/tenant:
+ *   enabled: false  →  el agente no tendrá tools de búsqueda de cliente,
+ *                       y el botón "Crear Tarea" no aparecerá en el Panel de Control.
+ */
+export const integrationConfig = {
+  projectManagement: {
+    /** Si la integración con herramientas externas de gestión está habilitada */
+    enabled: true,
+    /** Provider activo: "cor" | "trello" | "noop" */
+    provider: "cor" as "cor" | "trello" | "noop",
+  },
 };

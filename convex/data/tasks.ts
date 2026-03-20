@@ -6,6 +6,8 @@ import { createTool, createThread, saveMessage, listMessages } from "@convex-dev
 import { z } from "zod";
 import { internal, components } from "../_generated/api";
 import { reviewerAgent } from "../agents/reviewerAgent";
+import { getProjectManagementProvider, isProjectManagementEnabled } from "../integrations/registry";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 // ==================== TOOL PARA OBTENER FECHA ACTUAL ====================
 
@@ -187,18 +189,77 @@ Por favor verifica el ID e intenta de nuevo.`;
   },
 });
 
+// ==================== TOOL PARA BUSCAR CLIENTE EN SISTEMA EXTERNO ====================
+
+// Tool que el agente usa para buscar el cliente/marca en el sistema externo (COR, Trello, etc.)
+// Solo se registra si la integración de project management está habilitada
+export const searchClientInCORTool = createTool({
+  description: `Buscar un cliente o marca en el sistema de gestión de proyectos externo (COR).
+  Usar esta herramienta INMEDIATAMENTE después de que el usuario proporcione el nombre de la marca.
+  Esto permite asociar la task con el cliente correcto en COR para cuando se publique.
+  
+  Recibe el nombre de la marca/cliente tal como lo dijo el usuario.
+  Devuelve el ID del cliente si se encuentra, o un mensaje indicando que no se encontró.`,
+  args: z.object({
+    clientName: z.string().describe("Nombre de la marca o cliente a buscar en COR"),
+  }),
+  handler: async (ctx, args): Promise<string> => {
+    console.log(`[SearchClient] 🔍 Buscando cliente: "${args.clientName}"`);
+
+    // Verificar si la integración está habilitada
+    if (!isProjectManagementEnabled()) {
+      console.log("[SearchClient] ⚠️ Integración de project management deshabilitada");
+      return "La búsqueda de clientes en sistema externo no está habilitada para este tenant.";
+    }
+
+    try {
+      const provider = getProjectManagementProvider();
+      const client = await provider.searchClient(args.clientName);
+
+      if (!client) {
+        console.log(`[SearchClient] ⚠️ No se encontró cliente: "${args.clientName}"`);
+        return `❌ No se encontró un cliente con el nombre "${args.clientName}" en el sistema de gestión de proyectos (COR).
+
+IMPORTANTE: NO puedes crear un requerimiento para un cliente que no existe en COR.
+Debes informar al usuario que el cliente "${args.clientName}" no existe en el sistema y pedirle que proporcione el nombre correcto de un cliente que ya esté registrado en COR.
+
+NO continúes con la creación del brief hasta que el usuario proporcione un nombre de cliente válido que exista en COR.`;
+      }
+
+      console.log(`[SearchClient] ✅ Cliente encontrado: ${client.name} (ID: ${client.id})`);
+      
+      return `✅ Cliente encontrado en el sistema de gestión:
+
+**Nombre:** ${client.name}
+**ID:** ${client.id}
+${client.businessName ? `**Razón social:** ${client.businessName}` : ""}
+
+Este cliente se asociará automáticamente al brief cuando se cree la task.
+Guarda este ID (${client.id}) para usarlo al crear el brief con createTask.
+
+IMPORTANTE: Usa corClientId: ${client.id} y corClientName: "${client.name}" cuando llames a createTask.`;
+    } catch (error) {
+      console.error(`[SearchClient] ❌ Error:`, error);
+      return `Error al buscar cliente: ${error instanceof Error ? error.message : String(error)}
+
+Esto no impide crear el brief — puedes continuar normalmente.`;
+    }
+  },
+});
+
 // ==================== TOOL PARA CREAR TASK ====================
 
 // Tool que el agente puede usar para crear una task
-// AHORA USA WORKFLOW para garantizar durabilidad, reintentos e idempotencia
-// También sincroniza automáticamente con COR
+// SOLO crea en Convex — la publicación en COR/externo se hace desde el Panel de Control
 export const createTaskTool = createTool({
-  description: `Crear una nueva task/requerimiento en la base de datos y sincronizarla con COR. 
+  description: `Crear una nueva task/requerimiento en la base de datos. 
   SOLO usar esta herramienta cuando el usuario haya CONFIRMADO explicitamente que toda la informacion esta correcta.
   El usuario debe decir algo como "si", "correcto", "todo esta bien", "conforme", "ok, guardalo", etc.
   NO usar esta herramienta si el usuario quiere modificar algo.
   
-  La task se creará localmente Y se sincronizará automáticamente con el sistema COR de gestión de proyectos.`,
+  La task se guardará en el sistema. La publicación al sistema de gestión externo (COR) se hará desde el Panel de Control.
+  
+  Si previamente usaste searchClientInCOR y encontraste un cliente, incluye corClientId y corClientName.`,
   args: z.object({
     title: z.string().describe("Titulo breve del requerimiento"),
     description: z.string().optional().describe("Descripcion detallada del requerimiento"),
@@ -211,10 +272,12 @@ export const createTaskTool = createTool({
     budget: z.string().optional().describe("Presupuesto disponible"),
     approvers: z.string().optional().describe("Personas que deben aprobar el proyecto"),
     priority: z.string().optional().describe("Prioridad: baja, media, alta, urgente"),
+    corClientId: z.number().optional().describe("ID del cliente en COR (obtenido con searchClientInCOR)"),
+    corClientName: z.string().optional().describe("Nombre del cliente en COR (obtenido con searchClientInCOR)"),
   }),
   handler: async (ctx, args): Promise<string> => {
     console.log("\n========================================");
-    console.log("[CreateTask] 🚀 CREANDO TASK CON WORKFLOW + COR");
+    console.log("[CreateTask] 🚀 CREANDO TASK (SOLO CONVEX)");
     console.log("========================================");
     
     const threadId = ctx.threadId;
@@ -226,23 +289,27 @@ export const createTaskTool = createTool({
 
     console.log(`[CreateTask] ThreadId: ${threadId}`);
 
+    // Verificar que el cliente exista en COR si la integración está habilitada
+    if (isProjectManagementEnabled() && !args.corClientId) {
+      console.log("[CreateTask] ❌ BLOQUEADO: Integración habilitada pero no se proporcionó corClientId");
+      return `❌ No se puede crear el requerimiento sin un cliente válido en el sistema de gestión de proyectos (COR).
+
+Antes de crear el requerimiento, debes buscar y validar el cliente usando la herramienta searchClientInCOR.
+Si el cliente no existe en COR, pide al usuario que proporcione un nombre de cliente que sí esté registrado.
+
+NO crees el requerimiento hasta tener un corClientId válido.`;
+    }
+
     // Verificar IDEMPOTENCIA: Si ya existe una task para este thread, no crear otra
     const existingTask = await ctx.runQuery(internal.data.tasks.getTaskByThreadInternal, { threadId });
     
     if (existingTask) {
       console.log(`[CreateTask] ⚠️ Ya existe task para este thread: ${existingTask._id}`);
       
-      // Verificar si está sincronizada con COR
-      const corStatus = existingTask.corSyncStatus === "synced" 
-        ? `✅ Sincronizada con COR (ID: ${existingTask.corTaskId})`
-        : existingTask.corSyncStatus === "error"
-        ? "⚠️ Pendiente de sincronizar con COR"
-        : "⏳ Sincronización en progreso";
-      
       return `Ya existe un requerimiento para esta conversación.
 
 ID del requerimiento: ${existingTask._id}
-Estado COR: ${corStatus}
+Estado: ${existingTask.status}
 
 Si necesitas crear un nuevo requerimiento, por favor inicia una nueva conversación.`;
     }
@@ -251,81 +318,57 @@ Si necesitas crear un nuevo requerimiento, por favor inicia una nueva conversaci
     const userId = await ctx.runQuery(internal.data.tasks.getUserIdFromThread, { threadId });
     console.log(`[CreateTask] UserId: ${userId || "no encontrado"}`);
 
-    // WORKFLOW: Iniciar el workflow de creación de task
-    // Esto proporciona:
-    // - Durabilidad (sobrevive reinicios)
-    // - Reintentos automáticos
-    // - Idempotencia
-    // - Sincronización con COR
-    console.log("[CreateTask] ⏳ Iniciando creación de task con sincronización COR...");
+    // Crear task SOLO en Convex (sin sincronización con COR)
+    console.log("[CreateTask] ⏳ Creando task en Convex...");
     
-    // Crear task y sincronizar con COR de forma síncrona
-    // Esto devuelve el COR ID real inmediatamente al usuario
-    const result = await ctx.runAction(internal.workflows.taskCreation.createTaskAndSyncWithCOR, {
+    const taskId = await ctx.runMutation(internal.data.tasks.createTaskInternal, {
+      title: args.title,
+      description: args.description,
+      requestType: args.requestType,
+      brand: args.brand,
+      objective: args.objective,
+      keyMessage: args.keyMessage,
+      kpis: args.kpis,
+      deadline: args.deadline,
+      budget: args.budget,
+      approvers: args.approvers,
+      priority: args.priority,
       threadId,
-      taskData: {
-        title: args.title,
-        description: args.description,
-        requestType: args.requestType,
-        brand: args.brand,
-        objective: args.objective,
-        keyMessage: args.keyMessage,
-        kpis: args.kpis,
-        deadline: args.deadline,
-        budget: args.budget,
-        approvers: args.approvers,
-        priority: args.priority,
-      },
-      userId: userId || undefined,
-      // El corProjectId se puede configurar en convex/integrations/cor.ts
-      // o pasarlo dinámicamente si lo tienes disponible
+      status: "nueva",
+      createdBy: userId ? String(userId) : undefined,
+      // Estado COR: pendiente (se publicará desde el Panel de Control)
+      corSyncStatus: "pending",
+      // Cliente externo (si se encontró con searchClientInCOR)
+      corClientId: args.corClientId,
+      corClientName: args.corClientName,
     });
-    
-    console.log(`[CreateTask] ✅ Workflow completado`);
-    console.log(`[CreateTask] 📋 Task ID local: ${result.taskId}`);
-    console.log(`[CreateTask] 📋 COR Task ID: ${result.corTaskId || "N/A"}`);
-    console.log(`[CreateTask] 📋 Estado: ${result.status}`);
+
+    console.log(`[CreateTask] ✅ Task creada: ${taskId}`);
+
+    // Asociar archivos del thread a la task (en background, sin bloquear)
+    try {
+      await ctx.runAction(internal.data.tasks.associateFilesToTask, {
+        taskId,
+        threadId,
+        // Sin corTaskId — no hay task en COR todavía
+      });
+      console.log("[CreateTask] ✅ Archivos asociados");
+    } catch (error) {
+      console.log("[CreateTask] ⚠️ No se pudieron asociar archivos (continuando):", error);
+    }
+
+    console.log("\n========================================");
+    console.log("[CreateTask] 🏁 TASK CREADA EXITOSAMENTE");
+    console.log(`[CreateTask] Task ID: ${taskId}`);
     console.log("========================================\n");
 
-    // Construir respuesta con el COR ID REAL
-    if (result.status === "already_exists") {
-      const corInfo = result.corTaskId 
-        ? `✅ Sincronizado con COR (ID: **${result.corTaskId}**)`
-        : "⚠️ Pendiente de sincronizar con COR";
-      
-      return `Ya existe un requerimiento para esta conversación.
+    return `Listo, requerimiento guardado correctamente.
 
-**ID de tarea COR:** ${result.corTaskId || "Pendiente de sincronización"}
-Estado COR: ${corInfo}
+**ID del requerimiento:** ${taskId}
 
-Si necesitas crear un nuevo requerimiento, por favor inicia una nueva conversación.`;
-    }
+Puedes revisarlo y publicarlo al sistema de gestión (COR) desde el Panel de Control: /workspace/control-panel
 
-    if (result.corSyncStatus === "synced" && result.corTaskId) {
-      // ✅ Caso exitoso: Task creada y sincronizada con COR
-      return `¡Requerimiento creado exitosamente!
-
-📋 **ID de tu tarea en COR: ${result.corTaskId}**
-
-✅ Tu requerimiento ha sido guardado y sincronizado con el sistema de gestión de proyectos COR.
-
-El equipo ya puede ver y gestionar tu solicitud en COR con el ID **${result.corTaskId}**.
-
-¿Hay algo más en lo que pueda ayudarte?`;
-    } else {
-      // ⚠️ Task creada localmente pero no sincronizada con COR
-      return `⚠️ Requerimiento guardado con observaciones
-
-Tu requerimiento ha sido guardado en el sistema local pero hubo un problema al sincronizarlo con COR.
-
-📋 **Estado:**
-- ✅ Guardado en el sistema local (ID interno: ${result.taskId})
-- ❌ No se pudo sincronizar con COR: ${result.error || "Error desconocido"}
-
-El equipo técnico será notificado para resolver la sincronización.
-
-¿Hay algo más en lo que pueda ayudarte?`;
-    }
+IMPORTANTE PARA EL AGENTE: En tu respuesta al usuario DEBES incluir este link exacto en formato markdown: [Panel de Control](/workspace/control-panel) — el usuario necesita poder hacer clic para ir directamente.`;
   },
 });
 
@@ -684,6 +727,9 @@ export const createTaskInternal = internalMutation({
     corProjectId: v.optional(v.number()),
     corSyncStatus: v.optional(v.string()),
     corSyncError: v.optional(v.string()),
+    // Campos para identificar el cliente en el sistema externo
+    corClientId: v.optional(v.number()),
+    corClientName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     console.log("[Tasks.createTaskInternal] Insertando en base de datos...");
@@ -704,11 +750,13 @@ export const createTaskInternal = internalMutation({
       status: args.status,
       fileIds: args.fileIds,
       createdBy: args.createdBy,
-      // Campos COR
+      // Campos COR / sistema externo
       corTaskId: args.corTaskId,
       corProjectId: args.corProjectId,
       corSyncStatus: args.corSyncStatus,
       corSyncError: args.corSyncError,
+      corClientId: args.corClientId,
+      corClientName: args.corClientName,
     });
     
     console.log(`[Tasks.createTaskInternal] Task insertada con ID: ${taskId}`);
@@ -1045,5 +1093,279 @@ export const listByThread = query({
       .query("tasks")
       .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
       .collect();
+  },
+});
+
+// ==================== QUERY: LISTAR TASKS DEL USUARIO AUTENTICADO ====================
+
+/**
+ * Lista las tasks creadas por el usuario autenticado.
+ * Se usa en el Panel de Control para mostrar las tasks del usuario.
+ * Soporta filtro opcional por status.
+ * Retorna ordenadas por fecha de creación descendente (más recientes primero).
+ */
+export const listMyTasks = query({
+  args: {
+    status: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // Obtener el userId autenticado via @convex-dev/auth
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return [];
+    }
+
+    const userIdStr = String(userId);
+    
+    // Buscar tasks creadas por este usuario
+    let tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_createdBy", (q) => q.eq("createdBy", userIdStr))
+      .order("desc")
+      .collect();
+    
+    // Filtrar por status si se proporcionó
+    if (args.status) {
+      tasks = tasks.filter((t) => t.status === args.status);
+    }
+    
+    return tasks;
+  },
+});
+
+// ==================== PUBLICAR TASK EN SISTEMA EXTERNO (COR) ====================
+
+/**
+ * Mutation pública que inicia la publicación de una task en el sistema externo.
+ * 
+ * Patrón: mutation (feedback inmediato) → scheduler.runAfter(0, action) (trabajo async)
+ * 
+ * 1. Valida que la task existe y pertenece al usuario
+ * 2. Pone corSyncStatus: "syncing" (feedback inmediato para la UI)
+ * 3. Schedula la action que hace el trabajo pesado (crear proyecto + task en COR)
+ * 4. Retorna inmediatamente — la UI se actualiza reactivamente via subscriptions
+ */
+export const startPublishTaskToExternal = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    // Verificar autenticación
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("No autenticado");
+    }
+
+    // Obtener la task
+    const task = await ctx.db.get(args.taskId);
+    if (!task) {
+      throw new Error("Task no encontrada");
+    }
+
+    // Verificar que la task no está ya sincronizada
+    if (task.corSyncStatus === "synced") {
+      throw new Error("La task ya está publicada en el sistema externo");
+    }
+
+    // Verificar que no está en proceso de sincronización
+    if (task.corSyncStatus === "syncing") {
+      throw new Error("La task ya está en proceso de publicación");
+    }
+
+    // Poner estado "syncing" — la UI lo verá inmediatamente
+    await ctx.db.patch(args.taskId, {
+      corSyncStatus: "syncing",
+      corSyncError: undefined,
+    });
+
+    // Schedular la action que hace el trabajo pesado
+    // runAfter(0, ...) = ejecutar inmediatamente en background
+    await ctx.scheduler.runAfter(0, internal.data.tasks.publishTaskToExternalAction, {
+      taskId: args.taskId,
+    });
+
+    return { success: true, message: "Publicación iniciada" };
+  },
+});
+
+/**
+ * Action interna que ejecuta la publicación real en el sistema externo.
+ * Se ejecuta en background via scheduler para no bloquear al usuario.
+ * 
+ * Flujo:
+ * 1. Lee la task de Convex
+ * 2. Crea un PROYECTO en COR (POST /projects) asociado al client_id
+ * 3. Crea una TASK en COR (POST /tasks) dentro del proyecto
+ * 4. Actualiza la task local con los IDs externos y estado "synced"
+ * 5. Asocia los archivos del thread a la task en COR
+ */
+export const publishTaskToExternalAction = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    console.log("\n========================================");
+    console.log("[PublishTask] 🚀 PUBLICANDO TASK EN SISTEMA EXTERNO");
+    console.log(`[PublishTask] Task ID: ${args.taskId}`);
+    console.log("========================================\n");
+
+    try {
+      // 1. Leer la task de Convex
+      const task = await ctx.runQuery(internal.data.tasks.getTaskByIdInternal, {
+        taskId: args.taskId as string,
+      });
+
+      if (!task) {
+        console.error("[PublishTask] ❌ Task no encontrada");
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "error",
+          corSyncError: "Task no encontrada en la base de datos",
+        });
+        return;
+      }
+
+      // 2. Obtener el provider de integraciones
+      const provider = getProjectManagementProvider();
+      console.log(`[PublishTask] Provider: ${provider.name}`);
+
+      // 3. Crear PROYECTO en el sistema externo
+      const clientId = task.corClientId;
+      if (!clientId) {
+        console.error("[PublishTask] ❌ No hay corClientId — no se puede crear proyecto");
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "error",
+          corSyncError: "No se encontró un cliente asociado. Busca el cliente antes de publicar.",
+        });
+        return;
+      }
+
+      console.log(`[PublishTask] 📁 Creando proyecto para cliente ID: ${clientId}...`);
+      const projectName = `${task.brand} - ${task.title}`;
+      
+      const project = await provider.createProject({
+        name: projectName,
+        clientId,
+        description: task.description,
+        deadline: task.deadline,
+      });
+
+      console.log(`[PublishTask] ✅ Proyecto creado: ID ${project.id}`);
+
+      // 4. Crear TASK dentro del proyecto
+      console.log(`[PublishTask] 📋 Creando task en proyecto ${project.id}...`);
+      
+      // Construir descripción completa del brief
+      const briefDescription = [
+        `Marca: ${task.brand}`,
+        `Tipo: ${task.requestType}`,
+        task.objective ? `Objetivo: ${task.objective}` : null,
+        task.keyMessage ? `Mensaje clave: ${task.keyMessage}` : null,
+        task.kpis ? `KPIs: ${task.kpis}` : null,
+        task.budget ? `Presupuesto: ${task.budget}` : null,
+        task.approvers ? `Aprobadores: ${task.approvers}` : null,
+        task.description ? `\nDescripción:\n${task.description}` : null,
+      ].filter(Boolean).join("\n");
+
+      const externalTask = await provider.createTask({
+        projectId: project.id,
+        title: task.title,
+        description: briefDescription,
+        deadline: task.deadline,
+        priority: task.priority,
+      });
+
+      console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);
+
+      // 5. Actualizar task local con IDs externos y estado "synced"
+      await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+        taskId: args.taskId,
+        corSyncStatus: "synced",
+        corTaskId: String(externalTask.id),
+        corProjectId: project.id,
+        corSyncedAt: Date.now(),
+      });
+
+      // 6. Asociar archivos si existen
+      if (task.fileIds && task.fileIds.length > 0) {
+        console.log(`[PublishTask] 📎 Enviando ${task.fileIds.length} archivos a COR...`);
+        try {
+          // Preparar attachments
+          const attachments: { name: string; url: string; type: string; source: string }[] = [];
+          
+          for (const fileId of task.fileIds) {
+            try {
+              const fileInfo = await ctx.runQuery(internal.data.tasks.getFileInfoInternal, { fileId });
+              if (fileInfo && fileInfo.url) {
+                attachments.push({
+                  name: fileInfo.filename || `archivo_${fileId}`,
+                  url: fileInfo.url,
+                  type: fileInfo.mimeType || "application/octet-stream",
+                  source: "convex",
+                });
+              }
+            } catch (fileError) {
+              console.error(`[PublishTask] ⚠️ Error obteniendo archivo ${fileId}:`, fileError);
+            }
+          }
+          
+          if (attachments.length > 0) {
+            await ctx.runAction(internal.integrations.cor.postTaskMessage, {
+              corTaskId: externalTask.id,
+              message: `📎 Archivos adjuntos del brief (${attachments.length} archivo${attachments.length > 1 ? 's' : ''})`,
+              attachments,
+            });
+            console.log(`[PublishTask] ✅ ${attachments.length} archivos enviados`);
+          }
+        } catch (fileError) {
+          console.error("[PublishTask] ⚠️ Error enviando archivos (task ya publicada):", fileError);
+        }
+      }
+
+      console.log("\n========================================");
+      console.log("[PublishTask] 🏁 PUBLICACIÓN COMPLETADA");
+      console.log(`[PublishTask] Proyecto: ${project.id}`);
+      console.log(`[PublishTask] Task COR: ${externalTask.id}`);
+      console.log("========================================\n");
+
+    } catch (error) {
+      console.error("[PublishTask] ❌ Error publicando:", error);
+      
+      await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+        taskId: args.taskId,
+        corSyncStatus: "error",
+        corSyncError: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+});
+
+/**
+ * Mutation interna para actualizar el estado de publicación.
+ * Llamada desde publishTaskToExternalAction para actualizar
+ * la task con el resultado (éxito o error).
+ */
+export const updatePublishStatus = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    corSyncStatus: v.string(),
+    corSyncError: v.optional(v.string()),
+    corTaskId: v.optional(v.string()),
+    corProjectId: v.optional(v.number()),
+    corSyncedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const updateData: Record<string, unknown> = {
+      corSyncStatus: args.corSyncStatus,
+    };
+    
+    if (args.corSyncError !== undefined) updateData.corSyncError = args.corSyncError;
+    if (args.corTaskId !== undefined) updateData.corTaskId = args.corTaskId;
+    if (args.corProjectId !== undefined) updateData.corProjectId = args.corProjectId;
+    if (args.corSyncedAt !== undefined) updateData.corSyncedAt = args.corSyncedAt;
+    
+    await ctx.db.patch(args.taskId, updateData as any);
+    console.log(`[UpdatePublishStatus] Task ${args.taskId} → ${args.corSyncStatus}`);
   },
 });

@@ -52,12 +52,15 @@ export default defineSchema({
     threadId: v.string(),
     fileIds: v.optional(v.array(v.string())),
     createdBy: v.optional(v.string()),
-    // Campos para sincronización con COR
-    corTaskId: v.optional(v.string()), // ID de la task en COR
-    corProjectId: v.optional(v.number()), // ID del proyecto en COR donde se creó
-    corSyncStatus: v.optional(v.string()), // "pending" | "synced" | "error"
+    // Campos para sincronización con herramienta externa (COR, Trello, etc.)
+    corTaskId: v.optional(v.string()), // ID de la task en el sistema externo
+    corProjectId: v.optional(v.number()), // ID del proyecto en el sistema externo donde se creó
+    corSyncStatus: v.optional(v.string()), // "pending" | "syncing" | "synced" | "error"
     corSyncError: v.optional(v.string()), // Mensaje de error si falló la sincronización
     corSyncedAt: v.optional(v.number()), // Timestamp de la última sincronización exitosa
+    // Campos para identificar el cliente en el sistema externo
+    corClientId: v.optional(v.number()), // ID del cliente encontrado en COR/externo
+    corClientName: v.optional(v.string()), // Nombre del cliente tal como está en COR/externo
   })
     .index("by_thread", ["threadId"])
     .index("by_status", ["status"])
@@ -78,7 +81,7 @@ export default defineSchema({
   // Registro de errores de LLM para monitoreo y debugging
   llmErrors: defineTable({
     provider: v.string(), // "gemini" | "openai"
-    model: v.string(), // "gemini-3-pro-preview" | "gpt-5.2"
+    model: v.string(), // "gemini-3.1-pro-preview" | "gpt-5.2"
     agentName: v.string(), // "briefAgent" | "reviewerAgent" | "evaluatorAgent"
     errorType: v.string(), // "rate_limit" | "high_demand" | "timeout" | "unknown"
     errorMessage: v.string(),

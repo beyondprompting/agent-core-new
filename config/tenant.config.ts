@@ -93,7 +93,10 @@ export interface TenantConfig {
   ui: {
     welcomeMessage: string;
     inputPlaceholder: string;
-    showTaskPanel: boolean;
+    /** Mostrar opción de publicar tareas a herramienta externa (COR, etc.) */
+    showPublishToExternalTool: boolean;
+    /** Nombre visible de la herramienta externa (ej: "COR", "Trello") */
+    externalToolName: string;
     sidebarWidth: string;
   };
 }
@@ -171,7 +174,8 @@ const activeTenantConfig: TenantConfig = {
   ui: {
     welcomeMessage: `¡Hola! Soy tu asistente de ${CLIENT}. ¿En qué puedo ayudarte hoy?`,
     inputPlaceholder: "Escribe tu mensaje aquí...",
-    showTaskPanel: true,
+    showPublishToExternalTool: true,
+    externalToolName: "COR",
     sidebarWidth: "280px",
   },
 };

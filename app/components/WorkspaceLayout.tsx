@@ -24,6 +24,7 @@ import {
 } from "./ui/DropdownMenu";
 import { Tooltip } from "./ui/Tooltip";
 import { clientConfig } from "@/config/tenant.config";
+import { TopNavigation } from "./TopNavigation";
 
 interface Thread {
   _id: string;
@@ -303,6 +304,9 @@ export function WorkspaceLayout({
             </h2>
           </div>
         </header>
+
+        {/* Tab Navigation — Chat / Panel de Control */}
+        <TopNavigation />
 
         {/* Content - Área con scroll controlado */}
         <main className="flex-1 min-h-0 overflow-hidden">{children}</main>

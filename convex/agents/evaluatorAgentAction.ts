@@ -18,7 +18,7 @@ import {
 } from "../lib/llmFallback";
 
 // Usar modelo flash que es más eficiente en memoria
-const languageModel = google("gemini-3-pro-preview");
+const languageModel = google("gemini-3.1-pro-preview");
 
 // Tool para obtener la información de la task del thread
 const getTaskInfoTool = createTool({
@@ -227,7 +227,7 @@ export const generateEvaluationAsync = internalAction({
       try {
         result = await generateText({
           ...preparedArgs,
-          model: google("gemini-3-pro-preview"),
+          model: google("gemini-3.1-pro-preview"),
           providerOptions: {
             google: {
               thinkingConfig: {
@@ -238,16 +238,16 @@ export const generateEvaluationAsync = internalAction({
         });
         
         usedProvider = "gemini";
-        logLLMAttempt("gemini", "gemini-3-pro-preview", true, Date.now() - geminiStart);
+        logLLMAttempt("gemini", "gemini-3.1-pro-preview", true, Date.now() - geminiStart);
         
       } catch (error) {
         geminiError = error instanceof Error ? error : new Error(String(error));
-        logLLMAttempt("gemini", "gemini-3-pro-preview", false, Date.now() - geminiStart);
+        logLLMAttempt("gemini", "gemini-3.1-pro-preview", false, Date.now() - geminiStart);
         console.error(`[Evaluator] ❌ Gemini falló: ${extractErrorMessage(error)}`);
         
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
           provider: "gemini",
-          model: "gemini-3-pro-preview",
+          model: "gemini-3.1-pro-preview",
           agentName: "evaluatorAgent",
           errorType: classifyError(error),
           errorMessage: extractErrorMessage(error),
@@ -275,7 +275,7 @@ export const generateEvaluationAsync = internalAction({
         if (geminiError) {
           await ctx.runMutation(internal.data.llmConfig.logLLMError, {
             provider: "gemini",
-            model: "gemini-3-pro-preview",
+            model: "gemini-3.1-pro-preview",
             agentName: "evaluatorAgent",
             errorType: classifyError(geminiError),
             errorMessage: extractErrorMessage(geminiError),

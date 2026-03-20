@@ -6,13 +6,15 @@ import { api } from "../../convex/_generated/api";
 import { WorkspaceLayout } from "../components/WorkspaceLayout";
 import { LoadingScreen } from "../components/LoadingScreen";
 import ChatInterface from "../ChatInterface";
-import TaskPanel from "../TaskPanel";
-import { clientConfig } from "@/config/tenant.config";
+// COMENTADO: TaskPanel movido a Panel de Control como dialog
+// import TaskPanel from "../TaskPanel";
+// import { clientConfig } from "@/config/tenant.config";
 
 export default function WorkspacePage() {
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
-  const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
-  const [userClosedPanel, setUserClosedPanel] = useState(false);
+  // COMENTADO: TaskPanel movido a Panel de Control
+  // const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
+  // const [userClosedPanel, setUserClosedPanel] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
   const {
@@ -32,11 +34,11 @@ export default function WorkspacePage() {
     currentThreadId ? { threadId: currentThreadId } : "skip",
   );
 
-  // Obtener tareas del thread actual para auto-abrir el panel
-  const tasks = useQuery(
-    api.data.tasks.listByThread,
-    currentThreadId ? { threadId: currentThreadId } : "skip",
-  );
+  // COMENTADO: TaskPanel movido a Panel de Control
+  // const tasks = useQuery(
+  //   api.data.tasks.listByThread,
+  //   currentThreadId ? { threadId: currentThreadId } : "skip",
+  // );
 
   // Estado para evitar múltiples creaciones automáticas
   const [hasAutoCreated, setHasAutoCreated] = useState(false);
@@ -63,17 +65,16 @@ export default function WorkspacePage() {
     }
   }, [threads, currentThreadId, hasAutoCreated, createThread]);
 
-  // Auto-abrir panel cuando se crea una tarea (solo si el usuario no lo cerró manualmente)
-  useEffect(() => {
-    if (tasks && tasks.length > 0 && !isTaskPanelOpen && !userClosedPanel) {
-      setIsTaskPanelOpen(true);
-    }
-  }, [tasks, isTaskPanelOpen, userClosedPanel]);
+  // COMENTADO: TaskPanel movido a Panel de Control
+  // useEffect(() => {
+  //   if (tasks && tasks.length > 0 && !isTaskPanelOpen && !userClosedPanel) {
+  //     setIsTaskPanelOpen(true);
+  //   }
+  // }, [tasks, isTaskPanelOpen, userClosedPanel]);
 
-  // Reset userClosedPanel cuando cambia de thread
-  useEffect(() => {
-    setUserClosedPanel(false);
-  }, [currentThreadId]);
+  // useEffect(() => {
+  //   setUserClosedPanel(false);
+  // }, [currentThreadId]);
 
   const handleNewThread = useCallback(async () => {
     // Si el thread actual está vacío (sin mensajes), no crear uno nuevo
@@ -98,15 +99,16 @@ export default function WorkspacePage() {
     }
   }, []);
 
-  const toggleTaskPanel = useCallback(() => {
-    setIsTaskPanelOpen((prev) => {
-      const newState = !prev;
-      if (!newState) {
-        setUserClosedPanel(true);
-      }
-      return newState;
-    });
-  }, []);
+  // COMENTADO: TaskPanel movido a Panel de Control
+  // const toggleTaskPanel = useCallback(() => {
+  //   setIsTaskPanelOpen((prev) => {
+  //     const newState = !prev;
+  //     if (!newState) {
+  //       setUserClosedPanel(true);
+  //     }
+  //     return newState;
+  //   });
+  // }, []);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LOADING: Mostrar pantalla de carga completa hasta que todo esté listo
@@ -142,62 +144,9 @@ export default function WorkspacePage() {
           />
         </div>
 
-        {/* Toggle Button para Task Panel */}
-        {clientConfig.ui.showTaskPanel && (
-          <button
-            onClick={toggleTaskPanel}
-            className={`h-fit z-10 p-2 mt-4 mr-2 rounded-lg border border-border bg-card hover:bg-muted transition-colors shadow-sm ${
-              isTaskPanelOpen ? "lg:hidden" : ""
-            }`}
-            title={
-              isTaskPanelOpen
-                ? "Cerrar panel de tareas"
-                : "Abrir panel de tareas"
-            }
-          >
-            {isTaskPanelOpen ? (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-              </svg>
-            )}
-            {tasks && tasks.length > 0 && !isTaskPanelOpen && (
-              <span className="absolute top-1 right-2 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                {tasks.length}
-              </span>
-            )}
-          </button>
-        )}
-
-        {/* Task Panel */}
-        {clientConfig.ui.showTaskPanel && isTaskPanelOpen && (
-          <div className="w-[500px] flex-shrink-0 h-full overflow-hidden border-l border-border bg-card animate-in slide-in-from-right duration-200">
-            <TaskPanel threadId={currentThreadId} onClose={toggleTaskPanel} />
-          </div>
-        )}
+        {/* COMENTADO: TaskPanel movido a Panel de Control (/workspace/control-panel) */}
+        {/* El panel de tareas ahora se accede desde la pestaña "Panel de Control" */}
+        {/* donde cada tarea se abre como un dialog con opción de publicar a COR */}
       </div>
     </WorkspaceLayout>
   );
