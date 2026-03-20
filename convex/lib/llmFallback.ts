@@ -36,8 +36,8 @@ export interface LLMHealthCheckResult {
 // Modelo principal: Gemini 3 Pro Preview
 export const geminiConfig: LLMConfig = {
   provider: "gemini",
-  model: google("gemini-3-pro-preview"),
-  modelId: "gemini-3-pro-preview",
+  model: google("gemini-3.1-pro-preview"),
+  modelId: "gemini-3.1-pro-preview",
   providerOptions: {
     google: {
       thinkingConfig: {

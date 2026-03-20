@@ -186,7 +186,7 @@ export const generateResponseAsync = internalAction({
       try {
         result = await generateText({
           ...preparedArgs,
-          model: google("gemini-3-pro-preview"),
+          model: google("gemini-3.1-pro-preview"),
           providerOptions: {
             google: {
               thinkingConfig: {
@@ -197,18 +197,18 @@ export const generateResponseAsync = internalAction({
         });
         
         usedProvider = "gemini";
-        logLLMAttempt("gemini", "gemini-3-pro-preview", true, Date.now() - geminiStart);
+        logLLMAttempt("gemini", "gemini-3.1-pro-preview", true, Date.now() - geminiStart);
         console.log(`[GenerateResponse] ✅ Gemini respondió en ${Date.now() - geminiStart}ms`);
         
       } catch (error) {
         geminiError = error instanceof Error ? error : new Error(String(error));
-        logLLMAttempt("gemini", "gemini-3-pro-preview", false, Date.now() - geminiStart);
+        logLLMAttempt("gemini", "gemini-3.1-pro-preview", false, Date.now() - geminiStart);
         console.error(`[GenerateResponse] ❌ Gemini falló: ${extractErrorMessage(error)}`);
         
         // Registrar error en la base de datos
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
           provider: "gemini",
-          model: "gemini-3-pro-preview",
+          model: "gemini-3.1-pro-preview",
           agentName: "briefAgent",
           errorType: classifyError(error),
           errorMessage: extractErrorMessage(error),
@@ -240,7 +240,7 @@ export const generateResponseAsync = internalAction({
         if (geminiError) {
           await ctx.runMutation(internal.data.llmConfig.logLLMError, {
             provider: "gemini",
-            model: "gemini-3-pro-preview",
+            model: "gemini-3.1-pro-preview",
             agentName: "briefAgent",
             errorType: classifyError(geminiError),
             errorMessage: extractErrorMessage(geminiError),
