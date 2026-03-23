@@ -73,11 +73,32 @@ async function getCORAccessToken(): Promise<string> {
 }
 
 /**
+ * Parsea una fecha en formato DD/MM/YYYY o ISO a un objeto Date válido.
+ * JavaScript no entiende DD/MM/YYYY nativamente, así que lo convertimos.
+ */
+function parseDateFlexible(dateStr: string): Date | null {
+  // Intentar formato DD/MM/YYYY
+  const ddmmyyyy = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    const [, day, month, year] = ddmmyyyy;
+    const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // Intentar formato ISO u otros formatos nativos de JS
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) return d;
+
+  return null;
+}
+
+/**
  * Mapea prioridades internas al formato numérico de COR.
- * Interno: "baja" | "media" | "alta" | "urgente"
+ * Acepta texto ("baja", "media", "alta", "urgente") o número (0-3).
  * COR: 0 = Low, 1 = Medium, 2 = High, 3 = Urgent
  */
-function mapPriorityToCOR(priority: string | undefined): number {
+function mapPriorityToCOR(priority: string | number | undefined): number {
+  if (typeof priority === "number") return priority;
   switch (priority?.toLowerCase()) {
     case "baja":
     case "low":
@@ -93,6 +114,15 @@ function mapPriorityToCOR(priority: string | undefined): number {
     default:
       return 1;
   }
+}
+
+/**
+ * Convierte saltos de línea planos (\n) a HTML <br> para que COR
+ * los renderice correctamente en la descripción de la task.
+ * Nuestro DB almacena \n; COR necesita <br>.
+ */
+function plaintextToCorHtml(text: string): string {
+  return text.replace(/\n/g, "<br>\n");
 }
 
 /**
@@ -243,10 +273,13 @@ export function createCORProvider(): ProjectManagementProvider {
       }
 
       if (data.deadline) {
-        const deadlineDate = new Date(data.deadline);
-        if (!isNaN(deadlineDate.getTime())) {
+        const deadlineDate = parseDateFlexible(data.deadline);
+        if (deadlineDate) {
           // COR espera formato YYYY-MM-DD para start/end
           body.end = deadlineDate.toISOString().split("T")[0];
+          console.log(`[COR Provider] 📅 Deadline proyecto: "${data.deadline}" → ${body.end}`);
+        } else {
+          console.warn(`[COR Provider] ⚠️ No se pudo parsear deadline proyecto: "${data.deadline}"`);
         }
       }
 
@@ -284,13 +317,16 @@ export function createCORProvider(): ProjectManagementProvider {
       };
 
       if (data.description) {
-        body.description = data.description;
+        body.description = plaintextToCorHtml(data.description);
       }
 
       if (data.deadline) {
-        const deadlineDate = new Date(data.deadline);
-        if (!isNaN(deadlineDate.getTime())) {
+        const deadlineDate = parseDateFlexible(data.deadline);
+        if (deadlineDate) {
           body.deadline = deadlineDate.toISOString();
+          console.log(`[COR Provider] 📅 Deadline parseado: "${data.deadline}" → ${deadlineDate.toISOString()}`);
+        } else {
+          console.warn(`[COR Provider] ⚠️ No se pudo parsear deadline: "${data.deadline}"`);
         }
       }
 
@@ -373,7 +409,9 @@ export function createCORProvider(): ProjectManagementProvider {
         // 2. Merge seguro: solo sobrescribir campos explícitamente proporcionados
         const updateBody: Record<string, unknown> = {
           title: data.title ?? currentTask.title,
-          description: data.description ?? currentTask.description,
+          description: data.description
+            ? plaintextToCorHtml(data.description)
+            : currentTask.description,
           priority: data.priority
             ? mapPriorityToCOR(data.priority)
             : currentTask.priority,
@@ -382,9 +420,12 @@ export function createCORProvider(): ProjectManagementProvider {
         };
 
         if (data.deadline) {
-          const d = new Date(data.deadline);
-          if (!isNaN(d.getTime())) {
+          const d = parseDateFlexible(data.deadline);
+          if (d) {
             updateBody.deadline = d.toISOString();
+            console.log(`[COR Provider] 📅 Deadline update: "${data.deadline}" → ${d.toISOString()}`);
+          } else {
+            console.warn(`[COR Provider] ⚠️ No se pudo parsear deadline update: "${data.deadline}"`);
           }
         }
 

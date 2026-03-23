@@ -81,18 +81,14 @@ const getTaskInfoTool = createTool({
 
 ID: ${task._id}
 Título: ${task.title}
-Tipo de Requerimiento: ${task.requestType}
-Marca: ${task.brand}
-Objetivo: ${task.objective || "No especificado"}
-Mensaje Clave: ${task.keyMessage || "No especificado"}
-KPIs: ${task.kpis || "No especificado"}
-Fecha límite: ${task.deadline || "No especificado"}
-Presupuesto: ${task.budget || "No especificado"}
-Aprobadores: ${task.approvers || "No especificado"}
-Descripción detallada: ${task.description || "No especificado"}
-Archivos de referencia adjuntos: ${task.fileIds && task.fileIds.length > 0 ? `Sí (${task.fileIds.length} archivo(s))` : "No"}
 Estado actual: ${task.status}
-Prioridad: ${task.priority || "media"}
+Prioridad: ${task.priority ?? 1}
+Fecha límite: ${task.deadline || "No especificado"}
+
+Descripción del Brief:
+${task.description || "Sin descripción"}
+
+Archivos de referencia adjuntos: ${task.fileIds && task.fileIds.length > 0 ? `Sí (${task.fileIds.length} archivo(s))` : "No"}
 Thread ID original: ${task.threadId}`;
   },
 });

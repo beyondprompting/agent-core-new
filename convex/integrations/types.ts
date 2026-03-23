@@ -57,15 +57,15 @@ export interface CreateTaskInput {
   description?: string;
   /** Fecha límite (ISO 8601) */
   deadline?: string;
-  /** Prioridad: "baja" | "media" | "alta" | "urgente" */
-  priority?: string;
+  /** Prioridad: 0=Low, 1=Medium, 2=High, 3=Urgent (o texto: "baja"|"media"|"alta"|"urgente") */
+  priority?: string | number;
 }
 
 export interface UpdateTaskInput {
   title?: string;
   description?: string;
   deadline?: string;
-  priority?: string;
+  priority?: string | number;
   status?: string;
 }
 

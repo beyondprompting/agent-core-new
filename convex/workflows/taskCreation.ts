@@ -35,15 +35,8 @@ export const createTaskWorkflow = workflow.define({
     taskData: v.object({
       title: v.string(),
       description: v.optional(v.string()),
-      requestType: v.string(),
-      brand: v.string(),
-      objective: v.optional(v.string()),
-      keyMessage: v.optional(v.string()),
-      kpis: v.optional(v.string()),
       deadline: v.optional(v.string()),
-      budget: v.optional(v.string()),
-      approvers: v.optional(v.string()),
-      priority: v.optional(v.string()),
+      priority: v.optional(v.number()),     // 0=Low, 1=Medium, 2=High, 3=Urgent
     }),
     userId: v.optional(v.string()),
     corProjectId: v.optional(v.number()), // ID del proyecto en COR (opcional)
@@ -114,8 +107,7 @@ export const createTaskWorkflow = workflow.define({
         {
           localTaskId: taskId,
           title: args.taskData.title,
-          description: args.taskData.description || 
-            `${args.taskData.brand} - ${args.taskData.requestType}${args.taskData.objective ? ` - ${args.taskData.objective}` : ""}`,
+          description: args.taskData.description,
           deadline: args.taskData.deadline,
           priority: args.taskData.priority,
           projectId: args.corProjectId,
@@ -230,15 +222,8 @@ export const createTaskAndSyncWithCOR = internalAction({
     taskData: v.object({
       title: v.string(),
       description: v.optional(v.string()),
-      requestType: v.string(),
-      brand: v.string(),
-      objective: v.optional(v.string()),
-      keyMessage: v.optional(v.string()),
-      kpis: v.optional(v.string()),
       deadline: v.optional(v.string()),
-      budget: v.optional(v.string()),
-      approvers: v.optional(v.string()),
-      priority: v.optional(v.string()),
+      priority: v.optional(v.number()),     // 0=Low, 1=Medium, 2=High, 3=Urgent
     }),
     userId: v.optional(v.string()),
     corProjectId: v.optional(v.number()),
@@ -301,8 +286,7 @@ export const createTaskAndSyncWithCOR = internalAction({
         {
           localTaskId: taskId,
           title: args.taskData.title,
-          description: args.taskData.description || 
-            `${args.taskData.brand} - ${args.taskData.requestType}${args.taskData.objective ? ` - ${args.taskData.objective}` : ""}`,
+          description: args.taskData.description,
           deadline: args.taskData.deadline,
           priority: args.taskData.priority,
           projectId: args.corProjectId,

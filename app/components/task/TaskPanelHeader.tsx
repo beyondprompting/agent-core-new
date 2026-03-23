@@ -104,18 +104,18 @@ export function StatusBadge({ status, colorClass }: StatusBadgeProps) {
 }
 
 interface PriorityBadgeProps {
-  priority?: string;
-  config: { color: string; icon: string } | null;
+  priority?: number;
+  config: { color: string; icon: string; label: string } | null;
 }
 
 /**
  * Badge de prioridad de la tarea
  */
 export function PriorityBadge({ priority, config }: PriorityBadgeProps) {
-  if (!config || !priority) return null;
+  if (!config || priority === undefined || priority === null) return null;
   return (
     <span className={`${config.color} text-xs font-medium`}>
-      {config.icon} {priority}
+      {config.icon} {config.label}
     </span>
   );
 }

@@ -94,10 +94,11 @@ async function getCORAccessToken(): Promise<string> {
 
 /**
  * Mapea prioridades del formato interno al formato de COR
- * Interno: "baja" | "media" | "alta" | "urgente"
+ * Acepta texto ("baja", "media", "alta", "urgente") o número (0-3).
  * COR: 0 = Low, 1 = Medium, 2 = High, 3 = Urgent
  */
-function mapPriorityToCOR(priority: string | undefined): number {
+function mapPriorityToCOR(priority: string | number | undefined): number {
+  if (typeof priority === "number") return priority;
   switch (priority?.toLowerCase()) {
     case "baja":
     case "low":
@@ -127,7 +128,7 @@ export const createTaskInCOR = internalAction({
     title: v.string(),
     description: v.optional(v.string()),
     deadline: v.optional(v.string()),
-    priority: v.optional(v.string()),
+    priority: v.optional(v.union(v.string(), v.number())),
     projectId: v.optional(v.number()), // ID del proyecto en COR
   },
   handler: async (ctx, args): Promise<{ corTaskId: number; success: boolean }> => {
@@ -303,7 +304,7 @@ export const updateTaskInCOR = internalAction({
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     deadline: v.optional(v.string()),
-    priority: v.optional(v.string()),
+    priority: v.optional(v.union(v.string(), v.number())),
     status: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ success: boolean; error?: string }> => {

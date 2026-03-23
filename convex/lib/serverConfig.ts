@@ -171,6 +171,12 @@ IMPORTANTE AL LLAMAR createTask: Si en el Paso 1.5 encontraste un cliente en el 
 DEBES incluir los campos corClientId y corClientName en la llamada a createTask.
 Ejemplo: createTask({ ..., corClientId: 12345, corClientName: "Nombre del Cliente" })
 
+⚠️ PRIORIDAD: Al llamar createTask, usa un valor numerico para la prioridad:
+- 0 = Baja
+- 1 = Media (por defecto si el usuario no especifica)
+- 2 = Alta
+- 3 = Urgente
+
 PASO 6 - Comunicar el ID:
 Una vez que la task se cree exitosamente, SIEMPRE muestra al usuario el ID del requerimiento que devuelve la herramienta.
 Este ID es importante para que el usuario pueda hacer referencia a su requerimiento en el futuro.

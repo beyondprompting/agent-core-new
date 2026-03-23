@@ -36,31 +36,36 @@ export default defineSchema({
     .index("by_workspace", ["workspaceId"])
     .index("by_user_and_updated", ["userId", "updatedAt"]),
 
+  // === Tasks: Estructura idéntica a COR para sincronización 1:1 ===
+  // Campos principales = mismos campos que una task de COR:
+  //   title       → título de la task
+  //   description → toda la info del brief (tipo, marca, objetivo, kpis, etc.)
+  //   deadline    → fecha límite
+  //   priority    → numérico: 0=Low, 1=Medium, 2=High, 3=Urgent
+  //   status      → estado de la task
   tasks: defineTable({
+    // === Campos 1:1 con COR ===
     title: v.string(),
-    description: v.optional(v.string()),
-    requestType: v.string(),
-    brand: v.string(),
-    objective: v.optional(v.string()),
-    keyMessage: v.optional(v.string()),
-    kpis: v.optional(v.string()),
+    description: v.optional(v.string()),     // Contiene todos los datos del brief formateados
     deadline: v.optional(v.string()),
-    budget: v.optional(v.string()),
-    approvers: v.optional(v.string()),
+    priority: v.optional(v.number()),         // 0=Low, 1=Medium, 2=High, 3=Urgent
     status: v.string(),
-    priority: v.optional(v.string()),
+    // === Campos internos (no van a COR) ===
     threadId: v.string(),
     fileIds: v.optional(v.array(v.string())),
     createdBy: v.optional(v.string()),
-    // Campos para sincronización con herramienta externa (COR, Trello, etc.)
-    corTaskId: v.optional(v.string()), // ID de la task en el sistema externo
-    corProjectId: v.optional(v.number()), // ID del proyecto en el sistema externo donde se creó
-    corSyncStatus: v.optional(v.string()), // "pending" | "syncing" | "synced" | "error"
-    corSyncError: v.optional(v.string()), // Mensaje de error si falló la sincronización
-    corSyncedAt: v.optional(v.number()), // Timestamp de la última sincronización exitosa
-    // Campos para identificar el cliente en el sistema externo
-    corClientId: v.optional(v.number()), // ID del cliente encontrado en COR/externo
-    corClientName: v.optional(v.string()), // Nombre del cliente tal como está en COR/externo
+    // === Campos de sincronización con herramienta externa (COR, Trello, etc.) ===
+    corTaskId: v.optional(v.string()),
+    corProjectId: v.optional(v.number()),
+    corSyncStatus: v.optional(v.string()),    // "pending" | "syncing" | "synced" | "error"
+    corSyncError: v.optional(v.string()),
+    corSyncedAt: v.optional(v.number()),
+    // === Campos para identificar el cliente en el sistema externo ===
+    corClientId: v.optional(v.number()),
+    corClientName: v.optional(v.string()),
+    // === Campos para tracking de sincronización bidireccional ===
+    corDescriptionHash: v.optional(v.string()),
+    lastLocalEditAt: v.optional(v.number()),
   })
     .index("by_thread", ["threadId"])
     .index("by_status", ["status"])

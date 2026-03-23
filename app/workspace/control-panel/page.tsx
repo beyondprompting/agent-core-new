@@ -24,16 +24,9 @@ interface FullTask {
   _creationTime: number;
   title: string;
   description?: string;
-  requestType: string;
-  brand: string;
-  objective?: string;
-  keyMessage?: string;
-  kpis?: string;
   deadline?: string;
-  budget?: string;
-  approvers?: string;
+  priority?: number; // 0=Low, 1=Medium, 2=High, 3=Urgent
   status: string;
-  priority?: string;
   threadId: string;
   fileIds?: string[];
   createdBy?: string;
@@ -44,6 +37,8 @@ interface FullTask {
   corSyncedAt?: number;
   corClientId?: number;
   corClientName?: string;
+  corDescriptionHash?: string;
+  lastLocalEditAt?: number;
 }
 
 export default function ControlPanelPage() {
@@ -110,11 +105,10 @@ export default function ControlPanelPage() {
 
   const statusOptions = [
     { value: undefined, label: "Todas" },
-    { value: "nueva", label: "Nuevas" },
-    { value: "en_revision", label: "En revisión" },
-    { value: "aprobada", label: "Aprobadas" },
-    { value: "rechazada", label: "Rechazadas" },
-    { value: "completada", label: "Completadas" },
+    { value: "nueva", label: "Nueva" },
+    { value: "en_proceso", label: "En proceso" },
+    { value: "estancada", label: "Estancada" },
+    { value: "finalizada", label: "Finalizada" },
   ];
 
   return (

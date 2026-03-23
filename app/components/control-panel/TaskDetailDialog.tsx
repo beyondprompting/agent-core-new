@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { TaskBriefContent } from "../task/TaskBriefContent";
-import { formatDate, getStatusColor, getPriorityConfig } from "../task/types";
+import { getStatusColor } from "../task/types";
 import type { Task } from "../task/types";
 import { clientConfig } from "@/config/tenant.config";
 import {
@@ -121,14 +121,6 @@ export function TaskDetailDialog({
             >
               {task.status}
             </span>
-            {/* Priority */}
-            {getPriorityConfig(task.priority) && (
-              <span
-                className={`text-sm ${getPriorityConfig(task.priority)!.color}`}
-              >
-                {getPriorityConfig(task.priority)!.icon} {task.priority}
-              </span>
-            )}
           </div>
           <button
             onClick={onClose}

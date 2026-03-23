@@ -8,6 +8,7 @@ import { internal, components } from "../_generated/api";
 import { reviewerAgent } from "../agents/reviewerAgent";
 import { getProjectManagementProvider, isProjectManagementEnabled } from "../integrations/registry";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { hashText, buildBriefDescription, PRIORITY_LABELS } from "../lib/briefFormat";
 
 // ==================== TOOL PARA OBTENER FECHA ACTUAL ====================
 
@@ -261,8 +262,7 @@ export const createTaskTool = createTool({
   
   Si previamente usaste searchClientInCOR y encontraste un cliente, incluye corClientId y corClientName.`,
   args: z.object({
-    title: z.string().describe("Titulo breve del requerimiento"),
-    description: z.string().optional().describe("Descripcion detallada del requerimiento"),
+    title: z.string().describe("Titulo breve y descriptivo del proyecto (ej: Campaña de verano Coca-Cola)"),
     requestType: z.string().describe("Tipo de requerimiento - OBLIGATORIO"),
     brand: z.string().describe("Marca o empresa - OBLIGATORIO"),
     objective: z.string().optional().describe("Objetivo principal del proyecto"),
@@ -271,7 +271,7 @@ export const createTaskTool = createTool({
     deadline: z.string().optional().describe("Fecha limite o timeline del proyecto"),
     budget: z.string().optional().describe("Presupuesto disponible"),
     approvers: z.string().optional().describe("Personas que deben aprobar el proyecto"),
-    priority: z.string().optional().describe("Prioridad: baja, media, alta, urgente"),
+    priority: z.number().optional().describe("Prioridad numerica: 0=Baja, 1=Media, 2=Alta, 3=Urgente. Si no se especifica, usar 1 (Media)."),
     corClientId: z.number().optional().describe("ID del cliente en COR (obtenido con searchClientInCOR)"),
     corClientName: z.string().optional().describe("Nombre del cliente en COR (obtenido con searchClientInCOR)"),
   }),
@@ -318,27 +318,29 @@ Si necesitas crear un nuevo requerimiento, por favor inicia una nueva conversaci
     const userId = await ctx.runQuery(internal.data.tasks.getUserIdFromThread, { threadId });
     console.log(`[CreateTask] UserId: ${userId || "no encontrado"}`);
 
-    // Crear task SOLO en Convex (sin sincronización con COR)
-    console.log("[CreateTask] ⏳ Creando task en Convex...");
-    
-    const taskId = await ctx.runMutation(internal.data.tasks.createTaskInternal, {
-      title: args.title,
-      description: args.description,
+    // Construir description con toda la info del brief
+    const description = buildBriefDescription({
       requestType: args.requestType,
       brand: args.brand,
       objective: args.objective,
       keyMessage: args.keyMessage,
       kpis: args.kpis,
-      deadline: args.deadline,
       budget: args.budget,
       approvers: args.approvers,
-      priority: args.priority,
+    });
+
+    // Crear task SOLO en Convex (sin sincronización con COR)
+    console.log("[CreateTask] ⏳ Creando task en Convex...");
+    
+    const taskId = await ctx.runMutation(internal.data.tasks.createTaskInternal, {
+      title: args.title,
+      description,
+      deadline: args.deadline,
+      priority: args.priority ?? 1,
       threadId,
       status: "nueva",
       createdBy: userId ? String(userId) : undefined,
-      // Estado COR: pendiente (se publicará desde el Panel de Control)
       corSyncStatus: "pending",
-      // Cliente externo (si se encontró con searchClientInCOR)
       corClientId: args.corClientId,
       corClientName: args.corClientName,
     });
@@ -429,10 +431,12 @@ export const getTaskTool = createTool({
         return "Error: No se pudo identificar la task a consultar. Por favor proporciona el ID de la task o asegúrate de estar en la conversación correcta.";
       }
       
-      // Formatear la respuesta con todos los campos
+      // Formatear la respuesta
       const corInfo = task.corTaskId 
         ? `**ID de tarea COR:** ${task.corTaskId} ✅`
         : "**Estado COR:** Pendiente de sincronización";
+      
+      const priorityLabel = PRIORITY_LABELS[task.priority ?? 1] || "Media";
       
       const taskInfo = `
 📋 **Detalles del Requerimiento**
@@ -441,20 +445,11 @@ ${corInfo}
 
 **Título:** ${task.title || "Sin título"}
 **Estado:** ${task.status || "Sin estado"}
-**Prioridad:** ${task.priority || "media"}
-
-**Marca/Empresa:** ${task.brand || "No especificada"}
-**Tipo de Requerimiento:** ${task.requestType || "No especificado"}
-
-**Descripción:** ${task.description || "Sin descripción"}
-
-**Objetivo:** ${task.objective || "No especificado"}
-**Mensaje Clave:** ${task.keyMessage || "No especificado"}
-**KPIs:** ${task.kpis || "No especificados"}
-
+**Prioridad:** ${priorityLabel}
 **Fecha Límite:** ${task.deadline || "No especificada"}
-**Presupuesto:** ${task.budget || "No especificado"}
-**Aprobadores:** ${task.approvers || "No especificados"}
+
+**Descripción del Brief:**
+${task.description || "Sin descripción"}
 
 **Archivos adjuntos:** ${task.fileIds?.length || 0}
 `;
@@ -481,26 +476,17 @@ export const editTaskTool = createTool({
   - El ID local de la task
   - O si acaba de crear una task en esta conversacion, se encuentra automaticamente por el threadId
   
-  FLUJO:
-  1. Si se proporciona corTaskId, primero consulta COR para ver el estado actual de la task
-  2. Aplica los cambios solicitados
-  3. Actualiza tanto en COR como en la base de datos local
-  
-  IMPORTANTE: Solo actualiza los campos que el usuario quiere cambiar, no modifiques los demas.`,
+  IMPORTANTE: Solo actualiza los campos que el usuario quiere cambiar.
+  La descripcion contiene toda la info del brief (tipo, marca, objetivo, kpis, etc.).
+  Si el usuario quiere cambiar algo de la descripcion, primero usa getTask para ver el contenido actual,
+  luego envia la descripcion completa actualizada.`,
   args: z.object({
     corTaskId: z.string().optional().describe("ID de la task en COR (ej: 11301144) - PREFERIDO"),
     taskId: z.string().optional().describe("ID local de la task (opcional si se usa corTaskId o thread)"),
     title: z.string().optional().describe("Nuevo titulo del requerimiento"),
-    description: z.string().optional().describe("Nueva descripcion detallada"),
-    requestType: z.string().optional().describe("Nuevo tipo de requerimiento"),
-    brand: z.string().optional().describe("Nueva marca o empresa"),
-    objective: z.string().optional().describe("Nuevo objetivo principal"),
-    keyMessage: z.string().optional().describe("Nuevo mensaje clave"),
-    kpis: z.string().optional().describe("Nuevos KPIs"),
+    description: z.string().optional().describe("Nueva descripcion completa (contiene toda la info del brief)"),
     deadline: z.string().optional().describe("Nueva fecha limite"),
-    budget: z.string().optional().describe("Nuevo presupuesto"),
-    approvers: z.string().optional().describe("Nuevos aprobadores"),
-    priority: z.string().optional().describe("Nueva prioridad: baja, media, alta, urgente"),
+    priority: z.number().optional().describe("Nueva prioridad: 0=Baja, 1=Media, 2=Alta, 3=Urgente"),
   }),
   handler: async (ctx, args): Promise<string> => {
     console.log("\n========================================");
@@ -609,17 +595,10 @@ Por favor verifica el ID e intenta de nuevo.`;
       }
       
       // Construir objeto con solo los campos a actualizar
-      const updates: Record<string, string | undefined> = {};
+      const updates: Record<string, string | number | undefined> = {};
       if (args.title !== undefined) updates.title = args.title;
       if (args.description !== undefined) updates.description = args.description;
-      if (args.requestType !== undefined) updates.requestType = args.requestType;
-      if (args.brand !== undefined) updates.brand = args.brand;
-      if (args.objective !== undefined) updates.objective = args.objective;
-      if (args.keyMessage !== undefined) updates.keyMessage = args.keyMessage;
-      if (args.kpis !== undefined) updates.kpis = args.kpis;
       if (args.deadline !== undefined) updates.deadline = args.deadline;
-      if (args.budget !== undefined) updates.budget = args.budget;
-      if (args.approvers !== undefined) updates.approvers = args.approvers;
       if (args.priority !== undefined) updates.priority = args.priority;
       
       if (Object.keys(updates).length === 0) {
@@ -709,15 +688,8 @@ export const createTaskInternal = internalMutation({
   args: {
     title: v.string(),
     description: v.optional(v.string()),
-    requestType: v.string(),
-    brand: v.string(),
-    objective: v.optional(v.string()),
-    keyMessage: v.optional(v.string()),
-    kpis: v.optional(v.string()),
     deadline: v.optional(v.string()),
-    budget: v.optional(v.string()),
-    approvers: v.optional(v.string()),
-    priority: v.optional(v.string()),
+    priority: v.optional(v.number()),       // 0=Low, 1=Medium, 2=High, 3=Urgent
     threadId: v.string(),
     status: v.string(),
     fileIds: v.optional(v.array(v.string())),
@@ -737,15 +709,8 @@ export const createTaskInternal = internalMutation({
     const taskId = await ctx.db.insert("tasks", {
       title: args.title,
       description: args.description,
-      requestType: args.requestType,
-      brand: args.brand,
-      objective: args.objective,
-      keyMessage: args.keyMessage,
-      kpis: args.kpis,
       deadline: args.deadline,
-      budget: args.budget,
-      approvers: args.approvers,
-      priority: args.priority || "media",
+      priority: args.priority ?? 1,
       threadId: args.threadId,
       status: args.status,
       fileIds: args.fileIds,
@@ -760,7 +725,6 @@ export const createTaskInternal = internalMutation({
     });
     
     console.log(`[Tasks.createTaskInternal] Task insertada con ID: ${taskId}`);
-    console.log(`[Tasks.createTaskInternal] Detalles: Marca=${args.brand}, Tipo=${args.requestType}`);
     
     return taskId;
   },
@@ -773,15 +737,8 @@ export const updateTaskInternal = internalMutation({
     updates: v.object({
       title: v.optional(v.string()),
       description: v.optional(v.string()),
-      requestType: v.optional(v.string()),
-      brand: v.optional(v.string()),
-      objective: v.optional(v.string()),
-      keyMessage: v.optional(v.string()),
-      kpis: v.optional(v.string()),
       deadline: v.optional(v.string()),
-      budget: v.optional(v.string()),
-      approvers: v.optional(v.string()),
-      priority: v.optional(v.string()),
+      priority: v.optional(v.number()),     // 0=Low, 1=Medium, 2=High, 3=Urgent
     }),
   },
   handler: async (ctx, args) => {
@@ -865,21 +822,15 @@ export const getUserIdFromThread = internalQuery({
 });
 
 // Mutation pública para actualizar campos de una task desde el frontend (Panel de Control)
+// Si la task está publicada en COR (synced), dispara sincronización automática.
 export const updateTaskFields = mutation({
   args: {
     taskId: v.id("tasks"),
     updates: v.object({
       title: v.optional(v.string()),
       description: v.optional(v.string()),
-      requestType: v.optional(v.string()),
-      brand: v.optional(v.string()),
-      objective: v.optional(v.string()),
-      keyMessage: v.optional(v.string()),
-      kpis: v.optional(v.string()),
       deadline: v.optional(v.string()),
-      budget: v.optional(v.string()),
-      approvers: v.optional(v.string()),
-      priority: v.optional(v.string()),
+      priority: v.optional(v.number()),     // 0=Low, 1=Medium, 2=High, 3=Urgent
     }),
   },
   handler: async (ctx, args) => {
@@ -891,7 +842,7 @@ export const updateTaskFields = mutation({
     if (!task) throw new Error("Task no encontrada");
 
     // Filtrar campos undefined
-    const updateData: Record<string, string> = {};
+    const updateData: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(args.updates)) {
       if (value !== undefined) {
         updateData[key] = value;
@@ -900,8 +851,27 @@ export const updateTaskFields = mutation({
 
     if (Object.keys(updateData).length === 0) return args.taskId;
 
+    // Agregar timestamp de edición local
+    updateData.lastLocalEditAt = Date.now();
+
     console.log(`[Tasks.updateTaskFields] Actualizando task ${args.taskId}:`, Object.keys(updateData));
-    await ctx.db.patch(args.taskId, updateData);
+    await ctx.db.patch(args.taskId, updateData as any);
+
+    // Si la task está publicada en COR, disparar sincronización automática
+    if (task.corSyncStatus === "synced" && task.corTaskId) {
+      console.log(`[Tasks.updateTaskFields] 🔄 Task synced en COR — disparando sincronización`);
+      
+      // Determinar qué campos cambiaron para pasarlos a la action
+      const changedFields = Object.keys(args.updates).filter(
+        (k) => (args.updates as any)[k] !== undefined
+      );
+
+      await ctx.scheduler.runAfter(0, internal.data.tasks.syncEditToCORAction, {
+        taskId: args.taskId,
+        changedFields,
+      });
+    }
+
     return args.taskId;
   },
 });
@@ -1175,6 +1145,207 @@ export const listMyTasks = query({
   },
 });
 
+// ==================== SYNC: CONVEX → COR (mapeo 1:1) ====================
+
+/**
+ * Campos de Convex que tienen equivalente directo en COR.
+ * Estos se sincronizan 1:1 sin transformación.
+ *
+ *   Convex field  →  COR field
+ *   title         →  title
+ *   description   →  description
+ *   deadline      →  deadline
+ *   priority      →  priority
+ *   status        →  status
+ */
+const COR_SYNCABLE_FIELDS = new Set(["title", "description", "deadline", "priority", "status"]);
+
+/**
+ * Action interna: sincroniza una edición local de Convex hacia COR.
+ * 
+ * SEGURIDAD CRÍTICA:
+ * - Lee el corTaskId y corProjectId directamente de la task de Convex
+ * - Verifica que la task siga en estado "synced" antes de tocar COR
+ * - Solo edita la task COR que corresponde al corTaskId guardado
+ * - Verifica que la task en COR pertenece al proyecto correcto (corProjectId)
+ * - Logea exhaustivamente cada operación para auditoría
+ * 
+ * Flujo:
+ * 1. Lee la task actualizada de Convex
+ * 2. Si cambiaron campos nativos (title, deadline, priority) → updateTask directo
+ * 3. Si cambiaron campos de descripción → regenera con buildCORDescription
+ * 4. Actualiza hash y timestamps
+ */
+export const syncEditToCORAction = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+    changedFields: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    console.log("\n========================================");
+    console.log("[SyncEdit] 🔄 SINCRONIZANDO EDICIÓN LOCAL → COR");
+    console.log(`[SyncEdit] Task Convex ID: ${args.taskId}`);
+    console.log(`[SyncEdit] Campos cambiados: ${args.changedFields.join(", ")}`);
+    console.log("========================================\n");
+
+    try {
+      // 1. Leer la task actualizada de Convex
+      const task = await ctx.runQuery(internal.data.tasks.getTaskByIdInternal, {
+        taskId: args.taskId as string,
+      });
+
+      if (!task) {
+        console.error("[SyncEdit] ❌ Task no encontrada en Convex");
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════
+      // VERIFICACIONES DE SEGURIDAD — NUNCA SALTEAR
+      // ═══════════════════════════════════════════════════
+
+      // Verificar que la task sigue synced
+      if (task.corSyncStatus !== "synced") {
+        console.error(`[SyncEdit] ❌ Task no está synced (estado: ${task.corSyncStatus}). Abortando.`);
+        return;
+      }
+
+      // Verificar que tiene corTaskId
+      const corTaskId = task.corTaskId;
+      if (!corTaskId) {
+        console.error("[SyncEdit] ❌ Task no tiene corTaskId. Abortando.");
+        return;
+      }
+
+      // Verificar que tiene corProjectId
+      const corProjectId = task.corProjectId;
+      if (!corProjectId) {
+        console.error("[SyncEdit] ❌ Task no tiene corProjectId. Abortando.");
+        return;
+      }
+
+      // Verificar que tiene corClientId
+      if (!task.corClientId) {
+        console.error("[SyncEdit] ❌ Task no tiene corClientId. Abortando.");
+        return;
+      }
+
+      console.log(`[SyncEdit] ✅ Verificaciones de seguridad OK:`);
+      console.log(`  - corTaskId: ${corTaskId}`);
+      console.log(`  - corProjectId: ${corProjectId}`);
+      console.log(`  - corClientId: ${task.corClientId}`);
+      console.log(`  - corClientName: ${task.corClientName}`);
+
+      // 2. Obtener el provider
+      const provider = getProjectManagementProvider();
+
+      // 3. Primero, obtener la task actual de COR para verificación cruzada
+      const corTask = await provider.getTask(parseInt(corTaskId));
+      if (!corTask) {
+        console.error(`[SyncEdit] ❌ Task COR ${corTaskId} no encontrada. ¿Fue eliminada?`);
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "error",
+          corSyncError: `Task COR ${corTaskId} no encontrada — puede haber sido eliminada`,
+        });
+        return;
+      }
+
+      // VERIFICACIÓN CRUZADA: la task de COR debe pertenecer al proyecto correcto
+      if (corTask.projectId !== corProjectId) {
+        console.error(`[SyncEdit] 🚨 ALERTA DE SEGURIDAD: La task COR ${corTaskId} pertenece al proyecto ${corTask.projectId}, no al esperado ${corProjectId}. ABORTANDO.`);
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "error",
+          corSyncError: `Error de seguridad: task COR pertenece a proyecto incorrecto`,
+        });
+        return;
+      }
+
+      console.log(`[SyncEdit] ✅ Verificación cruzada OK — task COR ${corTaskId} pertenece al proyecto ${corProjectId}`);
+
+      // ═══════════════════════════════════════════════════
+      // CONSTRUIR EL UPDATE (mapeo 1:1)
+      // ═══════════════════════════════════════════════════
+
+      const updatePayload: Record<string, unknown> = {};
+
+      // Solo sincronizar campos que tienen equivalente en COR
+      const syncableChanges = args.changedFields.filter((f) => COR_SYNCABLE_FIELDS.has(f));
+
+      if (syncableChanges.length === 0) {
+        console.log("[SyncEdit] ℹ️ No hay campos sincronizables con COR (cambios son solo locales)");
+        return;
+      }
+
+      console.log(`[SyncEdit] 📝 Campos a sincronizar: ${syncableChanges.join(", ")}`);
+
+      // Mapeo directo 1:1
+      if (syncableChanges.includes("title")) updatePayload.title = task.title;
+      if (syncableChanges.includes("description")) updatePayload.description = task.description || "";
+      if (syncableChanges.includes("deadline")) updatePayload.deadline = task.deadline;
+      if (syncableChanges.includes("priority")) updatePayload.priority = task.priority;
+      if (syncableChanges.includes("status")) updatePayload.status = task.status;
+
+      // 4. Actualizar la task en COR
+      console.log(`[SyncEdit] 🚀 Enviando actualización a COR task ${corTaskId}:`, Object.keys(updatePayload));
+      
+      const result = await provider.updateTask(parseInt(corTaskId), updatePayload as any);
+
+      if (!result.success) {
+        console.error(`[SyncEdit] ❌ Error actualizando COR: ${result.error}`);
+        // No marcamos como error global, solo logeamos — la edición local ya se guardó
+        return;
+      }
+
+      // 5. Actualizar hash y timestamp de sync
+      if (updatePayload.description) {
+        const newHash = hashText(updatePayload.description as string);
+        await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
+          taskId: args.taskId,
+          corDescriptionHash: newHash,
+          corSyncedAt: Date.now(),
+        });
+        console.log(`[SyncEdit] ✅ Hash actualizado: ${newHash}`);
+      } else {
+        await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
+          taskId: args.taskId,
+          corSyncedAt: Date.now(),
+        });
+      }
+
+      console.log(`[SyncEdit] ✅ Sincronización completada exitosamente`);
+      console.log("========================================\n");
+
+    } catch (error) {
+      console.error("[SyncEdit] ❌ Error en sincronización:", error);
+      // No marcamos la task como error — la edición local ya está guardada
+      // El cron futuro podrá detectar la discrepancia y corregirla
+    }
+  },
+});
+
+/**
+ * Mutation interna para actualizar metadata de sync sin tocar otros campos.
+ */
+export const updateSyncMetadata = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    corDescriptionHash: v.optional(v.string()),
+    corSyncedAt: v.optional(v.number()),
+    lastLocalEditAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const updateData: Record<string, unknown> = {};
+    if (args.corDescriptionHash !== undefined) updateData.corDescriptionHash = args.corDescriptionHash;
+    if (args.corSyncedAt !== undefined) updateData.corSyncedAt = args.corSyncedAt;
+    if (args.lastLocalEditAt !== undefined) updateData.lastLocalEditAt = args.lastLocalEditAt;
+    
+    if (Object.keys(updateData).length > 0) {
+      await ctx.db.patch(args.taskId, updateData as any);
+    }
+  },
+});
+
 // ==================== PUBLICAR TASK EN SISTEMA EXTERNO (COR) ====================
 
 /**
@@ -1284,7 +1455,7 @@ export const publishTaskToExternalAction = internalAction({
       }
 
       console.log(`[PublishTask] 📁 Creando proyecto para cliente ID: ${clientId}...`);
-      const projectName = `${task.brand} - ${task.title}`;
+      const projectName = `${task.corClientName || "Sin cliente"} - ${task.title}`;
       
       const project = await provider.createProject({
         name: projectName,
@@ -1296,24 +1467,14 @@ export const publishTaskToExternalAction = internalAction({
       console.log(`[PublishTask] ✅ Proyecto creado: ID ${project.id}`);
 
       // 4. Crear TASK dentro del proyecto
+      // Mapeo 1:1: cada campo de Convex va a su campo equivalente en COR
+      // description → description, deadline → deadline, priority → priority
       console.log(`[PublishTask] 📋 Creando task en proyecto ${project.id}...`);
-      
-      // Construir descripción completa del brief
-      const briefDescription = [
-        `Marca: ${task.brand}`,
-        `Tipo: ${task.requestType}`,
-        task.objective ? `Objetivo: ${task.objective}` : null,
-        task.keyMessage ? `Mensaje clave: ${task.keyMessage}` : null,
-        task.kpis ? `KPIs: ${task.kpis}` : null,
-        task.budget ? `Presupuesto: ${task.budget}` : null,
-        task.approvers ? `Aprobadores: ${task.approvers}` : null,
-        task.description ? `\nDescripción:\n${task.description}` : null,
-      ].filter(Boolean).join("\n");
 
       const externalTask = await provider.createTask({
         projectId: project.id,
         title: task.title,
-        description: briefDescription,
+        description: task.description || "",
         deadline: task.deadline,
         priority: task.priority,
       });
@@ -1321,13 +1482,18 @@ export const publishTaskToExternalAction = internalAction({
       console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);
 
       // 5. Actualizar task local con IDs externos y estado "synced"
+      const descriptionHash = hashText(task.description || "");
+      
       await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
         taskId: args.taskId,
         corSyncStatus: "synced",
         corTaskId: String(externalTask.id),
         corProjectId: project.id,
         corSyncedAt: Date.now(),
+        corDescriptionHash: descriptionHash,
       });
+
+      console.log(`[PublishTask] ✅ IDs guardados — corTaskId: ${externalTask.id}, corProjectId: ${project.id}, clientId: ${clientId}, hash: ${descriptionHash}`);
 
       // 6. Asociar archivos si existen
       if (task.fileIds && task.fileIds.length > 0) {
@@ -1396,6 +1562,7 @@ export const updatePublishStatus = internalMutation({
     corTaskId: v.optional(v.string()),
     corProjectId: v.optional(v.number()),
     corSyncedAt: v.optional(v.number()),
+    corDescriptionHash: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const updateData: Record<string, unknown> = {
@@ -1406,6 +1573,7 @@ export const updatePublishStatus = internalMutation({
     if (args.corTaskId !== undefined) updateData.corTaskId = args.corTaskId;
     if (args.corProjectId !== undefined) updateData.corProjectId = args.corProjectId;
     if (args.corSyncedAt !== undefined) updateData.corSyncedAt = args.corSyncedAt;
+    if (args.corDescriptionHash !== undefined) updateData.corDescriptionHash = args.corDescriptionHash;
     
     await ctx.db.patch(args.taskId, updateData as any);
     console.log(`[UpdatePublishStatus] Task ${args.taskId} → ${args.corSyncStatus}`);

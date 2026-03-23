@@ -26,6 +26,7 @@ import type * as integrations_corProvider from "../integrations/corProvider.js";
 import type * as integrations_noopProvider from "../integrations/noopProvider.js";
 import type * as integrations_registry from "../integrations/registry.js";
 import type * as integrations_types from "../integrations/types.js";
+import type * as lib_briefFormat from "../lib/briefFormat.js";
 import type * as lib_llmFallback from "../lib/llmFallback.js";
 import type * as lib_serverConfig from "../lib/serverConfig.js";
 import type * as lib_speechToText from "../lib/speechToText.js";
@@ -65,6 +66,7 @@ declare const fullApi: ApiFromModules<{
   "integrations/noopProvider": typeof integrations_noopProvider;
   "integrations/registry": typeof integrations_registry;
   "integrations/types": typeof integrations_types;
+  "lib/briefFormat": typeof lib_briefFormat;
   "lib/llmFallback": typeof lib_llmFallback;
   "lib/serverConfig": typeof lib_serverConfig;
   "lib/speechToText": typeof lib_speechToText;

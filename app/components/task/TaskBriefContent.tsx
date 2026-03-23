@@ -228,6 +228,25 @@ export function TaskBriefContent({
 
   // Handler genérico para guardar un campo
   const handleSaveField = async (fieldKey: string, newValue: string) => {
+    // Para priority, convertir el texto a número
+    if (fieldKey === "priority") {
+      const priorityMap: Record<string, number> = {
+        baja: 0,
+        "0": 0,
+        media: 1,
+        "1": 1,
+        alta: 2,
+        "2": 2,
+        urgente: 3,
+        "3": 3,
+      };
+      const numValue = priorityMap[newValue.toLowerCase()] ?? 1;
+      await updateTask({
+        taskId: task._id,
+        updates: { priority: numValue },
+      });
+      return;
+    }
     await updateTask({
       taskId: task._id,
       updates: { [fieldKey]: newValue },
@@ -287,91 +306,48 @@ export function TaskBriefContent({
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-background">
-      {/* Título */}
+      {/* Fecha de creación */}
       <div>
-        <h3 className="text-xl font-bold text-foreground mb-1">{task.title}</h3>
         <p className="text-xs text-muted-foreground">
           Creado: {formatDate(task._creationTime)}
         </p>
       </div>
 
-      {/* Info Grid */}
+      {/* Campos editables — Solo los que son nativos de COR o necesitan edición directa */}
       <div className="space-y-3">
+        {/* Nombre de la task — editable para poder cambiar antes de publicar */}
         <EditableInfoItem
-          icon="🏷️"
-          label="Tipo"
-          value={task.requestType}
-          fieldKey="requestType"
+          icon="📝"
+          label="Nombre"
+          value={task.title || "Sin título"}
+          fieldKey="title"
           editable={editable}
           onSave={handleSaveField}
         />
-        <EditableInfoItem
-          icon="🏢"
-          label="Marca"
-          value={task.brand}
-          fieldKey="brand"
-          editable={editable}
-          onSave={handleSaveField}
-        />
-        {(task.objective || editable) && (
-          <EditableInfoItem
-            icon="🎯"
-            label="Objetivo"
-            value={task.objective || "No especificado"}
-            fieldKey="objective"
-            multiline
-            editable={editable}
-            onSave={handleSaveField}
-          />
-        )}
-        {(task.keyMessage || editable) && (
-          <EditableInfoItem
-            icon="💬"
-            label="Mensaje clave"
-            value={task.keyMessage || "No especificado"}
-            fieldKey="keyMessage"
-            multiline
-            editable={editable}
-            onSave={handleSaveField}
-          />
-        )}
-        {(task.kpis || editable) && (
-          <EditableInfoItem
-            icon="📊"
-            label="KPIs"
-            value={task.kpis || "No especificado"}
-            fieldKey="kpis"
-            multiline
-            editable={editable}
-            onSave={handleSaveField}
-          />
-        )}
+
         {(task.deadline || editable) && (
           <EditableInfoItem
             icon="📅"
-            label="Timing"
+            label="Fecha de Fin"
             value={task.deadline || "No especificado"}
             fieldKey="deadline"
             editable={editable}
             onSave={handleSaveField}
           />
         )}
-        {(task.budget || editable) && (
+        {(task.priority !== undefined || editable) && (
           <EditableInfoItem
-            icon="💰"
-            label="Presupuesto"
-            value={task.budget || "No especificado"}
-            fieldKey="budget"
-            editable={editable}
-            onSave={handleSaveField}
-          />
-        )}
-        {(task.approvers || editable) && (
-          <EditableInfoItem
-            icon="👥"
-            label="Aprobadores"
-            value={task.approvers || "No especificado"}
-            fieldKey="approvers"
+            icon="⚡"
+            label="Prioridad"
+            value={
+              (
+                { 0: "Baja", 1: "Media", 2: "Alta", 3: "Urgente" } as Record<
+                  number,
+                  string
+                >
+              )[task.priority ?? 1] || "Media"
+            }
+            fieldKey="priority"
             editable={editable}
             onSave={handleSaveField}
           />

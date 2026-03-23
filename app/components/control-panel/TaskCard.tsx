@@ -10,10 +10,9 @@ interface TaskCardTask {
   _id: Id<"tasks">;
   _creationTime: number;
   title: string;
-  brand: string;
-  requestType: string;
+  description?: string;
   deadline?: string;
-  priority?: string;
+  priority?: number;
   status: string;
   corSyncStatus?: string;
   corTaskId?: string;
@@ -85,14 +84,13 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         )}
       </div>
 
-      {/* Info: Brand + Type */}
+      {/* Info: Description excerpt */}
       <div className="space-y-1 mb-3">
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium">🏢</span> {task.brand}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium">🏷️</span> {task.requestType}
-        </p>
+        {task.description && (
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {task.description}
+          </p>
+        )}
         {task.deadline && (
           <p className="text-xs text-muted-foreground">
             <span className="font-medium">📅</span> {task.deadline}

@@ -5,17 +5,10 @@ export type Task = {
   _id: Id<"tasks">;
   _creationTime: number;
   title: string;
-  description?: string;
-  requestType: string;
-  brand: string;
-  objective?: string;
-  keyMessage?: string;
-  kpis?: string;
+  description?: string;    // Contiene toda la info del brief formateada
   deadline?: string;
-  budget?: string;
-  approvers?: string;
+  priority?: number;       // 0=Low, 1=Medium, 2=High, 3=Urgent
   status: string;
-  priority?: string;
   threadId: string;
   fileIds?: string[];
   createdBy?: string;
@@ -57,27 +50,25 @@ export const getStatusColor = (status: string) => {
   const colors: Record<string, string> = {
     nueva:
       "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800",
-    en_revision:
+    en_proceso:
       "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800",
-    aprobada:
-      "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
-    rechazada:
+    estancada:
       "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800",
-    completada:
-      "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800",
+    finalizada:
+      "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
   };
   return colors[status] || "bg-muted text-muted-foreground border-border";
 };
 
-export const getPriorityConfig = (priority?: string) => {
-  if (!priority) return null;
-  const badges: Record<string, { color: string; icon: string }> = {
-    baja: { color: "text-muted-foreground", icon: "▽" },
-    media: { color: "text-amber-600 dark:text-amber-400", icon: "◆" },
-    alta: { color: "text-orange-600 dark:text-orange-400", icon: "△" },
-    urgente: { color: "text-red-600 dark:text-red-400", icon: "⚡" },
+export const getPriorityConfig = (priority?: number) => {
+  if (priority === undefined || priority === null) return null;
+  const badges: Record<number, { color: string; icon: string; label: string }> = {
+    0: { color: "text-muted-foreground", icon: "▽", label: "Baja" },
+    1: { color: "text-amber-600 dark:text-amber-400", icon: "◆", label: "Media" },
+    2: { color: "text-orange-600 dark:text-orange-400", icon: "△", label: "Alta" },
+    3: { color: "text-red-600 dark:text-red-400", icon: "⚡", label: "Urgente" },
   };
-  return badges[priority.toLowerCase()] || badges.media;
+  return badges[priority] || badges[1];
 };
 
 // Tipos de archivo soportados para evaluación
