@@ -407,12 +407,14 @@ export function createCORProvider(): ProjectManagementProvider {
         const currentTask = await getResponse.json();
 
         // 2. Merge seguro: solo sobrescribir campos explícitamente proporcionados
+        // IMPORTANTE: usar != null (cubre null y undefined) en vez de truthy checks
+        // para evitar que valores legítimos como 0, "" sean ignorados
         const updateBody: Record<string, unknown> = {
           title: data.title ?? currentTask.title,
-          description: data.description
+          description: data.description != null
             ? plaintextToCorHtml(data.description)
             : currentTask.description,
-          priority: data.priority
+          priority: data.priority != null
             ? mapPriorityToCOR(data.priority)
             : currentTask.priority,
           status: data.status ?? currentTask.status,

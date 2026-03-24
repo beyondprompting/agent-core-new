@@ -831,6 +831,7 @@ export const updateTaskFields = mutation({
       description: v.optional(v.string()),
       deadline: v.optional(v.string()),
       priority: v.optional(v.number()),     // 0=Low, 1=Medium, 2=High, 3=Urgent
+      status: v.optional(v.string()),       // nueva, en_proceso, estancada, finalizada
     }),
   },
   handler: async (ctx, args) => {

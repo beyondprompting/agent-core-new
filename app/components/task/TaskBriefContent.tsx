@@ -2,10 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { Task } from "./types";
-import { formatDate } from "./types";
+import { formatDate, getStatusColor } from "./types";
 import { useConvex, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { Pencil, Check, X as XIcon } from "lucide-react";
+import { Pencil, Check, X as XIcon, Cloud, Loader2 } from "lucide-react";
 import type { Id } from "@/convex/_generated/dataModel";
 
 // ==================== EditableInfoItem ====================
@@ -168,6 +168,156 @@ function EditableInfoItem({
   );
 }
 
+// ==================== EditableSelectItem ====================
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+interface EditableSelectItemProps {
+  icon: string;
+  label: string;
+  value: string;
+  displayValue: string;
+  fieldKey: string;
+  options: SelectOption[];
+  editable?: boolean;
+  colorFn?: (value: string) => string;
+  onSave?: (fieldKey: string, newValue: string) => Promise<void>;
+}
+
+/**
+ * Componente para mostrar un item con dropdown de selección.
+ * Si editable=true, muestra un lápiz que abre un <select>.
+ */
+function EditableSelectItem({
+  icon,
+  label,
+  value,
+  displayValue,
+  fieldKey,
+  options,
+  editable = false,
+  colorFn,
+  onSave,
+}: EditableSelectItemProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const [isSaving, setIsSaving] = useState(false);
+  const selectRef = useRef<HTMLSelectElement>(null);
+
+  useEffect(() => {
+    if (isEditing && selectRef.current) {
+      selectRef.current.focus();
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (!isEditing) setEditValue(value);
+  }, [value, isEditing]);
+
+  const handleStartEdit = () => {
+    setEditValue(value);
+    setIsEditing(true);
+  };
+
+  const handleCancel = () => {
+    setEditValue(value);
+    setIsEditing(false);
+  };
+
+  const handleSave = async () => {
+    if (!onSave) return;
+    if (editValue === value) {
+      setIsEditing(false);
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSave(fieldKey, editValue);
+      setIsEditing(false);
+    } catch (err) {
+      console.error("Error saving field:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const colorClass = colorFn ? colorFn(isEditing ? editValue : value) : "";
+
+  return (
+    <div className="bg-card rounded-lg p-3 border border-border shadow-sm group/item">
+      <div className="flex items-start gap-2">
+        <span className="text-lg">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider">
+            {label}
+          </p>
+          {isEditing ? (
+            <div className="mt-1">
+              <select
+                ref={selectRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") handleCancel();
+                }}
+                className="w-full text-sm text-foreground bg-background border border-primary/40 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  <Check className="h-3 w-3" />
+                  {isSaving ? "Guardando..." : "Guardar"}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isSaving}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border hover:bg-muted transition-colors text-muted-foreground cursor-pointer"
+                >
+                  <XIcon className="h-3 w-3" />
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 mt-0.5">
+              {colorClass ? (
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full border ${colorClass}`}
+                >
+                  {displayValue}
+                </span>
+              ) : (
+                <p className="text-sm text-foreground">{displayValue}</p>
+              )}
+            </div>
+          )}
+        </div>
+        {editable && !isEditing && (
+          <button
+            onClick={handleStartEdit}
+            className="opacity-0 group-hover/item:opacity-100 p-1.5 rounded-md hover:bg-muted transition-all text-muted-foreground hover:text-foreground cursor-pointer flex-shrink-0"
+            title={`Editar ${label.toLowerCase()}`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ==================== Read-only InfoItem (backward compatible) ====================
 
 interface InfoItemProps {
@@ -213,7 +363,68 @@ interface TaskBriefContentProps {
   task: Task;
   /** Si true, muestra íconos de edición en cada campo */
   editable?: boolean;
+  /** Estado de sincronización con COR */
+  syncStatus?: string;
 }
+
+// Opciones de prioridad para COR (0=Baja, 1=Media, 2=Alta, 3=Urgente)
+const PRIORITY_OPTIONS: { value: string; label: string }[] = [
+  { value: "0", label: "Baja" },
+  { value: "1", label: "Media" },
+  { value: "2", label: "Alta" },
+  { value: "3", label: "Urgente" },
+];
+
+// Prioridad: icono + label para mostrar cuando ya está seleccionada
+const PRIORITY_DISPLAY: Record<
+  number,
+  { icon: string; label: string; color: string }
+> = {
+  0: {
+    icon: "↓",
+    label: "Baja",
+    color: "bg-muted text-muted-foreground border-border",
+  },
+  1: {
+    icon: "→",
+    label: "Media",
+    color:
+      "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+  },
+  2: {
+    icon: "↑",
+    label: "Alta",
+    color:
+      "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800",
+  },
+  3: {
+    icon: "⚠",
+    label: "Urgente",
+    color:
+      "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800",
+  },
+};
+
+const getPriorityColor = (value: string): string => {
+  const cfg = PRIORITY_DISPLAY[parseInt(value)];
+  return cfg?.color || PRIORITY_DISPLAY[1].color;
+};
+
+// Opciones de estado para COR
+const STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "nueva", label: "Nueva" },
+  { value: "en_proceso", label: "En Proceso" },
+  { value: "estancada", label: "Estancada" },
+  { value: "finalizada", label: "Finalizada" },
+];
+
+// Mapa de estado display
+const STATUS_DISPLAY: Record<string, string> = {
+  nueva: "Nueva",
+  en_proceso: "En Proceso",
+  estancada: "Estancada",
+  finalizada: "Finalizada",
+};
 
 /**
  * Contenido del brief de una tarea.
@@ -222,36 +433,58 @@ interface TaskBriefContentProps {
 export function TaskBriefContent({
   task,
   editable = false,
+  syncStatus,
 }: TaskBriefContentProps) {
   const convex = useConvex();
   const updateTask = useMutation(api.data.tasks.updateTaskFields);
 
   // Handler genérico para guardar un campo
   const handleSaveField = async (fieldKey: string, newValue: string) => {
-    // Para priority, convertir el texto a número
+    // Para priority, convertir el string del select a número
     if (fieldKey === "priority") {
-      const priorityMap: Record<string, number> = {
-        baja: 0,
-        "0": 0,
-        media: 1,
-        "1": 1,
-        alta: 2,
-        "2": 2,
-        urgente: 3,
-        "3": 3,
-      };
-      const numValue = priorityMap[newValue.toLowerCase()] ?? 1;
+      const numValue = parseInt(newValue);
       await updateTask({
         taskId: task._id,
-        updates: { priority: numValue },
+        updates: { priority: isNaN(numValue) ? 1 : numValue },
       });
+      showSyncFeedback();
+      return;
+    }
+    // Para status, el valor ya viene como string directo del select
+    if (fieldKey === "status") {
+      await updateTask({
+        taskId: task._id,
+        updates: { status: newValue },
+      });
+      showSyncFeedback();
       return;
     }
     await updateTask({
       taskId: task._id,
       updates: { [fieldKey]: newValue },
     });
+    showSyncFeedback();
   };
+
+  // Sync feedback indicator — muestra brevemente que se está sincronizando con COR
+  const [showingSyncFeedback, setShowingSyncFeedback] = useState(false);
+  const syncFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSyncFeedback = () => {
+    if (syncStatus !== "synced") return; // Solo mostrar para tasks publicadas en COR
+    setShowingSyncFeedback(true);
+    if (syncFeedbackTimer.current) clearTimeout(syncFeedbackTimer.current);
+    syncFeedbackTimer.current = setTimeout(() => {
+      setShowingSyncFeedback(false);
+    }, 3000);
+  };
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (syncFeedbackTimer.current) clearTimeout(syncFeedbackTimer.current);
+    };
+  }, []);
 
   // Handler para abrir archivo
   const handleOpenFile = async (fileId: string) => {
@@ -336,21 +569,40 @@ export function TaskBriefContent({
           />
         )}
         {(task.priority !== undefined || editable) && (
-          <EditableInfoItem
+          <EditableSelectItem
             icon="⚡"
             label="Prioridad"
-            value={
-              (
-                { 0: "Baja", 1: "Media", 2: "Alta", 3: "Urgente" } as Record<
-                  number,
-                  string
-                >
-              )[task.priority ?? 1] || "Media"
-            }
+            value={String(task.priority ?? 1)}
+            displayValue={`${PRIORITY_DISPLAY[task.priority ?? 1]?.icon || "→"} ${PRIORITY_DISPLAY[task.priority ?? 1]?.label || "Media"}`}
             fieldKey="priority"
+            options={PRIORITY_OPTIONS}
             editable={editable}
+            colorFn={getPriorityColor}
             onSave={handleSaveField}
           />
+        )}
+
+        {/* Estado — dropdown editable */}
+        {(task.status || editable) && (
+          <EditableSelectItem
+            icon="🔄"
+            label="Estado"
+            value={task.status || "nueva"}
+            displayValue={STATUS_DISPLAY[task.status] || task.status || "Nueva"}
+            fieldKey="status"
+            options={STATUS_OPTIONS}
+            editable={editable}
+            colorFn={getStatusColor}
+            onSave={handleSaveField}
+          />
+        )}
+
+        {/* Sync indicator — aparece tras guardar en una task publicada en COR */}
+        {showingSyncFeedback && (
+          <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+            <Cloud className="h-3.5 w-3.5" />
+            <span>Sincronizando cambios con COR...</span>
+          </div>
         )}
 
         {/* Descripción completa — con edición inline */}

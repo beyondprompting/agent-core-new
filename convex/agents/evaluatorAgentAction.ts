@@ -6,7 +6,6 @@
 import { Agent, createTool, listMessages } from "@convex-dev/agent";
 import { components, internal } from "../_generated/api";
 import { google } from "@ai-sdk/google";
-import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
@@ -14,7 +13,9 @@ import { agentConfig, getEvaluatorAgentInstructions } from "../lib/serverConfig"
 import { 
   classifyError, 
   extractErrorMessage,
-  logLLMAttempt 
+  logLLMAttempt,
+  geminiConfig,
+  openaiConfig,
 } from "../lib/llmFallback";
 
 // Usar modelo flash que es más eficiente en memoria
@@ -223,27 +224,22 @@ export const generateEvaluationAsync = internalAction({
       try {
         result = await generateText({
           ...preparedArgs,
-          model: google("gemini-3.1-pro-preview"),
-          providerOptions: {
-            google: {
-              thinkingConfig: {
-                thinkingLevel: "low",
-              },
-            },
-          },
+          model: geminiConfig.model,
+          providerOptions: geminiConfig.providerOptions as any,
+          maxRetries: 0,
         });
         
         usedProvider = "gemini";
-        logLLMAttempt("gemini", "gemini-3.1-pro-preview", true, Date.now() - geminiStart);
+        logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
         
       } catch (error) {
         geminiError = error instanceof Error ? error : new Error(String(error));
-        logLLMAttempt("gemini", "gemini-3.1-pro-preview", false, Date.now() - geminiStart);
+        logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
         console.error(`[Evaluator] ❌ Gemini falló: ${extractErrorMessage(error)}`);
         
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-          provider: "gemini",
-          model: "gemini-3.1-pro-preview",
+          provider: geminiConfig.provider,
+          model: geminiConfig.modelId,
           agentName: "evaluatorAgent",
           errorType: classifyError(error),
           errorMessage: extractErrorMessage(error),
@@ -262,32 +258,33 @@ export const generateEvaluationAsync = internalAction({
       try {
         result = await generateText({
           ...preparedArgs,
-          model: openai("gpt-5.2"),
+          model: openaiConfig.model,
+          maxRetries: 0,
         });
         
         usedProvider = "openai";
-        logLLMAttempt("openai", "gpt-5.2", true, Date.now() - openaiStart);
+        logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, true, Date.now() - openaiStart);
         
         if (geminiError) {
           await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-            provider: "gemini",
-            model: "gemini-3.1-pro-preview",
+            provider: geminiConfig.provider,
+            model: geminiConfig.modelId,
             agentName: "evaluatorAgent",
             errorType: classifyError(geminiError),
             errorMessage: extractErrorMessage(geminiError),
             threadId,
             resolved: true,
-            fallbackUsed: "gpt-5.2",
+            fallbackUsed: openaiConfig.modelId,
           });
         }
         
       } catch (error) {
         openaiError = error instanceof Error ? error : new Error(String(error));
-        logLLMAttempt("openai", "gpt-5.2", false, Date.now() - openaiStart);
+        logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, false, Date.now() - openaiStart);
         
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-          provider: "openai",
-          model: "gpt-5.2",
+          provider: openaiConfig.provider,
+          model: openaiConfig.modelId,
           agentName: "evaluatorAgent",
           errorType: classifyError(error),
           errorMessage: extractErrorMessage(error),

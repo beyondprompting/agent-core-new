@@ -134,7 +134,8 @@ export function TaskDetailDialog({
         <div className="flex-1 min-h-0 overflow-y-auto">
           <TaskBriefContent
             task={liveTask ?? task}
-            editable={syncStatus !== "synced" && syncStatus !== "syncing"}
+            editable={syncStatus !== "syncing"}
+            syncStatus={syncStatus}
           />
         </div>
 
