@@ -75,8 +75,16 @@ export interface TenantConfig {
   // NOTA: Los prompts de los agentes se definen en convex/lib/serverConfig.ts
   // Aquí solo se define el nombre para mostrar en la UI
   agents: {
+    // Agente orquestador — clasifica intención del usuario
+    orchestrator: {
+      name: string;
+    };
     // Agente recolector de brief
     brief: {
+      name: string;
+    };
+    // Agente de búsqueda en documentos/catálogos
+    documentSearch: {
       name: string;
     };
     // Agente evaluador de resultados
@@ -160,8 +168,14 @@ const activeTenantConfig: TenantConfig = {
   // Configuración de agentes - Solo nombres para UI
   // Los prompts se definen en convex/lib/serverConfig.ts
   agents: {
+    orchestrator: {
+      name: `Orquestador ${CLIENT}`,
+    },
     brief: {
       name: `Asistente de Brief ${CLIENT}`,
+    },
+    documentSearch: {
+      name: `Buscador de Documentos ${CLIENT}`,
     },
     evaluator: {
       name: `Evaluador de Resultados ${CLIENT}`,

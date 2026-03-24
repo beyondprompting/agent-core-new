@@ -6,12 +6,13 @@ import { google } from "@ai-sdk/google";
 import { createTaskTool, reviewBriefTool, editTaskTool, getTaskTool, nowTool, getTaskFromCORTool, searchClientInCORTool } from "../data/tasks";
 import { agentConfig, getBriefAgentInstructions } from "../lib/serverConfig";
 import { isProjectManagementEnabled } from "../integrations/registry";
-import { searchDocumentsTool, searchEntitiesTool, getRAGStatisticsTool, searchByImageTool } from "../rag/ragTools";
 
 // Gemini model (thinking config is passed in providerOptions)
 const languageModel = google("gemini-3.1-pro-preview");
 
 // ==================== MAIN AGENT: Brief Collector ====================
+// NOTA: Las RAG tools (searchDocuments, searchEntities, getRAGStatistics, searchByImage)
+// fueron movidas al documentSearchAgent.ts como parte de la arquitectura multi-agente.
 
 // Build tools object — conditionally include integration-specific tools
 const agentTools: Record<string, any> = {
@@ -21,12 +22,6 @@ const agentTools: Record<string, any> = {
   getTask: getTaskTool,
   getTaskFromCOR: getTaskFromCORTool,
   now: nowTool,
-  // RAG tools for document search
-  searchDocuments: searchDocumentsTool,
-  searchEntities: searchEntitiesTool,
-  getRAGStatistics: getRAGStatisticsTool,
-  // Image search tool - uses visual similarity
-  searchByImage: searchByImageTool,
 };
 
 // Conditionally add integration-specific tools

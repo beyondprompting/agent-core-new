@@ -3,16 +3,19 @@
 import { v } from "convex/values";
 import { mutation, query, internalAction } from "../_generated/server";
 import { briefAgent } from "../agents/agent";
+import { orchestratorAgent } from "../agents/orchestratorAgent";
+import { documentSearchAgent } from "../agents/documentSearchAgent";
 import { components, internal } from "../_generated/api";
 import { saveMessage, listUIMessages, getFile } from "@convex-dev/agent";
 import { paginationOptsValidator } from "convex/server";
-import { google } from "@ai-sdk/google";
-import { openai } from "@ai-sdk/openai";
+import { enabledAgents } from "../lib/serverConfig";
 import { 
   classifyError, 
   extractErrorMessage, 
   isRecoverableError,
-  logLLMAttempt 
+  logLLMAttempt,
+  geminiConfig,
+  openaiConfig,
 } from "../lib/llmFallback";
 
 // NOTA: La creación de threads ahora se hace a través de convex/threads.ts
@@ -136,6 +139,7 @@ export const sendMessage = mutation({
 });
 
 // Generar respuesta del agente (interna, llamada async)
+// CON ORQUESTADOR: Clasifica intención → enruta al agente correcto
 // CON SISTEMA DE FALLBACK: Gemini -> OpenAI GPT-5.2
 export const generateResponseAsync = internalAction({
   args: {
@@ -151,13 +155,183 @@ export const generateResponseAsync = internalAction({
     console.log("========================================\n");
 
     // Importación dinámica del AI SDK
-    const { generateText } = await import("ai");
+    const { generateText, generateObject } = await import("ai");
+    const { z } = await import("zod/v3");
 
-    // PASO 1: Preparar el contexto
-    const prepareStart = Date.now();
-    console.log("[GenerateResponse] 📍 PASO 1: Preparando contexto...");
+    // =====================================================
+    // PASO 0: Consultar estado de proveedores (UNA sola vez)
+    // Usa llmConfig table via isProviderEnabled (convex/data/llmConfig.ts)
+    // =====================================================
+    const geminiEnabled = await ctx.runQuery(internal.data.llmConfig.isProviderEnabled, { provider: "gemini" });
+    const openaiEnabled = await ctx.runQuery(internal.data.llmConfig.isProviderEnabled, { provider: "openai" });
+    console.log(`[GenerateResponse] 🔧 Proveedores: Gemini=${geminiEnabled}, OpenAI=${openaiEnabled}`);
+
+    // =====================================================
+    // PASO 1: Determinar agentes habilitados y seleccionar
+    // =====================================================
+    const enabledSpecialized = {
+      brief: enabledAgents.brief,
+      documentSearch: enabledAgents.documentSearch,
+    };
+    const enabledCount = Object.values(enabledSpecialized).filter(Boolean).length;
+
+    let selectedAgentKey: "brief" | "documentSearch" | "orchestrator" = "brief"; // default
+    let orchestratorIntent: string | null = null;
+
+    // Short-circuit — si solo 1 agente habilitado, usarlo directamente
+    if (enabledCount <= 1) {
+      if (enabledSpecialized.documentSearch && !enabledSpecialized.brief) {
+        selectedAgentKey = "documentSearch";
+      } else {
+        selectedAgentKey = "brief";
+      }
+      console.log(`[GenerateResponse] ⚡ Short-circuit: solo ${selectedAgentKey} habilitado, saltando orquestador`);
+    }
+    // Si hay ≥2 agentes habilitados y orquestador activo → clasificar
+    else if (enabledAgents.orchestrator && enabledCount >= 2) {
+      const classifyStart = Date.now();
+      console.log("[GenerateResponse] 🧠 PASO 1: Clasificando intención con orquestador...");
+      
+      try {
+        // Schema dinámico — solo incluir intenciones de agentes habilitados
+        const intentValues: string[] = [];
+        if (enabledSpecialized.brief) intentValues.push("brief");
+        if (enabledSpecialized.documentSearch) intentValues.push("document_search");
+        intentValues.push("needs_clarification"); // siempre disponible
+
+        const intentSchema = z.object({
+          intent: z.enum(intentValues as [string, ...string[]]).describe(
+            "La intención del usuario según los servicios habilitados para este cliente"
+          ),
+        });
+
+        // Clasificación con fallback Gemini → OpenAI
+        // Usa misma infraestructura que generateText: geminiConfig/openaiConfig + logLLMAttempt + llmErrors
+        let classificationResult: { intent: string } | null = null;
+        let orchGeminiError: Error | null = null;
+
+        // Intentar con Gemini (modelo primario de geminiConfig)
+        if (geminiEnabled) {
+          const geminiStart = Date.now();
+          try {
+            const classification = await orchestratorAgent.generateObject(
+              ctx,
+              { threadId },
+              { promptMessageId, schema: intentSchema },
+              { storageOptions: { saveMessages: "none" } }
+            );
+            classificationResult = classification.object as { intent: string };
+            logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
+          } catch (err) {
+            orchGeminiError = err instanceof Error ? err : new Error(String(err));
+            logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
+            console.error(`[GenerateResponse] ⚠️ Orquestador Gemini falló: ${extractErrorMessage(err)}`);
+            
+            await ctx.runMutation(internal.data.llmConfig.logLLMError, {
+              provider: geminiConfig.provider,
+              model: geminiConfig.modelId,
+              agentName: "orchestratorAgent",
+              errorType: classifyError(err),
+              errorMessage: extractErrorMessage(err),
+              threadId,
+              resolved: false,
+              fallbackUsed: undefined,
+            });
+          }
+        }
+
+        // Fallback con OpenAI (modelo de openaiConfig)
+        if (!classificationResult && openaiEnabled) {
+          const openaiStart = Date.now();
+          console.log("[GenerateResponse] 🔄 Intentando clasificación con OpenAI (fallback)...");
+          try {
+            const { args: orchArgs } = await orchestratorAgent.start(
+              ctx,
+              { promptMessageId, model: openaiConfig.model },
+              { threadId, storageOptions: { saveMessages: "none" } }
+            );
+            const fallbackResult = await generateObject({
+              ...orchArgs,
+              schema: intentSchema,
+            });
+            classificationResult = fallbackResult.object as { intent: string };
+            logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, true, Date.now() - openaiStart);
+
+            // Marcar error de Gemini como resuelto con fallback
+            if (orchGeminiError) {
+              await ctx.runMutation(internal.data.llmConfig.logLLMError, {
+                provider: geminiConfig.provider,
+                model: geminiConfig.modelId,
+                agentName: "orchestratorAgent",
+                errorType: classifyError(orchGeminiError),
+                errorMessage: extractErrorMessage(orchGeminiError),
+                threadId,
+                resolved: true,
+                fallbackUsed: openaiConfig.modelId,
+              });
+            }
+          } catch (err) {
+            logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, false, Date.now() - openaiStart);
+            console.error(`[GenerateResponse] ❌ Orquestador OpenAI también falló: ${extractErrorMessage(err)}`);
+            
+            await ctx.runMutation(internal.data.llmConfig.logLLMError, {
+              provider: openaiConfig.provider,
+              model: openaiConfig.modelId,
+              agentName: "orchestratorAgent",
+              errorType: classifyError(err),
+              errorMessage: extractErrorMessage(err),
+              threadId,
+              resolved: false,
+              fallbackUsed: undefined,
+            });
+          }
+        }
+
+        if (!classificationResult) {
+          throw new Error("Ambos proveedores fallaron para la clasificación del orquestador");
+        }
+
+        orchestratorIntent = classificationResult.intent;
+        const classifyTime = Date.now() - classifyStart;
+        console.log(`[GenerateResponse] 🧠 Clasificación: "${orchestratorIntent}" (${classifyTime}ms)`);
+
+        // Seleccionar agente según clasificación
+        if (orchestratorIntent === "document_search" && enabledSpecialized.documentSearch) {
+          selectedAgentKey = "documentSearch";
+        } else if (orchestratorIntent === "needs_clarification") {
+          selectedAgentKey = "orchestrator";
+        } else {
+          selectedAgentKey = "brief";
+        }
+      } catch (error) {
+        console.error(`[GenerateResponse] ⚠️ Orquestador falló, usando briefAgent por defecto: ${extractErrorMessage(error)}`);
+        selectedAgentKey = "brief";
+      }
+    } else {
+      console.log("[GenerateResponse] ⚡ Orquestador deshabilitado, usando briefAgent por defecto");
+    }
+
+    // Seleccionar el agente concreto
+    const agentMap = {
+      brief: { agent: briefAgent, name: "briefAgent" },
+      documentSearch: { agent: documentSearchAgent, name: "documentSearchAgent" },
+      orchestrator: { agent: orchestratorAgent, name: "orchestratorAgent" },
+    };
+    const selectedAgent = agentMap[selectedAgentKey].agent;
+    const selectedAgentName = agentMap[selectedAgentKey].name;
     
-    const { args: preparedArgs, save } = await briefAgent.start(
+    console.log(`[GenerateResponse] 🎯 Agente seleccionado: ${selectedAgentName}`);
+    if (orchestratorIntent) {
+      console.log(`[GenerateResponse] 📊 Intent del orquestador: ${orchestratorIntent}`);
+    }
+
+    // =====================================================
+    // PASO 2: Preparar el contexto con el agente seleccionado
+    // =====================================================
+    const prepareStart = Date.now();
+    console.log("[GenerateResponse] 📍 PASO 2: Preparando contexto...");
+    
+    const { args: preparedArgs, save } = await selectedAgent.start(
       ctx,
       { promptMessageId },
       { threadId }
@@ -167,53 +341,45 @@ export const generateResponseAsync = internalAction({
     console.log(`[GenerateResponse] ✅ Contexto preparado en ${prepareTime}ms`);
     console.log(`[GenerateResponse] 📊 Mensajes: ${preparedArgs.messages?.length || 0}`);
 
-    // Verificar si proveedores están habilitados (para testing)
-    const geminiEnabled = await ctx.runQuery(internal.data.llmConfig.isProviderEnabled, { provider: "gemini" });
-    const openaiEnabled = await ctx.runQuery(internal.data.llmConfig.isProviderEnabled, { provider: "openai" });
-    
-    console.log(`[GenerateResponse] 🔧 Gemini habilitado: ${geminiEnabled}, OpenAI habilitado: ${openaiEnabled}`);
-
+    // =====================================================
+    // PASO 3: generateText con fallback Gemini → OpenAI
+    // Usa geminiConfig/openaiConfig de llmFallback.ts
+    // Registra errores en llmErrors via llmConfig.logLLMError
+    // =====================================================
     let result: Awaited<ReturnType<typeof generateText>> | null = null;
     let usedProvider: "gemini" | "openai" | null = null;
     let geminiError: Error | null = null;
     let openaiError: Error | null = null;
 
-    // PASO 2: Intentar con Gemini primero (si está habilitado)
+    // Intentar con Gemini (geminiConfig)
     if (geminiEnabled) {
       const geminiStart = Date.now();
-      console.log("[GenerateResponse] 📍 PASO 2A: Intentando con Gemini...");
+      console.log("[GenerateResponse] 📍 PASO 3A: Intentando con Gemini...");
       
       try {
         result = await generateText({
           ...preparedArgs,
-          model: google("gemini-3.1-pro-preview"),
-          providerOptions: {
-            google: {
-              thinkingConfig: {
-                thinkingLevel: "low",
-              },
-            },
-          },
+          model: geminiConfig.model,
+          providerOptions: geminiConfig.providerOptions as any,
         });
         
         usedProvider = "gemini";
-        logLLMAttempt("gemini", "gemini-3.1-pro-preview", true, Date.now() - geminiStart);
+        logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
         console.log(`[GenerateResponse] ✅ Gemini respondió en ${Date.now() - geminiStart}ms`);
         
       } catch (error) {
         geminiError = error instanceof Error ? error : new Error(String(error));
-        logLLMAttempt("gemini", "gemini-3.1-pro-preview", false, Date.now() - geminiStart);
+        logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
         console.error(`[GenerateResponse] ❌ Gemini falló: ${extractErrorMessage(error)}`);
         
-        // Registrar error en la base de datos
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-          provider: "gemini",
-          model: "gemini-3.1-pro-preview",
-          agentName: "briefAgent",
+          provider: geminiConfig.provider,
+          model: geminiConfig.modelId,
+          agentName: selectedAgentName,
           errorType: classifyError(error),
           errorMessage: extractErrorMessage(error),
           threadId,
-          resolved: false, // Se actualizará si el fallback funciona
+          resolved: false,
           fallbackUsed: undefined,
         });
       }
@@ -221,45 +387,44 @@ export const generateResponseAsync = internalAction({
       console.log("[GenerateResponse] ⏭️ Gemini deshabilitado, saltando...");
     }
 
-    // PASO 3: Si Gemini falló o está deshabilitado, intentar con OpenAI
+    // Fallback con OpenAI (openaiConfig)
     if (!result && openaiEnabled) {
       const openaiStart = Date.now();
-      console.log("[GenerateResponse] 📍 PASO 2B: Intentando con OpenAI GPT-5.2 (fallback)...");
+      console.log("[GenerateResponse] 📍 PASO 3B: Intentando con OpenAI (fallback)...");
       
       try {
         result = await generateText({
           ...preparedArgs,
-          model: openai("gpt-5.2"),
+          model: openaiConfig.model,
         });
         
         usedProvider = "openai";
-        logLLMAttempt("openai", "gpt-5.2", true, Date.now() - openaiStart);
+        logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, true, Date.now() - openaiStart);
         console.log(`[GenerateResponse] ✅ OpenAI respondió en ${Date.now() - openaiStart}ms`);
         
-        // Si llegamos aquí por fallback, actualizar el error de Gemini como resuelto
+        // Marcar error de Gemini como resuelto con fallback
         if (geminiError) {
           await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-            provider: "gemini",
-            model: "gemini-3.1-pro-preview",
-            agentName: "briefAgent",
+            provider: geminiConfig.provider,
+            model: geminiConfig.modelId,
+            agentName: selectedAgentName,
             errorType: classifyError(geminiError),
             errorMessage: extractErrorMessage(geminiError),
             threadId,
             resolved: true,
-            fallbackUsed: "gpt-5.2",
+            fallbackUsed: openaiConfig.modelId,
           });
         }
         
       } catch (error) {
         openaiError = error instanceof Error ? error : new Error(String(error));
-        logLLMAttempt("openai", "gpt-5.2", false, Date.now() - openaiStart);
+        logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, false, Date.now() - openaiStart);
         console.error(`[GenerateResponse] ❌ OpenAI también falló: ${extractErrorMessage(error)}`);
         
-        // Registrar error de OpenAI
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-          provider: "openai",
-          model: "gpt-5.2",
-          agentName: "briefAgent",
+          provider: openaiConfig.provider,
+          model: openaiConfig.modelId,
+          agentName: selectedAgentName,
           errorType: classifyError(error),
           errorMessage: extractErrorMessage(error),
           threadId,
@@ -286,7 +451,6 @@ export const generateResponseAsync = internalAction({
       console.error(`[GenerateResponse] OpenAI error: ${openaiError?.message || "deshabilitado"}`);
       console.error("========================================\n");
       
-      // Guardar mensaje de error para el usuario
       await saveMessage(ctx, components.agent, {
         threadId,
         message: {
@@ -300,7 +464,7 @@ export const generateResponseAsync = internalAction({
 
     // PASO 5: Guardar el resultado exitoso
     const saveStart = Date.now();
-    console.log("[GenerateResponse] 📍 PASO 3: Guardando resultado...");
+    console.log("[GenerateResponse] 📍 PASO 4: Guardando resultado...");
     
     for (const step of result.steps) {
       await save({ step });
@@ -311,7 +475,9 @@ export const generateResponseAsync = internalAction({
     
     console.log("\n========================================");
     console.log(`[GenerateResponse] 🏁 RESUMEN:`);
-    console.log(`[GenerateResponse]    - Proveedor usado: ${usedProvider}`);
+    console.log(`[GenerateResponse]    - Agente: ${selectedAgentName}`);
+    console.log(`[GenerateResponse]    - Intent: ${orchestratorIntent || "short-circuit"}`);
+    console.log(`[GenerateResponse]    - Proveedor LLM: ${usedProvider}`);
     console.log(`[GenerateResponse]    - Preparación: ${prepareTime}ms`);
     console.log(`[GenerateResponse]    - Guardado: ${saveTime}ms`);
     console.log(`[GenerateResponse]    - TOTAL: ${totalTime}ms (${(totalTime/1000).toFixed(1)}s)`);
@@ -322,6 +488,8 @@ export const generateResponseAsync = internalAction({
       text: result.text,
       promptMessageId,
       provider: usedProvider,
+      agent: selectedAgentName,
+      intent: orchestratorIntent,
     };
   },
 });
