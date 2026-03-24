@@ -3,7 +3,12 @@
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { formatDate, getStatusColor, getPriorityConfig } from "../task/types";
+import {
+  formatDate,
+  getStatusColor,
+  getStatusDisplay,
+  getPriorityConfig,
+} from "../task/types";
 import { clientConfig } from "@/config/tenant.config";
 
 interface TaskCardTask {
@@ -103,7 +108,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         <span
           className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)}`}
         >
-          {task.status}
+          {getStatusDisplay(task.status)}
         </span>
         <span
           className={`text-xs px-2 py-0.5 rounded-full ${syncBadge.className}`}

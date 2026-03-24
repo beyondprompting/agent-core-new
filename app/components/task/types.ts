@@ -63,12 +63,23 @@ export const getStatusColor = (status: string) => {
 export const getPriorityConfig = (priority?: number) => {
   if (priority === undefined || priority === null) return null;
   const badges: Record<number, { color: string; icon: string; label: string }> = {
-    0: { color: "text-muted-foreground", icon: "▽", label: "Baja" },
-    1: { color: "text-amber-600 dark:text-amber-400", icon: "◆", label: "Media" },
-    2: { color: "text-orange-600 dark:text-orange-400", icon: "△", label: "Alta" },
-    3: { color: "text-red-600 dark:text-red-400", icon: "⚡", label: "Urgente" },
+    0: { color: "text-muted-foreground", icon: "↓", label: "Baja" },
+    1: { color: "text-blue-600 dark:text-blue-400", icon: "→", label: "Media" },
+    2: { color: "text-orange-600 dark:text-orange-400", icon: "↑", label: "Alta" },
+    3: { color: "text-red-600 dark:text-red-400", icon: "⚠", label: "Urgente" },
   };
   return badges[priority] || badges[1];
+};
+
+/** Convierte status interno (ej: "en_proceso") a display legible ("En Proceso") */
+export const getStatusDisplay = (status: string): string => {
+  const map: Record<string, string> = {
+    nueva: "Nueva",
+    en_proceso: "En Proceso",
+    estancada: "Estancada",
+    finalizada: "Finalizada",
+  };
+  return map[status] || status;
 };
 
 // Tipos de archivo soportados para evaluación

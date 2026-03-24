@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { TaskBriefContent } from "../task/TaskBriefContent";
-import { getStatusColor } from "../task/types";
+import { getStatusColor, getStatusDisplay } from "../task/types";
 import type { Task } from "../task/types";
 import { clientConfig } from "@/config/tenant.config";
 import {
@@ -119,7 +119,7 @@ export function TaskDetailDialog({
             <span
               className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)}`}
             >
-              {task.status}
+              {getStatusDisplay(task.status)}
             </span>
           </div>
           <button
