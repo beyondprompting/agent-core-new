@@ -226,8 +226,8 @@ export function createCORProvider(): ProjectManagementProvider {
           firstName: (u.first_name as string) || "",
           lastName: (u.last_name as string) || "",
           email: (u.email as string) || "",
-          roleId: u.role_id as number | undefined,
-          positionName: u.position_name as string | undefined,
+          roleId: (u.role_id as number) ?? undefined,
+          positionName: (u.position_name as string) ?? undefined,
         }));
       } catch (error) {
         console.error(`[COR Provider] ❌ Error en searchUsersByName:`, error);
@@ -267,8 +267,8 @@ export function createCORProvider(): ProjectManagementProvider {
         return {
           id: client.id,
           name: client.name,
-          businessName: client.business_name,
-          email: client.email_contact,
+          businessName: (client.business_name as string) ?? undefined,
+          email: (client.email_contact as string) ?? undefined,
         };
       } catch (error) {
         console.error(`[COR Provider] ❌ Error en searchClient:`, error);
@@ -487,6 +487,78 @@ export function createCORProvider(): ProjectManagementProvider {
           success: false,
           error: error instanceof Error ? error.message : String(error),
         };
+      }
+    },
+
+    // ==================== LIST ALL USERS ====================
+
+    async listAllUsers(): Promise<ExternalUser[]> {
+      console.log(`[COR Provider] 📋 Obteniendo TODOS los usuarios de COR (page=false)...`);
+
+      try {
+        const response = await corApiFetch(`/users?page=false`);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[COR Provider] ❌ Error listando usuarios: ${response.status} - ${errorText}`);
+          return [];
+        }
+
+        const result = await response.json();
+        // Cuando page=false, COR puede retornar { data: [...] } o un array directo
+        const users = Array.isArray(result) ? result : (result.data || []);
+
+        console.log(`[COR Provider] ✅ Obtenidos ${users.length} usuarios de COR`);
+
+        return users.map((u: Record<string, unknown>) => ({
+          id: u.id as number,
+          firstName: (u.first_name as string) || "",
+          lastName: (u.last_name as string) || "",
+          email: (u.email as string) || "",
+          roleId: (u.role_id as number) ?? undefined,
+          positionName: (u.position_name as string) ?? undefined,
+        }));
+      } catch (error) {
+        console.error(`[COR Provider] ❌ Error en listAllUsers:`, error);
+        return [];
+      }
+    },
+
+    // ==================== LIST ALL CLIENTS ====================
+
+    async listAllClients(): Promise<ExternalClient[]> {
+      console.log(`[COR Provider] 📋 Obteniendo TODOS los clientes de COR (page=false)...`);
+
+      try {
+        const response = await corApiFetch(`/clients?page=false`);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[COR Provider] ❌ Error listando clientes: ${response.status} - ${errorText}`);
+          return [];
+        }
+
+        const result = await response.json();
+        // Cuando page=false, COR puede retornar { data: [...] } o un array directo
+        const clients = Array.isArray(result) ? result : (result.data || []);
+
+        console.log(`[COR Provider] ✅ Obtenidos ${clients.length} clientes de COR`);
+
+        return clients.map((c: Record<string, unknown>) => ({
+          id: c.id as number,
+          name: (c.name as string) || "",
+          businessName: (c.business_name as string) ?? undefined,
+          email: (c.email_contact as string) ?? undefined,
+          nameContact: (c.name_contact as string) ?? undefined,
+          lastNameContact: (c.last_name_contact as string) ?? undefined,
+          phone: (c.phone as string) ?? undefined,
+          website: (c.website as string) ?? undefined,
+          description: (c.description as string) ?? undefined,
+          condition: (c.condition as string) ?? undefined,
+        }));
+      } catch (error) {
+        console.error(`[COR Provider] ❌ Error en listAllClients:`, error);
+        return [];
       }
     },
   };

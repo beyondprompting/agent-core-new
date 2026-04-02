@@ -68,5 +68,15 @@ export function createNoopProvider(): ProjectManagementProvider {
         error: "No hay integración de gestión de proyectos configurada.",
       };
     },
+
+    async listAllUsers(): Promise<ExternalUser[]> {
+      console.log("[Noop Provider] listAllUsers — no hay integración externa configurada");
+      return [];
+    },
+
+    async listAllClients(): Promise<ExternalClient[]> {
+      console.log("[Noop Provider] listAllClients — no hay integración externa configurada");
+      return [];
+    },
   };
 }

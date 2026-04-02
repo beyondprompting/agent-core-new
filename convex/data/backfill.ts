@@ -1,0 +1,295 @@
+"use node";
+
+// convex/data/backfill.ts
+// =====================================================
+// Funciones de backfill para migración de datos existentes.
+// Diseñadas para correr desde el dashboard de Convex (internalAction).
+//
+// ⚠️  ARCHIVO TEMPORAL — Borrar cuando ya no se necesite.
+//
+// Funciones:
+//   1. backfillCorUsers   — Resuelve usuarios existentes de Convex en COR
+//   2. backfillCorClients — Importa TODOS los clientes desde COR
+// =====================================================
+
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
+import { getProjectManagementProvider } from "../integrations/registry";
+
+// ==================== 1. BACKFILL COR USERS ====================
+
+/**
+ * Resuelve TODOS los usuarios existentes de Convex en COR.
+ *
+ * Flujo:
+ *   1. Lista todos los usuarios de Convex (authTables)
+ *   2. Lista todos los usuarios de COR (GET /users?page=false)
+ *   3. Cruza por email (coincidencia exacta, case-insensitive)
+ *   4. Para cada match → upsert en tabla corUsers
+ *
+ * Logs detallados:
+ *   - ✅ Para cada usuario resuelto exitosamente
+ *   - ⚠️ Para usuarios de Convex sin match en COR
+ *   - ❌ Para errores
+ *   - 📊 Resumen final con contadores
+ *
+ * Ejecutar desde: Dashboard de Convex → Functions → data/backfill:backfillCorUsers → Run
+ */
+export const backfillCorUsers = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    console.log("\n" + "=".repeat(60));
+    console.log("[Backfill] 🚀 INICIO: backfillCorUsers");
+    console.log("=".repeat(60));
+
+    const stats = {
+      totalConvexUsers: 0,
+      totalCORUsers: 0,
+      matched: 0,
+      alreadyExisted: 0,
+      created: 0,
+      noMatch: 0,
+      skippedNoEmail: 0,
+      errors: 0,
+    };
+
+    try {
+      // 1. Listar todos los usuarios de Convex
+      console.log("[Backfill] 📋 Obteniendo usuarios de Convex...");
+      const convexUsers = await ctx.runQuery(internal.data.corUsers.listAllConvexUsers, {});
+      stats.totalConvexUsers = convexUsers.length;
+      console.log(`[Backfill] ✅ ${convexUsers.length} usuarios encontrados en Convex`);
+
+      if (convexUsers.length === 0) {
+        console.log("[Backfill] ⚠️ No hay usuarios en Convex. Nada que hacer.");
+        return { success: true, stats };
+      }
+
+      // 2. Listar todos los usuarios de COR (una sola llamada HTTP)
+      console.log("[Backfill] 📋 Obteniendo usuarios de COR (page=false)...");
+      const provider = getProjectManagementProvider();
+
+      if (provider.name === "noop") {
+        console.log("[Backfill] ❌ Provider es noop — no se puede hacer backfill sin integración COR.");
+        return { success: false, error: "Provider es noop", stats };
+      }
+
+      const corUsers = await provider.listAllUsers();
+      stats.totalCORUsers = corUsers.length;
+      console.log(`[Backfill] ✅ ${corUsers.length} usuarios encontrados en COR`);
+
+      if (corUsers.length === 0) {
+        console.log("[Backfill] ⚠️ No se obtuvieron usuarios de COR. Verifica las credenciales.");
+        return { success: false, error: "COR retornó 0 usuarios", stats };
+      }
+
+      // 3. Crear mapa de email → COR user para búsqueda O(1)
+      const corUsersByEmail = new Map<string, typeof corUsers[0]>();
+      for (const cu of corUsers) {
+        if (cu.email) {
+          corUsersByEmail.set(cu.email.toLowerCase(), cu);
+        }
+      }
+      console.log(`[Backfill] 📊 ${corUsersByEmail.size} usuarios de COR con email indexados`);
+
+      // 4. Verificar cuáles ya tienen corUser
+      console.log("[Backfill] 🔍 Verificando cuáles usuarios ya tienen corUser...");
+
+      // 5. Cruzar usuarios
+      console.log("[Backfill] 🔄 Cruzando usuarios Convex ↔ COR...\n");
+
+      for (const convexUser of convexUsers) {
+        const email = convexUser.email;
+        const name = convexUser.name || "(sin nombre)";
+
+        if (!email) {
+          console.log(`[Backfill] ⚠️ SKIP: ${name} (ID: ${convexUser._id}) — sin email`);
+          stats.skippedNoEmail++;
+          continue;
+        }
+
+        // Verificar si ya tiene corUser
+        const existingCorUser = await ctx.runQuery(
+          internal.data.corUsers.getCorUserByUserId,
+          { userId: convexUser._id }
+        );
+
+        if (existingCorUser) {
+          console.log(`[Backfill] ℹ️ YA EXISTE: ${name} (${email}) → COR ID: ${existingCorUser.corUserId}`);
+          stats.alreadyExisted++;
+          stats.matched++;
+          continue;
+        }
+
+        // Buscar match por email en COR
+        const corMatch = corUsersByEmail.get(email.toLowerCase());
+
+        if (!corMatch) {
+          console.log(`[Backfill] ⚠️ SIN MATCH: ${name} (${email}) — no encontrado en COR`);
+          stats.noMatch++;
+          continue;
+        }
+
+        // Match encontrado → upsert
+        try {
+          await ctx.runMutation(internal.data.corUsers.upsertCorUser, {
+            userId: convexUser._id,
+            corUserId: corMatch.id,
+            corFirstName: corMatch.firstName,
+            corLastName: corMatch.lastName,
+            corEmail: corMatch.email,
+            corRoleId: corMatch.roleId,
+            corPositionName: corMatch.positionName,
+          });
+
+          console.log(
+            `[Backfill] ✅ CREADO: ${name} (${email}) → COR: ${corMatch.firstName} ${corMatch.lastName} (ID: ${corMatch.id}, Rol: ${corMatch.roleId})`
+          );
+          stats.matched++;
+          stats.created++;
+        } catch (error) {
+          console.error(
+            `[Backfill] ❌ ERROR upsert para ${name} (${email}):`,
+            error instanceof Error ? error.message : String(error)
+          );
+          stats.errors++;
+        }
+      }
+
+      // 6. Resumen final
+      console.log("\n" + "=".repeat(60));
+      console.log("[Backfill] 📊 RESUMEN backfillCorUsers:");
+      console.log(`  Usuarios Convex:       ${stats.totalConvexUsers}`);
+      console.log(`  Usuarios COR:          ${stats.totalCORUsers}`);
+      console.log(`  Matched total:         ${stats.matched}`);
+      console.log(`    - Ya existían:       ${stats.alreadyExisted}`);
+      console.log(`    - Creados ahora:     ${stats.created}`);
+      console.log(`  Sin match en COR:      ${stats.noMatch}`);
+      console.log(`  Sin email (skipped):   ${stats.skippedNoEmail}`);
+      console.log(`  Errores:               ${stats.errors}`);
+      console.log("=".repeat(60) + "\n");
+
+      return { success: true, stats };
+    } catch (error) {
+      console.error("[Backfill] ❌ ERROR FATAL en backfillCorUsers:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        stats,
+      };
+    }
+  },
+});
+
+// ==================== 2. BACKFILL COR CLIENTS ====================
+
+/**
+ * Importa TODOS los clientes desde COR a la tabla corClients.
+ *
+ * Flujo:
+ *   1. Llama GET /clients?page=false (trae todos sin paginación)
+ *   2. Para cada cliente → upsert en tabla corClients
+ *
+ * Logs detallados:
+ *   - ✅ Para cada cliente creado/actualizado
+ *   - ❌ Para errores individuales
+ *   - 📊 Resumen final con contadores
+ *
+ * Ejecutar desde: Dashboard de Convex → Functions → data/backfill:backfillCorClients → Run
+ */
+export const backfillCorClients = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    console.log("\n" + "=".repeat(60));
+    console.log("[Backfill] 🚀 INICIO: backfillCorClients");
+    console.log("=".repeat(60));
+
+    const stats = {
+      totalCORClients: 0,
+      created: 0,
+      updated: 0,
+      errors: 0,
+      errorDetails: [] as string[],
+    };
+
+    try {
+      // 1. Obtener todos los clientes de COR
+      console.log("[Backfill] 📋 Obteniendo clientes de COR (page=false)...");
+      const provider = getProjectManagementProvider();
+
+      if (provider.name === "noop") {
+        console.log("[Backfill] ❌ Provider es noop — no se puede hacer backfill sin integración COR.");
+        return { success: false, error: "Provider es noop", stats };
+      }
+
+      const corClients = await provider.listAllClients();
+      stats.totalCORClients = corClients.length;
+      console.log(`[Backfill] ✅ ${corClients.length} clientes obtenidos de COR`);
+
+      if (corClients.length === 0) {
+        console.log("[Backfill] ⚠️ COR retornó 0 clientes. Verifica las credenciales.");
+        return { success: false, error: "COR retornó 0 clientes", stats };
+      }
+
+      // 2. Upsert cada cliente
+      console.log("[Backfill] 🔄 Importando clientes...\n");
+
+      for (const client of corClients) {
+        try {
+          // Verificar si ya existe para loguear create vs update
+          const existing = await ctx.runQuery(
+            internal.data.corClients.getClientByCorId,
+            { corClientId: client.id }
+          );
+
+          await ctx.runMutation(internal.data.corClients.upsertClient, {
+            corClientId: client.id,
+            name: client.name,
+            businessName: client.businessName,
+            nameContact: client.nameContact,
+            lastNameContact: client.lastNameContact,
+            emailContact: client.email,
+            website: client.website,
+            description: client.description,
+            phone: client.phone,
+          });
+
+          if (existing) {
+            console.log(`[Backfill] 🔄 ACTUALIZADO: ${client.name} (COR ID: ${client.id})`);
+            stats.updated++;
+          } else {
+            console.log(`[Backfill] ✅ CREADO: ${client.name} (COR ID: ${client.id})`);
+            stats.created++;
+          }
+        } catch (error) {
+          const errorMsg = `${client.name} (COR ID: ${client.id}): ${error instanceof Error ? error.message : String(error)}`;
+          console.error(`[Backfill] ❌ ERROR: ${errorMsg}`);
+          stats.errors++;
+          stats.errorDetails.push(errorMsg);
+        }
+      }
+
+      // 3. Resumen final
+      console.log("\n" + "=".repeat(60));
+      console.log("[Backfill] 📊 RESUMEN backfillCorClients:");
+      console.log(`  Clientes en COR:       ${stats.totalCORClients}`);
+      console.log(`  Creados:               ${stats.created}`);
+      console.log(`  Actualizados:          ${stats.updated}`);
+      console.log(`  Errores:               ${stats.errors}`);
+      if (stats.errorDetails.length > 0) {
+        console.log(`  Detalle errores:`);
+        stats.errorDetails.forEach((e) => console.log(`    - ${e}`));
+      }
+      console.log("=".repeat(60) + "\n");
+
+      return { success: true, stats };
+    } catch (error) {
+      console.error("[Backfill] ❌ ERROR FATAL en backfillCorClients:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        stats,
+      };
+    }
+  },
+});

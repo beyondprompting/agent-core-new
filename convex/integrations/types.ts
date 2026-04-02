@@ -23,6 +23,13 @@ export interface ExternalClient {
   name: string;
   businessName?: string;
   email?: string;
+  // Campos adicionales (para sync completo)
+  nameContact?: string;
+  lastNameContact?: string;
+  phone?: string;
+  website?: string;
+  description?: string;
+  condition?: string;
 }
 
 /** Proyecto tal como existe en el sistema externo */
@@ -136,6 +143,20 @@ export interface ProjectManagementProvider {
     taskId: number,
     data: UpdateTaskInput
   ): Promise<{ success: boolean; error?: string }>;
+
+  /**
+   * Listar TODOS los usuarios del sistema externo.
+   * En COR: GET /users?page=false (desactiva paginación)
+   * Usado para backfill masivo de corUsers.
+   */
+  listAllUsers(): Promise<ExternalUser[]>;
+
+  /**
+   * Listar TODOS los clientes del sistema externo.
+   * En COR: GET /clients?page=false (desactiva paginación)
+   * Usado para backfill masivo de corClients.
+   */
+  listAllClients(): Promise<ExternalClient[]>;
 }
 
 // ==================== TIPO DE CONFIGURACIÓN ====================

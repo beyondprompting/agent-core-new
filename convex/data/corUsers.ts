@@ -42,6 +42,22 @@ export const getUserBasicInfo = internalQuery({
   },
 });
 
+/**
+ * Lista TODOS los usuarios de Convex (authTables) con su info básica.
+ * Usado por backfill para resolver usuarios masivamente en COR.
+ */
+export const listAllConvexUsers = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+    return users.map((u) => ({
+      _id: u._id,
+      name: (u as Record<string, unknown>).name as string | undefined,
+      email: (u as Record<string, unknown>).email as string | undefined,
+    }));
+  },
+});
+
 // ==================== MUTATIONS ====================
 
 /**

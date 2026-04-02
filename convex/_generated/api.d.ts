@@ -15,6 +15,7 @@ import type * as agents_orchestratorAgent from "../agents/orchestratorAgent.js";
 import type * as agents_priorityAgent from "../agents/priorityAgent.js";
 import type * as agents_reviewerAgent from "../agents/reviewerAgent.js";
 import type * as auth from "../auth.js";
+import type * as data_backfill from "../data/backfill.js";
 import type * as data_corClients from "../data/corClients.js";
 import type * as data_corClientsActions from "../data/corClientsActions.js";
 import type * as data_corUsers from "../data/corUsers.js";
@@ -71,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   "agents/priorityAgent": typeof agents_priorityAgent;
   "agents/reviewerAgent": typeof agents_reviewerAgent;
   auth: typeof auth;
+  "data/backfill": typeof data_backfill;
   "data/corClients": typeof data_corClients;
   "data/corClientsActions": typeof data_corClientsActions;
   "data/corUsers": typeof data_corUsers;
