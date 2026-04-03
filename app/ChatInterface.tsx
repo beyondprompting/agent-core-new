@@ -205,12 +205,6 @@ export default function ChatInterface({
       if (currentFiles.length > 0) {
         setIsUploadingFile(true);
         for (const file of currentFiles) {
-          const isWordDoc =
-            file.type.includes("word") ||
-            file.type === "application/msword" ||
-            file.type ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
           const result = await uploadFile({
             fileBase64: file.base64,
             filename: file.name,
@@ -218,9 +212,9 @@ export default function ChatInterface({
             extractedImages: file.extractedImages,
           });
 
-          if (!isWordDoc) {
-            fileIds.push(result.fileId);
-          }
+          // Siempre incluir el archivo original (para adjuntar a la tarea)
+          // chat.ts ya se encarga de omitir Word/PDF al construir el contenido para el LLM
+          fileIds.push(result.fileId);
 
           if (result.extractedImageFileIds?.length > 0) {
             fileIds.push(...result.extractedImageFileIds);
