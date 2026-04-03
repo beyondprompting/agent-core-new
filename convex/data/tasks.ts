@@ -721,6 +721,43 @@ export const startPublishTaskToExternal = mutation({
       throw new Error("La task ya está en proceso de publicación");
     }
 
+    // Verificar que la task tiene un cliente asociado
+    if (!task.corClientId) {
+      throw new Error("No se puede publicar: no hay un cliente asociado a esta tarea.");
+    }
+
+    // Buscar el cliente local por corClientId
+    const localClient = await ctx.db
+      .query("corClients")
+      .withIndex("by_corClientId", (q) => q.eq("corClientId", task.corClientId!))
+      .unique();
+
+    if (!localClient) {
+      throw new Error("No se puede publicar: el cliente no está registrado en el sistema.");
+    }
+
+    // Resolver el userId del usuario autenticado
+    const user = await ctx.db
+      .query("users")
+      .filter((q) => q.eq(q.field("email"), identity.email))
+      .unique();
+
+    if (!user) {
+      throw new Error("No se puede publicar: usuario no encontrado en el sistema.");
+    }
+
+    // Verificar que el usuario tiene autorización para este cliente
+    const assignment = await ctx.db
+      .query("clientUserAssignments")
+      .withIndex("by_client_and_user", (q) =>
+        q.eq("clientId", localClient._id).eq("userId", user._id)
+      )
+      .unique();
+
+    if (!assignment) {
+      throw new Error(`No tienes autorización para crear tareas para el cliente "${localClient.name}". Contacta al administrador.`);
+    }
+
     // Poner estado "syncing" — la UI lo verá inmediatamente
     await ctx.db.patch(args.taskId, {
       corSyncStatus: "syncing",
