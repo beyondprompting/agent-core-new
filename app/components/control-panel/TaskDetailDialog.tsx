@@ -47,6 +47,7 @@ export function TaskDetailDialog({
   const startPublish = useMutation(api.data.tasks.startPublishTaskToExternal);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"task" | "project">("task");
 
   // Suscripción reactiva a la task para detectar cambios en corSyncStatus
   const liveTask = useQuery(api.data.tasks.getTask, { taskId: task._id });
@@ -138,11 +139,50 @@ export function TaskDetailDialog({
           </button>
         </div>
 
-        {/* Body — Proyecto + Task */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {/* Sección de Proyecto (si existe) */}
+        {/* Tabs */}
+        <div className="flex border-b border-border flex-shrink-0 px-6">
+          <button
+            onClick={() => setActiveTab("task")}
+            className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
+              activeTab === "task"
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            📋 Tarea
+            {activeTab === "task" && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+            )}
+          </button>
           {project && (
-            <div className="p-4 pb-2">
+            <button
+              onClick={() => setActiveTab("project")}
+              className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
+                activeTab === "project"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              📁 Proyecto
+              {activeTab === "project" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Body — Tab content */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {activeTab === "task" && (
+            <TaskBriefContent
+              task={liveTask ?? task}
+              editable={syncStatus !== "syncing"}
+              syncStatus={syncStatus}
+            />
+          )}
+
+          {activeTab === "project" && project && (
+            <div className="p-4">
               <ProjectBriefContent
                 project={project}
                 editable={syncStatus !== "syncing"}
@@ -150,16 +190,6 @@ export function TaskDetailDialog({
               />
             </div>
           )}
-
-          {/* Separador entre proyecto y tarea */}
-          {project && <div className="mx-4 border-t border-border" />}
-
-          {/* Sección de Tarea */}
-          <TaskBriefContent
-            task={liveTask ?? task}
-            editable={syncStatus !== "syncing"}
-            syncStatus={syncStatus}
-          />
         </div>
 
         {/* Footer — Publish action */}

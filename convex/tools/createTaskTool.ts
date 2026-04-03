@@ -18,7 +18,13 @@ export const createTaskTool = createTool({
   La task se guardará en el sistema. La publicación al sistema de gestión externo (COR) se hará desde el Panel de Control.
   
   IMPORTANTE: Antes de usar esta herramienta, debes haber usado "validateUserForClient" para obtener 
-  corUserId, corClientId, corClientName y localClientId. Inclúyelos en la llamada.`,
+  corUserId, corClientId, corClientName y localClientId. Inclúyelos en la llamada.
+  
+  Los campos se guardan automaticamente en sus fields correspondientes:
+  - title, deadline, priority → fields dedicados de la task
+  - deliverables → field del proyecto asociado
+  - El resto (requestType, brand, objective, keyMessage, kpis, budget, approvers) → se combinan en el campo description
+  No necesitas preocuparte por la distribucion, el sistema lo maneja automaticamente.`,
   args: z.object({
     title: z.string().describe("Titulo breve y descriptivo del proyecto (ej: Campaña de verano Coca-Cola)"),
     requestType: z.string().describe("Tipo de requerimiento - OBLIGATORIO"),

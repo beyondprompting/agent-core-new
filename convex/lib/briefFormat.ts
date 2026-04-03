@@ -20,6 +20,12 @@
  * Construye el texto de description de la task a partir de los campos
  * individuales del brief. Este texto se guarda tanto en Convex como en COR.
  *
+ * IMPORTANTE: Solo incluye campos que NO tienen field dedicado en la task.
+ * - deadline → se guarda en task.deadline (NO en description)
+ * - deliverables → se guarda en project.deliverables (NO en description)
+ * - priority → se guarda en task.priority (NO en description)
+ * - title → se guarda en task.title (NO en description)
+ *
  * El formato es plano y legible para que se vea bien en ambos sistemas.
  */
 export function buildBriefDescription(fields: {
@@ -28,8 +34,8 @@ export function buildBriefDescription(fields: {
   objective?: string;
   keyMessage?: string;
   kpis?: string;
-  deadline?: string;
-  deliverables?: string;
+  deadline?: string;       // Ignorado — se guarda en task.deadline
+  deliverables?: string;   // Ignorado — se guarda en project.deliverables
   budget?: string;
   approvers?: string;
   additionalNotes?: string;
@@ -39,8 +45,7 @@ export function buildBriefDescription(fields: {
 
   lines.push(`Tipo de requerimiento: ${fields.requestType}`);
   lines.push(`Marca: ${fields.brand}`);
-  if (fields.deadline) lines.push(`Fecha límite: ${fields.deadline}`);
-  if (fields.deliverables) lines.push(`Entregables: ${fields.deliverables}`);
+  // deadline y deliverables NO se incluyen — tienen fields dedicados
   if (fields.objective) lines.push(`Objetivo: ${fields.objective}`);
   if (fields.keyMessage) lines.push(`Mensaje clave: ${fields.keyMessage}`);
   if (fields.kpis) lines.push(`KPIs: ${fields.kpis}`);
