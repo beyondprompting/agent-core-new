@@ -1,0 +1,47 @@
+// convex/lib/corRetry.ts
+// =====================================================
+// Helper centralizado para reintentos de sincronización con COR.
+//
+// Uso: importar desde cualquier action que llame a COR y necesite
+// reintentar en caso de fallo (sync de ediciones, publicación, etc.).
+// =====================================================
+
+/**
+ * Delays de backoff exponencial para cada intento (en ms).
+ * Intento 0 = inmediato (ya se ejecutó),
+ * Intento 1 = 5s, 2 = 30s, 3 = 2min, 4 = 10min.
+ */
+export const COR_RETRY_DELAYS = [0, 5_000, 30_000, 120_000, 600_000];
+
+/** Máximo de intentos (incluyendo el primero). */
+export const MAX_RETRY_ATTEMPTS = COR_RETRY_DELAYS.length;
+
+/**
+ * Retorna el delay en ms para el próximo intento, o `null` si se agotaron.
+ *
+ *   attempt 0 → ejecutado ahora, si falla → delay para intento 1 = 5_000
+ *   attempt 4 → último intento, si falla → null (rendirse)
+ */
+export function getRetryDelay(attempt: number): number | null {
+  const nextAttempt = attempt + 1;
+  if (nextAttempt >= MAX_RETRY_ATTEMPTS) return null;
+  return COR_RETRY_DELAYS[nextAttempt];
+}
+
+/**
+ * ¿Quedan reintentos disponibles?
+ */
+export function shouldRetry(attempt: number): boolean {
+  return getRetryDelay(attempt) !== null;
+}
+
+/**
+ * Extrae un mensaje limpio de un error para guardar en corSyncError.
+ * Nunca expone stack traces ni info sensible.
+ */
+export function formatRetryError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.slice(0, 500);
+  }
+  return String(error).slice(0, 500);
+}

@@ -17,6 +17,7 @@ import {
 import { internal } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getProjectManagementProvider } from "../integrations/registry";
+import { shouldRetry, getRetryDelay, formatRetryError, MAX_RETRY_ATTEMPTS } from "../lib/corRetry";
 
 // ==================== QUERIES ====================
 
@@ -231,7 +232,7 @@ export const updateProjectInternal = internalMutation({
 
 /**
  * Mutation interna: programa la sincronización de ediciones locales hacia COR.
- * Verifica que el proyecto esté publicado y luego schedula la action de sync.
+ * Verifica que el proyecto esté publicado, marca "syncing" y schedula la action.
  */
 export const scheduleProjectSyncToCOR = internalMutation({
   args: {
@@ -242,15 +243,29 @@ export const scheduleProjectSyncToCOR = internalMutation({
     const project = await ctx.db.get(args.projectId);
     if (!project) return;
 
-    if (project.corSyncStatus !== "synced" || !project.corProjectId) {
+    if (!project.corProjectId) {
       console.log(`[scheduleProjectSyncToCOR] Proyecto ${args.projectId} no está publicado en COR, omitiendo sync.`);
       return;
     }
 
+    if (!["synced", "retrying", "error"].includes(project.corSyncStatus || "")) {
+      if (project.corSyncStatus !== "synced") {
+        console.log(`[scheduleProjectSyncToCOR] Proyecto ${args.projectId} no está en estado sincronizable, omitiendo.`);
+        return;
+      }
+    }
+
     console.log(`[scheduleProjectSyncToCOR] 🔄 Programando sync para proyecto ${args.projectId}`);
+    await ctx.db.patch(args.projectId, {
+      corSyncStatus: "syncing",
+      corSyncAttempt: 0,
+      corSyncError: undefined,
+    });
+
     await ctx.scheduler.runAfter(0, internal.data.projects.syncProjectEditToCORAction, {
       projectId: args.projectId,
       changedFields: args.changedFields,
+      attempt: 0,
     });
   },
 });
@@ -264,17 +279,21 @@ const COR_PROJECT_SYNCABLE_FIELDS = new Set([
 
 /**
  * Action interna: sincroniza una edición local de proyecto hacia COR.
+ * Incluye reintentos automáticos con backoff exponencial.
  */
 export const syncProjectEditToCORAction = internalAction({
   args: {
     projectId: v.id("projects"),
     changedFields: v.array(v.string()),
+    attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const attempt = args.attempt ?? 0;
     console.log("\n========================================");
     console.log("[SyncProjectEdit] 🔄 SINCRONIZANDO PROYECTO → COR");
     console.log(`[SyncProjectEdit] Proyecto Convex ID: ${args.projectId}`);
     console.log(`[SyncProjectEdit] Campos cambiados: ${args.changedFields.join(", ")}`);
+    console.log(`[SyncProjectEdit] Intento: ${attempt + 1}/${MAX_RETRY_ATTEMPTS}`);
     console.log("========================================\n");
 
     try {
@@ -287,8 +306,8 @@ export const syncProjectEditToCORAction = internalAction({
         return;
       }
 
-      if (project.corSyncStatus !== "synced") {
-        console.error(`[SyncProjectEdit] ❌ Proyecto no está synced (estado: ${project.corSyncStatus}). Abortando.`);
+      if (!["synced", "syncing", "retrying"].includes(project.corSyncStatus || "")) {
+        console.error(`[SyncProjectEdit] ❌ Proyecto no está en estado sincronizable (estado: ${project.corSyncStatus}). Abortando.`);
         return;
       }
 
@@ -302,6 +321,11 @@ export const syncProjectEditToCORAction = internalAction({
       const syncableChanges = args.changedFields.filter((f) => COR_PROJECT_SYNCABLE_FIELDS.has(f));
       if (syncableChanges.length === 0) {
         console.log("[SyncProjectEdit] ℹ️ No hay campos sincronizables con COR");
+        // Restaurar a synced ya que no hay nada que sincronizar
+        await ctx.runMutation(internal.data.projects.updateProjectPublishStatus, {
+          projectId: args.projectId,
+          corSyncStatus: "synced",
+        });
         return;
       }
 
@@ -319,20 +343,78 @@ export const syncProjectEditToCORAction = internalAction({
       const result = await provider.updateProject(corProjectId, updatePayload as any);
 
       if (!result.success) {
-        console.error(`[SyncProjectEdit] ❌ Error actualizando COR: ${result.error}`);
-        return;
+        throw new Error(result.error || "Error desconocido de COR");
       }
 
-      // Actualizar timestamp de sync
-      await ctx.runMutation(internal.data.projects.updateProjectPublishStatus, {
+      // ÉXITO — marcar como synced y limpiar estado de retry
+      await ctx.runMutation(internal.data.projects.updateProjectSyncMetadata, {
         projectId: args.projectId,
         corSyncStatus: "synced",
+        corSyncedAt: Date.now(),
+        corSyncAttempt: 0,
+        corSyncError: undefined,
       });
 
       console.log(`[SyncProjectEdit] ✅ Sincronización completada`);
       console.log("========================================\n");
     } catch (error) {
-      console.error("[SyncProjectEdit] ❌ Error en sincronización:", error);
+      const errorMsg = formatRetryError(error);
+      console.error(`[SyncProjectEdit] ❌ Error (intento ${attempt + 1}):`, errorMsg);
+
+      if (shouldRetry(attempt)) {
+        const delay = getRetryDelay(attempt)!;
+        console.log(`[SyncProjectEdit] 🔄 Reintentando en ${delay / 1000}s (intento ${attempt + 2}/${MAX_RETRY_ATTEMPTS})`);
+
+        await ctx.runMutation(internal.data.projects.updateProjectSyncMetadata, {
+          projectId: args.projectId,
+          corSyncStatus: "retrying",
+          corSyncError: `Intento ${attempt + 1}/${MAX_RETRY_ATTEMPTS} falló: ${errorMsg}`,
+          corSyncAttempt: attempt + 1,
+        });
+
+        await ctx.scheduler.runAfter(delay, internal.data.projects.syncProjectEditToCORAction, {
+          projectId: args.projectId,
+          changedFields: args.changedFields,
+          attempt: attempt + 1,
+        });
+      } else {
+        console.error(`[SyncProjectEdit] 🚫 Reintentos agotados para proyecto ${args.projectId}`);
+        await ctx.runMutation(internal.data.projects.updateProjectSyncMetadata, {
+          projectId: args.projectId,
+          corSyncStatus: "error",
+          corSyncError: `Falló después de ${MAX_RETRY_ATTEMPTS} intentos. Último error: ${errorMsg}`,
+          corSyncAttempt: attempt,
+        });
+      }
+    }
+  },
+});
+
+/**
+ * Mutation interna para actualizar metadata de sync de proyecto.
+ */
+export const updateProjectSyncMetadata = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    corSyncStatus: v.optional(v.string()),
+    corSyncedAt: v.optional(v.number()),
+    corSyncAttempt: v.optional(v.number()),
+    corSyncError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const updateData: Record<string, unknown> = {};
+    if (args.corSyncStatus !== undefined) updateData.corSyncStatus = args.corSyncStatus;
+    if (args.corSyncedAt !== undefined) updateData.corSyncedAt = args.corSyncedAt;
+    if (args.corSyncAttempt !== undefined) updateData.corSyncAttempt = args.corSyncAttempt;
+    if (args.corSyncError !== undefined) updateData.corSyncError = args.corSyncError;
+    // Limpiar error cuando se marca synced
+    if (args.corSyncStatus === "synced") {
+      updateData.corSyncError = undefined;
+      updateData.corSyncAttempt = 0;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await ctx.db.patch(args.projectId, updateData);
     }
   },
 });
@@ -366,5 +448,46 @@ export const updateProjectPublishStatus = internalMutation({
 
     await ctx.db.patch(args.projectId, updates);
     console.log(`[projects] 🔄 Proyecto ${args.projectId} → ${args.corSyncStatus}`);
+  },
+});
+
+/**
+ * Mutation pública: reintento manual de sincronización de proyecto con COR.
+ * Llamada desde la UI cuando el usuario hace clic en "Reintentar" después de un error.
+ */
+export const retryProjectSync = mutation({
+  args: {
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("No autenticado");
+
+    const project = await ctx.db.get(args.projectId);
+    if (!project) throw new Error("Proyecto no encontrado");
+
+    if (!["error", "retrying"].includes(project.corSyncStatus || "")) {
+      throw new Error("El proyecto no está en estado de error para reintentar.");
+    }
+
+    if (!project.corProjectId) {
+      throw new Error("El proyecto no tiene ID de COR. Debe publicarse primero desde la task.");
+    }
+
+    console.log(`[retryProjectSync] 🔄 Reintentando sync de proyecto ${args.projectId}`);
+    await ctx.db.patch(args.projectId, {
+      corSyncStatus: "syncing",
+      corSyncAttempt: 0,
+      corSyncError: undefined,
+    });
+
+    const allSyncFields = ["name", "brief", "startDate", "endDate", "deliverables", "estimatedTime"];
+    await ctx.scheduler.runAfter(0, internal.data.projects.syncProjectEditToCORAction, {
+      projectId: args.projectId,
+      changedFields: allSyncFields,
+      attempt: 0,
+    });
+
+    return { success: true, message: "Sincronización reintentada" };
   },
 });

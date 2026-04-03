@@ -58,9 +58,10 @@ export default defineSchema({
     // === Campos de sincronización con herramienta externa (COR, Trello, etc.) ===
     corTaskId: v.optional(v.string()),
     corProjectId: v.optional(v.number()),
-    corSyncStatus: v.optional(v.string()),    // "pending" | "syncing" | "synced" | "error"
+    corSyncStatus: v.optional(v.string()),    // "pending" | "syncing" | "synced" | "retrying" | "error"
     corSyncError: v.optional(v.string()),
     corSyncedAt: v.optional(v.number()),
+    corSyncAttempt: v.optional(v.number()),    // Intento actual de sync (0-based)
     // === Campos para identificar el cliente en el sistema externo ===
     corClientId: v.optional(v.number()),
     corClientName: v.optional(v.string()),
@@ -245,9 +246,10 @@ export default defineSchema({
     // === Campos de sincronización con COR ===
     corProjectId: v.optional(v.number()),
     corClientId: v.optional(v.number()),       // Denormalized para fast publish
-    corSyncStatus: v.optional(v.string()),     // "pending" | "syncing" | "synced" | "error"
+    corSyncStatus: v.optional(v.string()),     // "pending" | "syncing" | "synced" | "retrying" | "error"
     corSyncError: v.optional(v.string()),
     corSyncedAt: v.optional(v.number()),
+    corSyncAttempt: v.optional(v.number()),     // Intento actual de sync (0-based)
   })
     .index("by_clientId", ["clientId"])
     .index("by_corProjectId", ["corProjectId"])

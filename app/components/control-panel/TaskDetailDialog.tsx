@@ -15,6 +15,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 
 interface TaskDetailDialogProps {
@@ -45,8 +46,11 @@ export function TaskDetailDialog({
   onPublishResult,
 }: TaskDetailDialogProps) {
   const startPublish = useMutation(api.data.tasks.startPublishTaskToExternal);
+  const retryTask = useMutation(api.data.tasks.retryTaskSync);
+  const retryProject = useMutation(api.data.projects.retryProjectSync);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [activeTab, setActiveTab] = useState<"task" | "project">("task");
 
   // Suscripción reactiva a la task para detectar cambios en corSyncStatus
@@ -183,6 +187,50 @@ export function TaskDetailDialog({
 
           {activeTab === "project" && project && (
             <div className="p-4">
+              {/* Banner de error de sync del proyecto */}
+              {project.corSyncStatus === "retrying" && (
+                <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 mb-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                  <RefreshCw className="h-4 w-4 animate-spin flex-shrink-0" />
+                  <span>
+                    Sincronizando proyecto con {toolName} (reintentando)...
+                  </span>
+                </div>
+              )}
+              {project.corSyncStatus === "error" && (
+                <div className="flex flex-col gap-2 mb-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                    <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                    <span>Error al sincronizar proyecto con {toolName}</span>
+                  </div>
+                  {(project as any).corSyncError && (
+                    <p className="text-xs text-muted-foreground ml-6">
+                      {(project as any).corSyncError}
+                    </p>
+                  )}
+                  <button
+                    onClick={async () => {
+                      try {
+                        setIsRetrying(true);
+                        setPublishError(null);
+                        await retryProject({ projectId: project._id });
+                      } catch (err: any) {
+                        setPublishError(err.message || "Error al reintentar");
+                      } finally {
+                        setIsRetrying(false);
+                      }
+                    }}
+                    disabled={isRetrying}
+                    className="flex items-center gap-2 ml-6 px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50 cursor-pointer w-fit"
+                  >
+                    {isRetrying ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    Reintentar sincronización
+                  </button>
+                </div>
+              )}
               <ProjectBriefContent
                 project={project}
                 editable={syncStatus !== "syncing"}
@@ -217,17 +265,56 @@ export function TaskDetailDialog({
               </div>
             )}
 
-            {syncStatus === "error" && (
-              <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 mb-3">
-                <AlertCircle className="h-4 w-4" />
+            {syncStatus === "retrying" && (
+              <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 mb-3">
+                <RefreshCw className="h-4 w-4 animate-spin" />
                 <span>
-                  Error al publicar
-                  {task.corSyncError && (
-                    <span className="text-muted-foreground ml-1">
-                      — {task.corSyncError}
+                  Sincronizando con {toolName} (reintentando)...
+                  {(liveTask as any)?.corSyncError && (
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      {(liveTask as any).corSyncError}
                     </span>
                   )}
                 </span>
+              </div>
+            )}
+
+            {syncStatus === "error" && (
+              <div className="flex flex-col gap-2 mb-3">
+                <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>Error al sincronizar con {toolName}</span>
+                </div>
+                {((liveTask as any)?.corSyncError || task.corSyncError) && (
+                  <p className="text-xs text-muted-foreground ml-6">
+                    {(liveTask as any)?.corSyncError || task.corSyncError}
+                  </p>
+                )}
+                {/* Botón reintentar sync (cuando ya está publicada pero falló un edit sync) */}
+                {task.corTaskId && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        setIsRetrying(true);
+                        setPublishError(null);
+                        await retryTask({ taskId: task._id });
+                      } catch (err: any) {
+                        setPublishError(err.message || "Error al reintentar");
+                      } finally {
+                        setIsRetrying(false);
+                      }
+                    }}
+                    disabled={isRetrying}
+                    className="flex items-center gap-2 ml-6 px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50 cursor-pointer w-fit"
+                  >
+                    {isRetrying ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    Reintentar sincronización
+                  </button>
+                )}
               </div>
             )}
 
@@ -251,27 +338,30 @@ export function TaskDetailDialog({
 
             {/* Action buttons */}
             <div className="flex items-center gap-3">
-              {syncStatus !== "synced" && (
-                <button
-                  onClick={handlePublish}
-                  disabled={isPublishing || syncStatus === "syncing"}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium cursor-pointer"
-                >
-                  {isPublishing || syncStatus === "syncing" ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Publicando...
-                    </>
-                  ) : (
-                    <>
-                      <ExternalLink className="h-4 w-4" />
-                      {syncStatus === "error"
-                        ? `Reintentar publicación en ${toolName}`
-                        : `Crear Tarea en ${toolName}`}
-                    </>
-                  )}
-                </button>
-              )}
+              {/* Show publish button only when task has never been published, or publish failed (no corTaskId yet) */}
+              {syncStatus !== "synced" &&
+                syncStatus !== "retrying" &&
+                !task.corTaskId && (
+                  <button
+                    onClick={handlePublish}
+                    disabled={isPublishing || syncStatus === "syncing"}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium cursor-pointer"
+                  >
+                    {isPublishing || syncStatus === "syncing" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Publicando...
+                      </>
+                    ) : (
+                      <>
+                        <ExternalLink className="h-4 w-4" />
+                        {syncStatus === "error"
+                          ? `Reintentar publicación en ${toolName}`
+                          : `Crear Tarea en ${toolName}`}
+                      </>
+                    )}
+                  </button>
+                )}
 
               <button
                 onClick={onClose}

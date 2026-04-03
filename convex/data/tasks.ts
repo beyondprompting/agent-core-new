@@ -10,6 +10,7 @@ import { internal, components } from "../_generated/api";
 import { getProjectManagementProvider } from "../integrations/registry";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { hashText } from "../lib/briefFormat";
+import { shouldRetry, getRetryDelay, formatRetryError, MAX_RETRY_ATTEMPTS } from "../lib/corRetry";
 
 // ==================== MUTATIONS ====================
 
@@ -524,6 +525,7 @@ const COR_SYNCABLE_FIELDS = new Set(["title", "description", "deadline", "priori
  * Mutation interna: programa la sincronización de ediciones locales hacia COR.
  * 
  * Verifica que la task esté publicada y luego schedula la action de sync.
+ * Marca estado como "syncing" y resetea el attempt counter.
  * Uso: desde updateTaskFields (UI) y editTaskTool (agente) para unificar el flujo.
  */
 export const scheduleTaskSyncToCOR = internalMutation({
@@ -535,15 +537,26 @@ export const scheduleTaskSyncToCOR = internalMutation({
     const task = await ctx.db.get(args.taskId);
     if (!task) return;
 
-    if (task.corSyncStatus !== "synced" || !task.corTaskId) {
-      console.log(`[scheduleTaskSyncToCOR] Task ${args.taskId} no está publicada en COR, omitiendo sync.`);
-      return;
+    if (task.corSyncStatus !== "synced" && task.corSyncStatus !== "retrying" && task.corSyncStatus !== "error") {
+      if (!task.corTaskId) {
+        console.log(`[scheduleTaskSyncToCOR] Task ${args.taskId} no está publicada en COR, omitiendo sync.`);
+        return;
+      }
     }
 
+    if (!task.corTaskId) return;
+
     console.log(`[scheduleTaskSyncToCOR] 🔄 Programando sync para task ${args.taskId}`);
+    await ctx.db.patch(args.taskId, {
+      corSyncStatus: "syncing",
+      corSyncAttempt: 0,
+      corSyncError: undefined,
+    });
+
     await ctx.scheduler.runAfter(0, internal.data.tasks.syncEditToCORAction, {
       taskId: args.taskId,
       changedFields: args.changedFields,
+      attempt: 0,
     });
   },
 });
@@ -568,12 +581,15 @@ export const syncEditToCORAction = internalAction({
   args: {
     taskId: v.id("tasks"),
     changedFields: v.array(v.string()),
+    attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const attempt = args.attempt ?? 0;
     console.log("\n========================================");
     console.log("[SyncEdit] 🔄 SINCRONIZANDO EDICIÓN LOCAL → COR");
     console.log(`[SyncEdit] Task Convex ID: ${args.taskId}`);
     console.log(`[SyncEdit] Campos cambiados: ${args.changedFields.join(", ")}`);
+    console.log(`[SyncEdit] Intento: ${attempt + 1}/${MAX_RETRY_ATTEMPTS}`);
     console.log("========================================\n");
 
     try {
@@ -591,9 +607,9 @@ export const syncEditToCORAction = internalAction({
       // VERIFICACIONES DE SEGURIDAD — NUNCA SALTEAR
       // ═══════════════════════════════════════════════════
 
-      // Verificar que la task sigue synced
-      if (task.corSyncStatus !== "synced") {
-        console.error(`[SyncEdit] ❌ Task no está synced (estado: ${task.corSyncStatus}). Abortando.`);
+      // Verificar que la task sigue en estado sincronizable
+      if (!["synced", "syncing", "retrying"].includes(task.corSyncStatus || "")) {
+        console.error(`[SyncEdit] ❌ Task no está en estado sincronizable (estado: ${task.corSyncStatus}). Abortando.`);
         return;
       }
 
@@ -681,11 +697,11 @@ export const syncEditToCORAction = internalAction({
 
       if (!result.success) {
         console.error(`[SyncEdit] ❌ Error actualizando COR: ${result.error}`);
-        // No marcamos como error global, solo logeamos — la edición local ya se guardó
-        return;
+        // Tratar como error recuperable → intentar reintentar
+        throw new Error(result.error || "Error desconocido de COR");
       }
 
-      // 5. Actualizar hash y timestamp de sync
+      // 5. Actualizar hash y timestamp de sync — ÉXITO
       if (updatePayload.description) {
         const newHash = hashText(updatePayload.description as string);
         await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
@@ -701,13 +717,53 @@ export const syncEditToCORAction = internalAction({
         });
       }
 
+      // Marcar como synced y limpiar error/attempt
+      await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+        taskId: args.taskId,
+        corSyncStatus: "synced",
+      });
+
       console.log(`[SyncEdit] ✅ Sincronización completada exitosamente`);
       console.log("========================================\n");
 
     } catch (error) {
-      console.error("[SyncEdit] ❌ Error en sincronización:", error);
-      // No marcamos la task como error — la edición local ya está guardada
-      // El cron futuro podrá detectar la discrepancia y corregirla
+      const errorMsg = formatRetryError(error);
+      console.error(`[SyncEdit] ❌ Error en sincronización (intento ${attempt + 1}):`, errorMsg);
+
+      if (shouldRetry(attempt)) {
+        const delay = getRetryDelay(attempt)!;
+        console.log(`[SyncEdit] 🔄 Reintentando en ${delay / 1000}s (intento ${attempt + 2}/${MAX_RETRY_ATTEMPTS})`);
+
+        // Marcar como "retrying" con el error actual
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "retrying",
+          corSyncError: `Intento ${attempt + 1}/${MAX_RETRY_ATTEMPTS} falló: ${errorMsg}`,
+        });
+        await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
+          taskId: args.taskId,
+          corSyncAttempt: attempt + 1,
+        });
+
+        // Programar siguiente intento
+        await ctx.scheduler.runAfter(delay, internal.data.tasks.syncEditToCORAction, {
+          taskId: args.taskId,
+          changedFields: args.changedFields,
+          attempt: attempt + 1,
+        });
+      } else {
+        // Se agotaron los reintentos → marcar como error definitivo
+        console.error(`[SyncEdit] 🚫 Reintentos agotados para task ${args.taskId}`);
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "error",
+          corSyncError: `Falló después de ${MAX_RETRY_ATTEMPTS} intentos. Último error: ${errorMsg}`,
+        });
+        await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
+          taskId: args.taskId,
+          corSyncAttempt: attempt,
+        });
+      }
     }
   },
 });
@@ -721,16 +777,73 @@ export const updateSyncMetadata = internalMutation({
     corDescriptionHash: v.optional(v.string()),
     corSyncedAt: v.optional(v.number()),
     lastLocalEditAt: v.optional(v.number()),
+    corSyncAttempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const updateData: Record<string, unknown> = {};
     if (args.corDescriptionHash !== undefined) updateData.corDescriptionHash = args.corDescriptionHash;
     if (args.corSyncedAt !== undefined) updateData.corSyncedAt = args.corSyncedAt;
     if (args.lastLocalEditAt !== undefined) updateData.lastLocalEditAt = args.lastLocalEditAt;
+    if (args.corSyncAttempt !== undefined) updateData.corSyncAttempt = args.corSyncAttempt;
     
     if (Object.keys(updateData).length > 0) {
       await ctx.db.patch(args.taskId, updateData as any);
     }
+  },
+});
+
+/**
+ * Mutation pública: reintento manual de sincronización con COR.
+ * Llamada desde la UI cuando el usuario hace clic en "Reintentar" después de un error.
+ */
+export const retryTaskSync = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("No autenticado");
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task no encontrada");
+
+    // Solo permitir retry si está en error o retrying
+    if (!["error", "retrying"].includes(task.corSyncStatus || "")) {
+      throw new Error("La task no está en estado de error para reintentar.");
+    }
+
+    // Si la task nunca fue publicada (no tiene corTaskId), reintentar publicación
+    if (!task.corTaskId) {
+      console.log(`[retryTaskSync] 🔄 Reintentando PUBLICACIÓN de task ${args.taskId}`);
+      await ctx.db.patch(args.taskId, {
+        corSyncStatus: "syncing",
+        corSyncAttempt: 0,
+        corSyncError: undefined,
+      });
+      await ctx.scheduler.runAfter(0, internal.data.tasks.publishTaskToExternalAction, {
+        taskId: args.taskId,
+        attempt: 0,
+      });
+      return { success: true, message: "Publicación reintentada" };
+    }
+
+    // Si ya tiene corTaskId, reintentar sincronización de edición
+    console.log(`[retryTaskSync] 🔄 Reintentando SYNC de task ${args.taskId}`);
+    await ctx.db.patch(args.taskId, {
+      corSyncStatus: "syncing",
+      corSyncAttempt: 0,
+      corSyncError: undefined,
+    });
+
+    // Sincronizar todos los campos sincronizables
+    const allSyncFields = ["title", "description", "deadline", "priority", "status"];
+    await ctx.scheduler.runAfter(0, internal.data.tasks.syncEditToCORAction, {
+      taskId: args.taskId,
+      changedFields: allSyncFields,
+      attempt: 0,
+    });
+
+    return { success: true, message: "Sincronización reintentada" };
   },
 });
 
@@ -840,11 +953,14 @@ export const startPublishTaskToExternal = mutation({
 export const publishTaskToExternalAction = internalAction({
   args: {
     taskId: v.id("tasks"),
+    attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const attempt = args.attempt ?? 0;
     console.log("\n========================================");
     console.log("[PublishTask] 🚀 PUBLICANDO TASK EN SISTEMA EXTERNO");
     console.log(`[PublishTask] Task ID: ${args.taskId}`);
+    console.log(`[PublishTask] Intento: ${attempt + 1}/${MAX_RETRY_ATTEMPTS}`);
     console.log("========================================\n");
 
     try {
@@ -1005,13 +1121,39 @@ export const publishTaskToExternalAction = internalAction({
       console.log("========================================\n");
 
     } catch (error) {
-      console.error("[PublishTask] ❌ Error publicando:", error);
+      const errorMsg = formatRetryError(error);
+      console.error(`[PublishTask] ❌ Error publicando (intento ${attempt + 1}):`, errorMsg);
       
-      await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
-        taskId: args.taskId,
-        corSyncStatus: "error",
-        corSyncError: error instanceof Error ? error.message : String(error),
-      });
+      if (shouldRetry(attempt)) {
+        const delay = getRetryDelay(attempt)!;
+        console.log(`[PublishTask] 🔄 Reintentando en ${delay / 1000}s (intento ${attempt + 2}/${MAX_RETRY_ATTEMPTS})`);
+
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "retrying",
+          corSyncError: `Intento ${attempt + 1}/${MAX_RETRY_ATTEMPTS} falló: ${errorMsg}`,
+        });
+        await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
+          taskId: args.taskId,
+          corSyncAttempt: attempt + 1,
+        });
+
+        await ctx.scheduler.runAfter(delay, internal.data.tasks.publishTaskToExternalAction, {
+          taskId: args.taskId,
+          attempt: attempt + 1,
+        });
+      } else {
+        console.error(`[PublishTask] 🚫 Reintentos agotados para task ${args.taskId}`);
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "error",
+          corSyncError: `Falló después de ${MAX_RETRY_ATTEMPTS} intentos. Último error: ${errorMsg}`,
+        });
+        await ctx.runMutation(internal.data.tasks.updateSyncMetadata, {
+          taskId: args.taskId,
+          corSyncAttempt: attempt,
+        });
+      }
     }
   },
 });

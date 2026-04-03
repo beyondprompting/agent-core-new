@@ -33,6 +33,7 @@ import type * as integrations_noopProvider from "../integrations/noopProvider.js
 import type * as integrations_registry from "../integrations/registry.js";
 import type * as integrations_types from "../integrations/types.js";
 import type * as lib_briefFormat from "../lib/briefFormat.js";
+import type * as lib_corRetry from "../lib/corRetry.js";
 import type * as lib_llmFallback from "../lib/llmFallback.js";
 import type * as lib_math from "../lib/math.js";
 import type * as lib_serverConfig from "../lib/serverConfig.js";
@@ -90,6 +91,7 @@ declare const fullApi: ApiFromModules<{
   "integrations/registry": typeof integrations_registry;
   "integrations/types": typeof integrations_types;
   "lib/briefFormat": typeof lib_briefFormat;
+  "lib/corRetry": typeof lib_corRetry;
   "lib/llmFallback": typeof lib_llmFallback;
   "lib/math": typeof lib_math;
   "lib/serverConfig": typeof lib_serverConfig;
