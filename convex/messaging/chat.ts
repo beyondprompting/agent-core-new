@@ -6,7 +6,7 @@ import { briefAgent } from "../agents/agent";
 import { orchestratorAgent } from "../agents/orchestratorAgent";
 import { documentSearchAgent } from "../agents/documentSearchAgent";
 import { components, internal } from "../_generated/api";
-import { saveMessage, listUIMessages, getFile } from "@convex-dev/agent";
+import { saveMessage, listUIMessages, getFile, syncStreams, vStreamArgs } from "@convex-dev/agent";
 import { paginationOptsValidator } from "convex/server";
 import { enabledAgents } from "../lib/serverConfig";
 import { 
@@ -334,6 +334,103 @@ export const generateResponseAsync = internalAction({
     }
 
     // =====================================================
+    // BIFURCACIÓN: Brief Agent → streamText | Otros → generateText
+    // =====================================================
+    if (selectedAgentKey === "brief") {
+      // =======================================================
+      // PATH STREAMING: briefAgent.streamText con saveStreamDeltas
+      // Los deltas se guardan progresivamente en la DB,
+      // el frontend los consume via syncStreams + useUIMessages
+      //
+      // NOTA: streamText con tools multi-step puede fallar por un
+      // race condition en el AI SDK (run-tools-transformation.ts).
+      // Si falla, se hace fallback al path SYNC (generateText).
+      // =======================================================
+      console.log("[GenerateResponse] 🌊 Usando path STREAMING para briefAgent");
+
+      let streamingSucceeded = false;
+
+      // Intentar streaming con Gemini
+      if (geminiEnabled) {
+        const geminiStart = Date.now();
+        console.log("[GenerateResponse] 📍 STREAM 3A: Intentando streamText con Gemini...");
+
+        try {
+          const streamResult = await briefAgent.streamText(
+            ctx,
+            { threadId },
+            {
+              promptMessageId,
+              model: geminiConfig.model,
+              providerOptions: geminiConfig.providerOptions,
+              maxRetries: 0,
+            } as any,
+            { saveStreamDeltas: true },
+          );
+          // Consumir el stream completo (bloquea hasta que termina)
+          await streamResult.consumeStream();
+
+          streamingSucceeded = true;
+          logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
+
+          const totalTime = Date.now() - startTime;
+          console.log("\n========================================");
+          console.log(`[GenerateResponse] 🏁 RESUMEN (STREAMING):`);
+          console.log(`[GenerateResponse]    - Agente: briefAgent`);
+          console.log(`[GenerateResponse]    - Intent: ${orchestratorIntent || "short-circuit"}`);
+          console.log(`[GenerateResponse]    - Proveedor LLM: gemini`);
+          console.log(`[GenerateResponse]    - TOTAL: ${totalTime}ms (${(totalTime / 1000).toFixed(1)}s)`);
+          console.log(`[GenerateResponse] 📝 Respuesta: ${(await streamResult.text)?.substring(0, 100)}...`);
+          console.log("========================================\n");
+
+          return {
+            text: await streamResult.text,
+            promptMessageId,
+            provider: "gemini" as const,
+            agent: "briefAgent",
+            intent: orchestratorIntent,
+          };
+        } catch (error) {
+          logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
+          const errMsg = extractErrorMessage(error);
+          console.warn(`[GenerateResponse] ⚠️ Gemini streamText falló: ${errMsg}`);
+          console.warn("[GenerateResponse] 🔄 Cayendo al path SYNC (generateText) como fallback...");
+
+          // No logear como error de LLM si es un error de streaming (no del proveedor)
+          const isStreamError = errMsg.includes("stream") || errMsg.includes("enqueue");
+          if (!isStreamError) {
+            await ctx.runMutation(internal.data.llmConfig.logLLMError, {
+              provider: geminiConfig.provider,
+              model: geminiConfig.modelId,
+              agentName: "briefAgent",
+              errorType: classifyError(error),
+              errorMessage: errMsg,
+              threadId,
+              resolved: false,
+              fallbackUsed: undefined,
+            });
+            // Si el error NO es de streaming, marcar Gemini como caído
+            geminiEnabled = false;
+          }
+        }
+      }
+
+      // Si streaming falló, caer al path SYNC (generateText) que sí
+      // maneja tools multi-step sin problemas
+      if (!streamingSucceeded) {
+        console.log("[GenerateResponse] 📝 FALLBACK: Usando generateText SYNC para briefAgent");
+      }
+      // Si streaming tuvo éxito, ya retornamos arriba.
+      // Si no, caemos al path SYNC que está abajo (no entramos al else).
+    }
+
+    // =======================================================
+    // PATH SYNC: briefAgent (fallback) + otros agentes
+    // Usa start() → generateText() → save()
+    // =======================================================
+    console.log(`[GenerateResponse] 📝 Usando path SYNC para ${selectedAgentName}`);
+
+    // =====================================================
     // PASO 2: Preparar el contexto con el agente seleccionado
     // =====================================================
     const prepareStart = Date.now();
@@ -504,19 +601,21 @@ export const generateResponseAsync = internalAction({
   },
 });
 
-// Listar mensajes de un thread
+// Listar mensajes de un thread (con soporte para streaming deltas)
 export const listThreadMessages = query({
   args: {
     threadId: v.string(),
     paginationOpts: paginationOptsValidator,
+    streamArgs: vStreamArgs,
   },
-  handler: async (ctx, { threadId, paginationOpts }) => {
-    const messages = await listUIMessages(ctx, components.agent, {
-      threadId,
-      paginationOpts,
-    });
-    
-    return messages;
+  handler: async (ctx, args) => {
+    // Obtener mensajes regulares (no-streaming)
+    const paginated = await listUIMessages(ctx, components.agent, args);
+
+    // Sincronizar deltas de streaming activos para este thread
+    const streams = await syncStreams(ctx, components.agent, args);
+
+    return { ...paginated, streams };
   },
 });
 

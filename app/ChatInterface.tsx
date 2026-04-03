@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useAction } from "convex/react";
+import { useUIMessages } from "@convex-dev/agent/react";
 import { api } from "@/convex/_generated/api";
 import mammoth from "mammoth";
 import TurndownService from "turndown";
@@ -139,20 +140,16 @@ export default function ChatInterface({
     userId: undefined,
   });
 
-  const messages = useQuery(
+  const { results: uiMessages, status: streamStatus } = useUIMessages(
     api.messaging.chat.listThreadMessages,
-    currentThreadId
-      ? {
-          threadId: currentThreadId as any,
-          paginationOpts: { cursor: null, numItems: 50 },
-        }
-      : "skip",
+    currentThreadId ? { threadId: currentThreadId as any } : "skip",
+    { initialNumItems: 50, stream: true },
   );
 
   // Auto-scroll al final cuando hay mensajes nuevos
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [uiMessages]);
 
   // Sincronizar con threadId inicial
   useEffect(() => {
@@ -464,9 +461,9 @@ export default function ChatInterface({
   };
 
   // ===========================================================================
-  // Procesar mensajes
+  // Procesar mensajes (adaptado para useUIMessages + streaming)
   // ===========================================================================
-  const messageList: Message[] = (messages?.page || [])
+  const messageList: Message[] = (uiMessages || [])
     .map((msg: any) => ({
       key: msg.key,
       role: msg.role,
@@ -489,7 +486,7 @@ export default function ChatInterface({
     });
 
   // Detectar si el último mensaje es un error (contiene ⚠️)
-  const lastAssistantMessage = (messages?.page || [])
+  const lastAssistantMessage = (uiMessages || [])
     .filter((msg: any) => msg.role === "assistant")
     .pop();
   const isErrorMessage =
@@ -497,18 +494,24 @@ export default function ChatInterface({
     (Array.isArray(lastAssistantMessage?.parts) &&
       lastAssistantMessage.parts.some((p: any) => p.text?.includes("⚠️")));
 
+  // isAgentThinking: mostrar indicador solo cuando el agente está procesando
+  // pero NO hay ningún mensaje streaming ya visible (evita doble loader)
+  const hasAnyStreamingMessage = (uiMessages || []).some(
+    (msg: any) => msg.role === "assistant" && msg.status === "streaming",
+  );
+
   const isAgentThinking =
     !isErrorMessage &&
-    ((messages?.page || []).some(
+    !hasAnyStreamingMessage &&
+    ((uiMessages || []).some(
       (msg: any) =>
         msg.role === "assistant" &&
-        (msg.status === "pending" || msg.status === "streaming") &&
+        msg.status === "pending" &&
         !msg.text &&
         (!msg.parts || msg.parts.length === 0),
     ) ||
       (messageList.length > 0 &&
         messageList[messageList.length - 1]?.role === "user" &&
-        // No mostrar loader si el último mensaje del asistente es un error
         !isErrorMessage));
 
   // ===========================================================================

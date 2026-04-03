@@ -29,9 +29,9 @@ export const ACTIVE_TENANT = CLIENT_ID;
  * en config/tenant.config.ts (configuración del frontend).
  */
 export const enabledAgents = {
-  orchestrator: true,
+  orchestrator: false,
   brief: true,
-  documentSearch: true,
+  documentSearch: false,
 };
 
 // =====================================================
