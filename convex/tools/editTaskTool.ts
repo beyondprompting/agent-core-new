@@ -1,10 +1,9 @@
 // convex/tools/editTaskTool.ts
 // Tool para editar una task existente en Convex y sincronizar con COR si está publicada.
-// Mantiene la lógica de edición quirúrgica de description y sincronización bidireccional.
+// Usa scheduleTaskSyncToCOR para unificar el flujo de sync con la UI.
 import { createTool } from "@convex-dev/agent";
 import { z } from "zod";
 import { internal } from "../_generated/api";
-import { getProjectManagementProvider } from "../integrations/registry";
 import { PRIORITY_LABELS } from "../lib/briefFormat";
 
 export const editTaskTool = createTool({
@@ -46,7 +45,6 @@ export const editTaskTool = createTool({
       const threadId = ctx.threadId;
       let taskIdToEdit = args.taskId;
       let task: any = null;
-      let corTaskData: any = null;
       
       // Obtener el userId del thread actual para verificar permisos
       let currentUserId: string | null = null;
@@ -62,8 +60,6 @@ export const editTaskTool = createTool({
       // PRIORIDAD 1: Si se proporciona corTaskId, buscar por COR ID
       if (args.corTaskId) {
         console.log(`[EditTask] 🔍 Buscando task por COR ID: ${args.corTaskId}`);
-        
-        // Buscar la task local por el COR ID
         task = await ctx.runQuery(internal.data.tasks.getTaskByCORIdInternal, { 
           corTaskId: args.corTaskId 
         });
@@ -71,20 +67,7 @@ export const editTaskTool = createTool({
         if (task) {
           taskIdToEdit = task._id;
           console.log(`[EditTask] 📋 Task local encontrada: ${taskIdToEdit}`);
-        }
-        
-        // Obtener datos actuales de COR
-        try {
-          const provider = getProjectManagementProvider();
-          corTaskData = await provider.getTask(parseInt(args.corTaskId));
-          if (corTaskData) {
-            console.log(`[EditTask] ✅ Task encontrada en COR: ${corTaskData.title}`);
-          }
-        } catch (err) {
-          console.log(`[EditTask] ⚠️ No se pudo leer task de COR: ${err}`);
-        }
-        
-        if (!task && !corTaskData) {
+        } else {
           return `No se encontró ninguna task con el COR ID: ${args.corTaskId}. Verifica el ID e intenta de nuevo.`;
         }
       }
@@ -96,21 +79,6 @@ export const editTaskTool = createTool({
         if (!task) {
           return `No se encontró ninguna task con el ID local: ${taskIdToEdit}. Verifica que el ID sea correcto.`;
         }
-        
-        // Verificar permisos
-        if (currentUserId && task.createdBy && task.createdBy !== currentUserId) {
-          return "No tienes permiso para editar esta task. Solo puedes modificar requerimientos creados por ti.";
-        }
-        
-        // Si la task tiene COR ID, obtener datos del sistema externo
-        if (task.corTaskId) {
-          try {
-            const provider = getProjectManagementProvider();
-            corTaskData = await provider.getTask(parseInt(task.corTaskId));
-          } catch (err) {
-            console.log(`[EditTask] ⚠️ No se pudo leer task de COR: ${err}`);
-          }
-        }
       } 
       // PRIORIDAD 3: Buscar por threadId
       else if (threadId) {
@@ -119,21 +87,32 @@ export const editTaskTool = createTool({
         if (task) {
           taskIdToEdit = task._id;
           console.log(`[EditTask] Task encontrada: ${taskIdToEdit}`);
-          
-          if (task.corTaskId) {
-            try {
-              const provider = getProjectManagementProvider();
-              corTaskData = await provider.getTask(parseInt(task.corTaskId));
-            } catch (err) {
-              console.log(`[EditTask] ⚠️ No se pudo leer task de COR: ${err}`);
-            }
-          }
         }
       }
       
       // Si no encontramos ninguna task
-      if (!taskIdToEdit && !args.corTaskId) {
+      if (!task || !taskIdToEdit) {
         return "Error: No se pudo identificar la task a editar. Por favor proporciona el COR ID de la task (ej: 11301144), el ID local, o asegurate de estar en la conversacion correcta.";
+      }
+      
+      // ====================================================
+      // VALIDACIÓN DE PERMISOS (clientUserAssignments)
+      // ====================================================
+      if (task.corClientId && currentUserId) {
+        const client = await ctx.runQuery(internal.data.corClients.getClientByCorId, {
+          corClientId: task.corClientId,
+        });
+
+        if (client) {
+          const isAuthorized = await ctx.runQuery(internal.data.corClients.isUserAuthorizedForClient, {
+            clientId: client._id,
+            userId: currentUserId as any,
+          });
+
+          if (!isAuthorized) {
+            return `No tienes permisos para editar tasks del cliente "${task.corClientName || "desconocido"}".`;
+          }
+        }
       }
       
       // ====================================================
@@ -147,22 +126,18 @@ export const editTaskTool = createTool({
       
       if (Object.keys(updates).length === 0) {
         // Si no hay campos para actualizar, mostrar la task actual
-        const taskTitle = task?.title || corTaskData?.title || "Sin título";
-        const taskDesc = task?.description || corTaskData?.description || "Sin descripción";
-        const taskDeadline = task?.deadline || corTaskData?.deadline || "Sin fecha límite";
-        const taskPriority = PRIORITY_LABELS[task?.priority ?? corTaskData?.priority ?? 1] || "Media";
-        const taskStatus = task?.status || corTaskData?.status || "Sin estado";
-        const corId = task?.corTaskId || args.corTaskId || "No sincronizada";
+        const taskPriority = PRIORITY_LABELS[task.priority ?? 1] || "Media";
+        const corId = task.corTaskId || "No sincronizada";
         
         return `📋 **Task actual${corId !== "No sincronizada" ? ` (COR ID: ${corId})` : ""}**
 
-**Título:** ${taskTitle}
-**Estado:** ${taskStatus}
+**Título:** ${task.title || "Sin título"}
+**Estado:** ${task.status || "Sin estado"}
 **Prioridad:** ${taskPriority}
-**Deadline:** ${taskDeadline}
+**Deadline:** ${task.deadline || "Sin fecha límite"}
 
 **Descripción:**
-${taskDesc}
+${task.description || "Sin descripción"}
 
 ¿Qué cambios quieres hacer?`;
       }
@@ -170,72 +145,40 @@ ${taskDesc}
       console.log(`[EditTask] Campos a actualizar:`, JSON.stringify(updates, null, 2));
       
       // ====================================================
-      // ACTUALIZAR EN CONVEX (si existe registro local)
+      // ACTUALIZAR EN CONVEX
       // ====================================================
-      if (taskIdToEdit) {
-        await ctx.runMutation(internal.data.tasks.updateTaskInternal, {
-          taskId: taskIdToEdit,
-          updates,
-        });
-        console.log(`[EditTask] ✅ Task ${taskIdToEdit} actualizada en Convex`);
-      }
+      await ctx.runMutation(internal.data.tasks.updateTaskInternal, {
+        taskId: taskIdToEdit,
+        updates,
+      });
+      console.log(`[EditTask] ✅ Task ${taskIdToEdit} actualizada en Convex`);
       
       // ====================================================
-      // SINCRONIZAR CON COR (si la task está publicada)
+      // PROGRAMAR SYNC A COR (flujo unificado)
       // ====================================================
-      let corUpdateResult: any = null;
-      const corIdToUpdate = args.corTaskId || task?.corTaskId;
-      
-      if (corIdToUpdate) {
-        console.log(`[EditTask] 🔄 Task publicada en COR (ID: ${corIdToUpdate}) — sincronizando...`);
-        
-        try {
-          const provider = getProjectManagementProvider();
-          corUpdateResult = await provider.updateTask(parseInt(corIdToUpdate), {
-            title: args.title,
-            description: args.description,
-            deadline: args.deadline,
-            priority: args.priority,
-          });
-          
-          if (corUpdateResult.success) {
-            console.log("[EditTask] ✅ Task actualizada en COR");
-          } else {
-            console.error("[EditTask] ⚠️ Error al actualizar en COR:", corUpdateResult.error);
-          }
-        } catch (corError) {
-          console.error("[EditTask] ⚠️ Error al actualizar en COR:", corError);
-        }
-      } else {
-        console.log("[EditTask] ℹ️ Task solo en Convex (no publicada en COR)");
-      }
+      const changedFields = Object.keys(updates);
+      await ctx.runMutation(internal.data.tasks.scheduleTaskSyncToCOR, {
+        taskId: taskIdToEdit as any,
+        changedFields,
+      });
       
       console.log("========================================\n");
       
       // ====================================================
       // CONSTRUIR RESPUESTA CON TASK COMPLETA ACTUALIZADA
       // ====================================================
-      const updatedFields = Object.keys(updates).join(", ");
+      const updatedFields = changedFields.join(", ");
+      const updatedTask = await ctx.runQuery(internal.data.tasks.getTaskByIdInternal, { taskId: taskIdToEdit });
       
-      // Leer la task actualizada para mostrarla completa
-      let updatedTask = task;
-      if (taskIdToEdit) {
-        updatedTask = await ctx.runQuery(internal.data.tasks.getTaskByIdInternal, { taskId: taskIdToEdit });
-      }
+      const finalTitle = updatedTask?.title || task.title || "Sin título";
+      const finalDesc = updatedTask?.description || task.description || "Sin descripción";
+      const finalDeadline = updatedTask?.deadline || task.deadline || "Sin fecha límite";
+      const finalPriority = PRIORITY_LABELS[updatedTask?.priority ?? task.priority ?? 1] || "Media";
       
-      const finalTitle = updatedTask?.title || args.title || task?.title || "Sin título";
-      const finalDesc = updatedTask?.description || args.description || task?.description || "Sin descripción";
-      const finalDeadline = updatedTask?.deadline || args.deadline || task?.deadline || "Sin fecha límite";
-      const finalPriority = PRIORITY_LABELS[updatedTask?.priority ?? args.priority ?? task?.priority ?? 1] || "Media";
-      
-      let corStatus = "";
-      if (corIdToUpdate) {
-        if (corUpdateResult?.success) {
-          corStatus = `\n✅ Cambios sincronizados en COR (ID: ${corIdToUpdate})`;
-        } else if (corUpdateResult) {
-          corStatus = `\n⚠️ No se pudieron sincronizar los cambios en COR: ${corUpdateResult.error}`;
-        }
-      }
+      const corId = task.corTaskId;
+      const corStatus = corId
+        ? `\n🔄 Sincronización con COR (ID: ${corId}) programada automáticamente.`
+        : "";
       
       return `✅ Task actualizada exitosamente!
 

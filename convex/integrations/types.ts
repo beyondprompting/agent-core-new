@@ -86,6 +86,15 @@ export interface UpdateTaskInput {
   status?: string;
 }
 
+export interface UpdateProjectInput {
+  name?: string;
+  brief?: string;
+  startDate?: string;
+  endDate?: string;
+  deliverables?: string;
+  estimatedTime?: number;
+}
+
 export interface TaskMessageAttachment {
   name: string;
   url: string;
@@ -158,6 +167,16 @@ export interface ProjectManagementProvider {
   updateTask(
     taskId: number,
     data: UpdateTaskInput
+  ): Promise<{ success: boolean; error?: string }>;
+
+  /**
+   * Actualizar un proyecto existente en el sistema externo.
+   * Hace merge seguro: primero obtiene el estado actual y solo
+   * sobrescribe los campos proporcionados.
+   */
+  updateProject(
+    projectId: number,
+    data: UpdateProjectInput
   ): Promise<{ success: boolean; error?: string }>;
 
   /**

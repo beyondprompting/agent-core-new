@@ -176,6 +176,36 @@ export const updateTaskFields = mutation({
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Task no encontrada");
 
+    // ─── Validación de permisos (clientUserAssignments) ───
+    if (task.corClientId) {
+      const client = await ctx.db
+        .query("corClients")
+        .filter((q) => q.eq(q.field("corClientId"), task.corClientId))
+        .first();
+
+      if (client) {
+        const user = await ctx.db
+          .query("users")
+          .filter((q) => q.eq(q.field("_id"), userId))
+          .first();
+
+        if (user) {
+          const assignment = await ctx.db
+            .query("clientUserAssignments")
+            .withIndex("by_client_and_user", (q) =>
+              q.eq("clientId", client._id).eq("userId", user._id)
+            )
+            .first();
+
+          if (!assignment) {
+            throw new Error(
+              `No tienes permisos para editar tasks del cliente "${task.corClientName || client.name}".`
+            );
+          }
+        }
+      }
+    }
+
     // Filtrar campos undefined
     const updateData: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(args.updates)) {
@@ -192,20 +222,14 @@ export const updateTaskFields = mutation({
     console.log(`[Tasks.updateTaskFields] Actualizando task ${args.taskId}:`, Object.keys(updateData));
     await ctx.db.patch(args.taskId, updateData as any);
 
-    // Si la task está publicada en COR, disparar sincronización automática
-    if (task.corSyncStatus === "synced" && task.corTaskId) {
-      console.log(`[Tasks.updateTaskFields] 🔄 Task synced en COR — disparando sincronización`);
-      
-      // Determinar qué campos cambiaron para pasarlos a la action
-      const changedFields = Object.keys(args.updates).filter(
-        (k) => (args.updates as any)[k] !== undefined
-      );
-
-      await ctx.scheduler.runAfter(0, internal.data.tasks.syncEditToCORAction, {
-        taskId: args.taskId,
-        changedFields,
-      });
-    }
+    // Programar sync a COR si corresponde (via internalMutation)
+    const changedFields = Object.keys(args.updates).filter(
+      (k) => (args.updates as any)[k] !== undefined
+    );
+    await ctx.scheduler.runAfter(0, internal.data.tasks.scheduleTaskSyncToCOR, {
+      taskId: args.taskId,
+      changedFields,
+    });
 
     return args.taskId;
   },
@@ -495,6 +519,34 @@ export const listMyTasks = query({
  *   status        →  status
  */
 const COR_SYNCABLE_FIELDS = new Set(["title", "description", "deadline", "priority", "status"]);
+
+/**
+ * Mutation interna: programa la sincronización de ediciones locales hacia COR.
+ * 
+ * Verifica que la task esté publicada y luego schedula la action de sync.
+ * Uso: desde updateTaskFields (UI) y editTaskTool (agente) para unificar el flujo.
+ */
+export const scheduleTaskSyncToCOR = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    changedFields: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (!task) return;
+
+    if (task.corSyncStatus !== "synced" || !task.corTaskId) {
+      console.log(`[scheduleTaskSyncToCOR] Task ${args.taskId} no está publicada en COR, omitiendo sync.`);
+      return;
+    }
+
+    console.log(`[scheduleTaskSyncToCOR] 🔄 Programando sync para task ${args.taskId}`);
+    await ctx.scheduler.runAfter(0, internal.data.tasks.syncEditToCORAction, {
+      taskId: args.taskId,
+      changedFields: args.changedFields,
+    });
+  },
+});
 
 /**
  * Action interna: sincroniza una edición local de Convex hacia COR.

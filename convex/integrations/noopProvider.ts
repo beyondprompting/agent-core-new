@@ -18,6 +18,7 @@ import type {
   CreateProjectInput,
   CreateTaskInput,
   UpdateTaskInput,
+  UpdateProjectInput,
   PostTaskMessageInput,
 } from "./types";
 
@@ -63,6 +64,16 @@ export function createNoopProvider(): ProjectManagementProvider {
     async updateTask(
       _taskId: number,
       _data: UpdateTaskInput
+    ): Promise<{ success: boolean; error?: string }> {
+      return {
+        success: false,
+        error: "No hay integración de gestión de proyectos configurada.",
+      };
+    },
+
+    async updateProject(
+      _projectId: number,
+      _data: UpdateProjectInput
     ): Promise<{ success: boolean; error?: string }> {
       return {
         success: false,

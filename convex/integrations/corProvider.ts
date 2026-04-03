@@ -17,6 +17,7 @@ import type {
   CreateProjectInput,
   CreateTaskInput,
   UpdateTaskInput,
+  UpdateProjectInput,
   PostTaskMessageInput,
 } from "./types";
 
@@ -478,6 +479,71 @@ export function createCORProvider(): ProjectManagementProvider {
         }
 
         console.log(`[COR Provider] ✅ Task ${taskId} actualizada correctamente`);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+
+    // ==================== UPDATE PROJECT ====================
+
+    async updateProject(
+      projectId: number,
+      data: UpdateProjectInput
+    ): Promise<{ success: boolean; error?: string }> {
+      console.log(`[COR Provider] 🔄 Actualizando proyecto: ${projectId}`);
+
+      try {
+        // 1. GET actual para preservar campos no modificados
+        const getResponse = await corApiFetch(`/projects/${projectId}`);
+
+        if (!getResponse.ok) {
+          return {
+            success: false,
+            error: `No se pudo obtener el proyecto actual: ${getResponse.status}`,
+          };
+        }
+
+        const currentProject = await getResponse.json();
+
+        // 2. Merge seguro: solo sobrescribir campos explícitamente proporcionados
+        const updateBody: Record<string, unknown> = {
+          name: data.name ?? currentProject.name,
+          brief: data.brief ?? currentProject.brief,
+          deliverables: data.deliverables ?? currentProject.deliverables,
+          estimated_time: data.estimatedTime ?? currentProject.estimated_time,
+          start: currentProject.start,
+          end: currentProject.end,
+        };
+
+        if (data.startDate) {
+          const d = parseDateFlexible(data.startDate);
+          if (d) updateBody.start = d.toISOString().split("T")[0];
+        }
+
+        if (data.endDate) {
+          const d = parseDateFlexible(data.endDate);
+          if (d) updateBody.end = d.toISOString().split("T")[0];
+        }
+
+        // 3. PUT con objeto completo
+        const putResponse = await corApiFetch(`/projects/${projectId}`, {
+          method: "PUT",
+          body: JSON.stringify(updateBody),
+        });
+
+        if (!putResponse.ok) {
+          const errorText = await putResponse.text();
+          return {
+            success: false,
+            error: `COR API error: ${putResponse.status} - ${errorText}`,
+          };
+        }
+
+        console.log(`[COR Provider] ✅ Proyecto ${projectId} actualizado correctamente`);
         return { success: true };
       } catch (error) {
         return {

@@ -12,8 +12,11 @@ import {
   mutation,
   internalMutation,
   internalQuery,
+  internalAction,
 } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { getProjectManagementProvider } from "../integrations/registry";
 
 // ==================== QUERIES ====================
 
@@ -114,7 +117,8 @@ export const createProjectInternal = internalMutation({
 
 /**
  * Actualiza campos de un proyecto existente.
- * Usado desde el Panel de Control para edición pre-publicación.
+ * Usado desde el Panel de Control para edición pre/post-publicación.
+ * Si el proyecto está publicado en COR, dispara sincronización automática.
  */
 export const updateProjectFields = mutation({
   args: {
@@ -136,6 +140,36 @@ export const updateProjectFields = mutation({
     const project = await ctx.db.get(args.projectId);
     if (!project) throw new Error("Proyecto no encontrado");
 
+    // ─── Validación de permisos (clientUserAssignments) ───
+    if (project.corClientId) {
+      const client = await ctx.db
+        .query("corClients")
+        .filter((q) => q.eq(q.field("corClientId"), project.corClientId))
+        .first();
+
+      if (client) {
+        const user = await ctx.db
+          .query("users")
+          .filter((q) => q.eq(q.field("_id"), userId))
+          .first();
+
+        if (user) {
+          const assignment = await ctx.db
+            .query("clientUserAssignments")
+            .withIndex("by_client_and_user", (q) =>
+              q.eq("clientId", client._id).eq("userId", user._id)
+            )
+            .first();
+
+          if (!assignment) {
+            throw new Error(
+              `No tienes permisos para editar proyectos del cliente "${client.name}".`
+            );
+          }
+        }
+      }
+    }
+
     // Construir objeto de actualización solo con los campos proporcionados
     const updates: Record<string, unknown> = {};
     if (args.name !== undefined) updates.name = args.name;
@@ -152,6 +186,154 @@ export const updateProjectFields = mutation({
 
     await ctx.db.patch(args.projectId, updates);
     console.log(`[projects] ✅ Proyecto "${project.name}" actualizado (${Object.keys(updates).join(", ")})`);
+
+    // Programar sync a COR si corresponde
+    const changedFields = Object.keys(updates);
+    await ctx.scheduler.runAfter(0, internal.data.projects.scheduleProjectSyncToCOR, {
+      projectId: args.projectId,
+      changedFields,
+    });
+  },
+});
+
+/**
+ * Mutation interna para actualizar un proyecto (llamada desde editProjectTool del agente).
+ */
+export const updateProjectInternal = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    updates: v.object({
+      name: v.optional(v.string()),
+      brief: v.optional(v.string()),
+      startDate: v.optional(v.string()),
+      endDate: v.optional(v.string()),
+      deliverables: v.optional(v.string()),
+      estimatedTime: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    console.log(`[projects.updateProjectInternal] Actualizando proyecto ${args.projectId}...`);
+
+    const updateData: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(args.updates)) {
+      if (value !== undefined) {
+        updateData[key] = value;
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) return args.projectId;
+
+    await ctx.db.patch(args.projectId, updateData);
+    console.log(`[projects.updateProjectInternal] ✅ Proyecto actualizado`);
+    return args.projectId;
+  },
+});
+
+/**
+ * Mutation interna: programa la sincronización de ediciones locales hacia COR.
+ * Verifica que el proyecto esté publicado y luego schedula la action de sync.
+ */
+export const scheduleProjectSyncToCOR = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    changedFields: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project) return;
+
+    if (project.corSyncStatus !== "synced" || !project.corProjectId) {
+      console.log(`[scheduleProjectSyncToCOR] Proyecto ${args.projectId} no está publicado en COR, omitiendo sync.`);
+      return;
+    }
+
+    console.log(`[scheduleProjectSyncToCOR] 🔄 Programando sync para proyecto ${args.projectId}`);
+    await ctx.scheduler.runAfter(0, internal.data.projects.syncProjectEditToCORAction, {
+      projectId: args.projectId,
+      changedFields: args.changedFields,
+    });
+  },
+});
+
+/**
+ * Campos de proyecto que tienen equivalente directo en COR.
+ */
+const COR_PROJECT_SYNCABLE_FIELDS = new Set([
+  "name", "brief", "startDate", "endDate", "deliverables", "estimatedTime",
+]);
+
+/**
+ * Action interna: sincroniza una edición local de proyecto hacia COR.
+ */
+export const syncProjectEditToCORAction = internalAction({
+  args: {
+    projectId: v.id("projects"),
+    changedFields: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    console.log("\n========================================");
+    console.log("[SyncProjectEdit] 🔄 SINCRONIZANDO PROYECTO → COR");
+    console.log(`[SyncProjectEdit] Proyecto Convex ID: ${args.projectId}`);
+    console.log(`[SyncProjectEdit] Campos cambiados: ${args.changedFields.join(", ")}`);
+    console.log("========================================\n");
+
+    try {
+      const project = await ctx.runQuery(internal.data.projects.getProjectInternal, {
+        projectId: args.projectId,
+      });
+
+      if (!project) {
+        console.error("[SyncProjectEdit] ❌ Proyecto no encontrado en Convex");
+        return;
+      }
+
+      if (project.corSyncStatus !== "synced") {
+        console.error(`[SyncProjectEdit] ❌ Proyecto no está synced (estado: ${project.corSyncStatus}). Abortando.`);
+        return;
+      }
+
+      const corProjectId = project.corProjectId;
+      if (!corProjectId) {
+        console.error("[SyncProjectEdit] ❌ Proyecto no tiene corProjectId. Abortando.");
+        return;
+      }
+
+      // Solo sincronizar campos que aplican
+      const syncableChanges = args.changedFields.filter((f) => COR_PROJECT_SYNCABLE_FIELDS.has(f));
+      if (syncableChanges.length === 0) {
+        console.log("[SyncProjectEdit] ℹ️ No hay campos sincronizables con COR");
+        return;
+      }
+
+      console.log(`[SyncProjectEdit] 📝 Campos a sincronizar: ${syncableChanges.join(", ")}`);
+
+      const updatePayload: Record<string, unknown> = {};
+      if (syncableChanges.includes("name")) updatePayload.name = project.name;
+      if (syncableChanges.includes("brief")) updatePayload.brief = project.brief;
+      if (syncableChanges.includes("startDate")) updatePayload.startDate = project.startDate;
+      if (syncableChanges.includes("endDate")) updatePayload.endDate = project.endDate;
+      if (syncableChanges.includes("deliverables")) updatePayload.deliverables = project.deliverables;
+      if (syncableChanges.includes("estimatedTime")) updatePayload.estimatedTime = project.estimatedTime;
+
+      const provider = getProjectManagementProvider();
+      const result = await provider.updateProject(corProjectId, updatePayload as any);
+
+      if (!result.success) {
+        console.error(`[SyncProjectEdit] ❌ Error actualizando COR: ${result.error}`);
+        return;
+      }
+
+      // Actualizar timestamp de sync
+      await ctx.runMutation(internal.data.projects.updateProjectPublishStatus, {
+        projectId: args.projectId,
+        corSyncStatus: "synced",
+      });
+
+      console.log(`[SyncProjectEdit] ✅ Sincronización completada`);
+      console.log("========================================\n");
+    } catch (error) {
+      console.error("[SyncProjectEdit] ❌ Error en sincronización:", error);
+    }
   },
 });
 

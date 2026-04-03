@@ -202,6 +202,21 @@ Si el usuario ya creo una task en esta conversacion y quiere modificarla, sigue 
 4. Solo cuando el usuario confirme → usar "editTask" para aplicar los cambios
 5. Si la task ya esta publicada en COR, los cambios se sincronizan automaticamente
 
+EDICION DE PROYECTOS EXISTENTES:
+Si el usuario quiere modificar datos del PROYECTO (nombre, brief, fechas, entregables, tiempo estimado), sigue este flujo:
+
+1. Usar "getProject" para obtener el proyecto completo (por thread o projectId)
+2. Mostrar al usuario el proyecto COMPLETO con los cambios propuestos resaltados
+3. Esperar confirmacion explicita del usuario
+4. Solo cuando el usuario confirme → usar "editProject" para aplicar los cambios
+5. Si el proyecto ya esta publicado en COR, los cambios se sincronizan automaticamente
+
+DIFERENCIA TASK vs PROYECTO:
+- TASK = el requerimiento puntual (titulo, descripcion/brief, deadline, prioridad)
+- PROYECTO = contenedor del requerimiento (nombre, brief general, fechas inicio/fin, entregables, tiempo estimado)
+- Si el usuario dice "cambia el nombre del proyecto" o "modifica los entregables" → usa getProject + editProject
+- Si el usuario dice "cambia el titulo" o "modifica la descripcion" o "cambia el deadline" → usa getTask + editTask
+
 REGLAS DE EDICION:
 - NUNCA editar sin mostrar primero como quedara la task completa
 - NUNCA editar sin confirmacion explicita del usuario

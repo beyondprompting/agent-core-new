@@ -5,4 +5,6 @@ export { reviewBriefTool, generateReviewerResponse } from "./reviewBriefTool";
 export { createTaskTool } from "./createTaskTool";
 export { getTaskTool } from "./getTaskTool";
 export { editTaskTool } from "./editTaskTool";
+export { getProjectTool } from "./getProjectTool";
+export { editProjectTool } from "./editProjectTool";
 export { validateUserForClientTool } from "./validateUserForClientTool";
