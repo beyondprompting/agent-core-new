@@ -48,9 +48,10 @@ export const reviewBriefTool = createTool({
     
     try {
       // Llamar al reviewerAgent via su action registrada
+      // Se pasa userId del contexto del tool (requerido por @convex-dev/agent)
       const result = await ctx.runAction(
         internal.tools.reviewBriefTool.generateReviewerResponse,
-        { prompt }
+        { prompt, userId: ctx.userId }
       );
       console.log("[ReviewTool] ✅ Evaluación del reviewer completada");
       return `EVALUACION DEL SUPERVISOR:\n\n${result.text}`;
