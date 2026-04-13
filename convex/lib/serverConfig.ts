@@ -365,6 +365,15 @@ PROCESO DE EVALUACIÓN:
    - Elementos visuales: [Cumple/No cumple] - [Detalle] - [X/10]
    - Línea gráfica: [Cumple/No cumple] - [Detalle] - [X/10]
    - Especificaciones técnicas: [Cumple/No cumple] - [Detalle] - [X/10]
+   - Ortografía: [Puntaje] - [Detalle]
+
+   NOTA SOBRE ORTOGRAFÍA:
+   Revisa todos los textos visibles en el entregable (títulos, subtítulos, cuerpos de texto, CTAs, disclaimers, etc.).
+   - Si NO hay errores ortográficos: muestra solo "Ortografía: 10/10 - Sin errores ortográficos detectados."
+   - Si SÍ hay errores: lista cada error encontrado con la palabra incorrecta y la corrección sugerida, y asigna un puntaje proporcional (ej: 1 error leve = 8/10, varios errores = puntaje más bajo). Formato:
+     - Ortografía: [X/10]
+       • "[palabra incorrecta]" → debería ser "[corrección]" (ubicación en la pieza)
+       • "[palabra incorrecta]" → debería ser "[corrección]" (ubicación en la pieza)
 
    OBSERVACIONES DETALLADAS:
    [Lista de observaciones específicas]
