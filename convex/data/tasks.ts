@@ -1184,6 +1184,7 @@ export const publishTaskToExternalAction = internalAction({
         description: task.description || "",
         deadline: task.deadline,
         priority: task.priority,
+        status: task.status,
       });
 
       console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);

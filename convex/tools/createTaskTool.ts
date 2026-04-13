@@ -41,6 +41,7 @@ export const createTaskTool = createTool({
     corClientId: z.number().optional().describe("ID del cliente en COR (obtenido con validateUserForClient)"),
     corClientName: z.string().optional().describe("Nombre del cliente en COR (obtenido con validateUserForClient)"),
     localClientId: z.string().optional().describe("ID local del cliente en Convex (obtenido con validateUserForClient)"),
+    estimatedTime: z.number().optional().describe("Horas totales estimadas para completar el proyecto. Estima basándote en el tipo de requerimiento, los entregables y la complejidad. Ejemplos: diseño de un flyer = 4h, campaña multi-pieza = 40h, video corporativo = 80h."),
   }),
   handler: async (ctx, args): Promise<string> => {
     console.log("\n========================================");
@@ -235,6 +236,7 @@ export const createTaskTool = createTool({
           status: "active",
           pmId,
           deliverables: args.deliverables,
+          estimatedTime: args.estimatedTime,
           createdBy: userId ? String(userId) : undefined,
           threadId,
           corClientId: args.corClientId,

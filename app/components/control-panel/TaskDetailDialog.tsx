@@ -20,6 +20,8 @@ import {
   AlertCircle,
   RefreshCw,
   RefreshCcw,
+  Copy,
+  Check,
 } from "lucide-react";
 
 interface TaskDetailDialogProps {
@@ -75,6 +77,14 @@ export function TaskDetailDialog({
   );
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [isSubmittingEval, setIsSubmittingEval] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  /** Copia un ID al clipboard y muestra feedback visual por 1.5s */
+  const handleCopyId = (id: string) => {
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  };
 
   // Suscripción reactiva a la task para detectar cambios en corSyncStatus
   const liveTask = useQuery(api.data.tasks.getTask, { taskId: task._id });
@@ -335,15 +345,53 @@ export function TaskDetailDialog({
           }`}
         >
           {activeTab === "task" && (
-            <TaskBriefContent
-              task={liveTask ?? task}
-              editable={syncStatus !== "syncing"}
-              syncStatus={syncStatus}
-            />
+            <div>
+              {/* ID de la task para edición via agente */}
+              <div className="mx-6 mt-4 mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+                <span className="font-medium">ID para edición:</span>
+                <code className="font-mono text-foreground/80 select-all">
+                  {task._id}
+                </code>
+                <button
+                  onClick={() => handleCopyId(task._id)}
+                  className="ml-auto p-1 hover:bg-muted rounded transition-colors cursor-pointer"
+                  title="Copiar ID"
+                >
+                  {copiedId === task._id ? (
+                    <Check className="h-3.5 w-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+              <TaskBriefContent
+                task={liveTask ?? task}
+                editable={syncStatus !== "syncing"}
+                syncStatus={syncStatus}
+              />
+            </div>
           )}
 
           {activeTab === "project" && project && (
             <div className="p-4">
+              {/* ID del proyecto para edición via agente */}
+              <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+                <span className="font-medium">ID para edición:</span>
+                <code className="font-mono text-foreground/80 select-all">
+                  {project._id}
+                </code>
+                <button
+                  onClick={() => handleCopyId(project._id)}
+                  className="ml-auto p-1 hover:bg-muted rounded transition-colors cursor-pointer"
+                  title="Copiar ID"
+                >
+                  {copiedId === project._id ? (
+                    <Check className="h-3.5 w-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
               {/* Banner de error de sync del proyecto */}
               {project.corSyncStatus === "retrying" && (
                 <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 mb-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">

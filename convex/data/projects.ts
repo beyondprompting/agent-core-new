@@ -94,6 +94,7 @@ export const createProjectInternal = internalMutation({
     corClientId: v.optional(v.number()),
     pmId: v.optional(v.number()),
     deliverables: v.optional(v.string()),
+    estimatedTime: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const projectId = await ctx.db.insert("projects", {
@@ -108,6 +109,7 @@ export const createProjectInternal = internalMutation({
       corClientId: args.corClientId,
       pmId: args.pmId,
       deliverables: args.deliverables,
+      estimatedTime: args.estimatedTime,
       corSyncStatus: "pending",
     });
 

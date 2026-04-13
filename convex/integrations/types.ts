@@ -83,6 +83,8 @@ export interface CreateTaskInput {
   deadline?: string;
   /** Prioridad: 0=Low, 1=Medium, 2=High, 3=Urgent (o texto: "baja"|"media"|"alta"|"urgente") */
   priority?: string | number;
+  /** Estado de la task (ej: "nueva", "en_proceso", "estancada", "finalizada") */
+  status?: string;
 }
 
 export interface UpdateTaskInput {

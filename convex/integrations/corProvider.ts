@@ -354,6 +354,10 @@ export function createCORProvider(): ProjectManagementProvider {
         body.description = plaintextToCorHtml(data.description);
       }
 
+      if (data.status) {
+        body.status = data.status;
+      }
+
       if (data.deadline) {
         const deadlineDate = parseDateFlexible(data.deadline);
         if (deadlineDate) {
