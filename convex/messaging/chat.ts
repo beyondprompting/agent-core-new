@@ -11,8 +11,7 @@ import { paginationOptsValidator } from "convex/server";
 import { enabledAgents } from "../lib/serverConfig";
 import { 
   classifyError, 
-  extractErrorMessage, 
-  isRecoverableError,
+  extractErrorMessage,
   logLLMAttempt,
   geminiConfig,
   openaiConfig,
@@ -154,6 +153,12 @@ export const generateResponseAsync = internalAction({
     console.log(`[GenerateResponse] ThreadId: ${threadId}`);
     console.log(`[GenerateResponse] Timestamp: ${new Date().toISOString()}`);
     console.log("========================================\n");
+
+    // =========================================================
+    // TRY-CATCH GLOBAL: Si algo falla, guardar mensaje de error
+    // para que el usuario vea feedback en vez de un loader eterno.
+    // =========================================================
+    try {
 
     // Importación dinámica del AI SDK
     const { generateText, generateObject } = await import("ai");
@@ -335,107 +340,10 @@ export const generateResponseAsync = internalAction({
     }
 
     // =====================================================
-    // BIFURCACIÓN: Brief Agent → streamText | Otros → generateText
+    // PATH SYNC: Todos los agentes usan generateText
+    // (streaming removido — causaba race conditions en el AI SDK
+    // con tools multi-step: "enqueue" / "tp(...).map" errors)
     // =====================================================
-    if (selectedAgentKey === "brief") {
-      // =======================================================
-      // PATH STREAMING: briefAgent.streamText con saveStreamDeltas
-      // Los deltas se guardan progresivamente en la DB,
-      // el frontend los consume via syncStreams + useUIMessages
-      //
-      // NOTA: streamText con tools multi-step puede fallar por un
-      // race condition en el AI SDK (run-tools-transformation.ts).
-      // Si falla, se hace fallback al path SYNC (generateText).
-      // =======================================================
-      console.log("[GenerateResponse] 🌊 Usando path STREAMING para briefAgent");
-
-      let streamingSucceeded = false;
-
-      // Intentar streaming con Gemini
-      if (geminiEnabled) {
-        const geminiStart = Date.now();
-        console.log("[GenerateResponse] 📍 STREAM 3A: Intentando streamText con Gemini...");
-
-        // NOTA: NO usar AbortController con streamText + saveStreamDeltas.
-        // @convex-dev/agent guarda deltas incrementales en la DB durante el stream.
-        // Si se aborta, la mutación finalizeMessage intenta procesar datos parciales
-        // y crashea con "tp(...).map is not a function" en fromUIMessages.
-        // La protección contra timeouts en streaming viene de maxSteps: 8 + el límite de 600s de Convex.
-        // Los AbortController se usan solo en generateText (sync), que no tiene estado incremental.
-
-        try {
-          const streamResult = await briefAgent.streamText(
-            ctx,
-            { threadId },
-            {
-              promptMessageId,
-              model: geminiConfig.model,
-              providerOptions: geminiConfig.providerOptions,
-              maxRetries: 0,
-            } as any,
-            { saveStreamDeltas: true },
-          );
-          // Consumir el stream completo (bloquea hasta que termina)
-          await streamResult.consumeStream();
-
-          streamingSucceeded = true;
-          logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
-
-          const totalTime = Date.now() - startTime;
-          console.log("\n========================================");
-          console.log(`[GenerateResponse] 🏁 RESUMEN (STREAMING):`);
-          console.log(`[GenerateResponse]    - Agente: briefAgent`);
-          console.log(`[GenerateResponse]    - Intent: ${orchestratorIntent || "short-circuit"}`);
-          console.log(`[GenerateResponse]    - Proveedor LLM: gemini`);
-          console.log(`[GenerateResponse]    - TOTAL: ${totalTime}ms (${(totalTime / 1000).toFixed(1)}s)`);
-          console.log(`[GenerateResponse] 📝 Respuesta: ${(await streamResult.text)?.substring(0, 100)}...`);
-          console.log("========================================\n");
-
-          return {
-            text: await streamResult.text,
-            promptMessageId,
-            provider: "gemini" as const,
-            agent: "briefAgent",
-            intent: orchestratorIntent,
-          };
-        } catch (error) {
-          logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
-          const errMsg = extractErrorMessage(error);
-          console.warn(`[GenerateResponse] ⚠️ Gemini streamText falló: ${errMsg}`);
-          console.warn("[GenerateResponse] 🔄 Cayendo al path SYNC (generateText) como fallback...");
-
-          // No logear como error de LLM si es un error de streaming (no del proveedor)
-          const isStreamError = errMsg.includes("stream") || errMsg.includes("enqueue");
-          if (!isStreamError) {
-            await ctx.runMutation(internal.data.llmConfig.logLLMError, {
-              provider: geminiConfig.provider,
-              model: geminiConfig.modelId,
-              agentName: "briefAgent",
-              errorType: classifyError(error),
-              errorMessage: errMsg,
-              threadId,
-              resolved: false,
-              fallbackUsed: undefined,
-            });
-            // Si el error NO es de streaming, marcar Gemini como caído
-            geminiEnabled = false;
-          }
-        }
-      }
-
-      // Si streaming falló, caer al path SYNC (generateText) que sí
-      // maneja tools multi-step sin problemas
-      if (!streamingSucceeded) {
-        console.log("[GenerateResponse] 📝 FALLBACK: Usando generateText SYNC para briefAgent");
-      }
-      // Si streaming tuvo éxito, ya retornamos arriba.
-      // Si no, caemos al path SYNC que está abajo (no entramos al else).
-    }
-
-    // =======================================================
-    // PATH SYNC: briefAgent (fallback) + otros agentes
-    // Usa start() → generateText() → save()
-    // =======================================================
     console.log(`[GenerateResponse] 📝 Usando path SYNC para ${selectedAgentName}`);
 
     // =====================================================
@@ -627,6 +535,35 @@ export const generateResponseAsync = internalAction({
       agent: selectedAgentName,
       intent: orchestratorIntent,
     };
+
+    } catch (globalError) {
+      // =========================================================
+      // CATCH GLOBAL: Guardar un mensaje de error para el usuario
+      // para que el frontend muestre feedback en vez de un loader eterno.
+      // =========================================================
+      const totalTime = Date.now() - startTime;
+      const errMsg = globalError instanceof Error ? globalError.message : String(globalError);
+      console.error(`\n========================================`);
+      console.error(`[GenerateResponse] 💥 ERROR GLOBAL después de ${totalTime}ms`);
+      console.error(`[GenerateResponse] Error: ${errMsg}`);
+      console.error(`========================================\n`);
+
+      // Intentar guardar un mensaje de error visible para el usuario
+      try {
+        await saveMessage(ctx, components.agent, {
+          threadId,
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: `⚠️ Ocurrió un error procesando tu mensaje. Por favor, intenta de nuevo.` }],
+          },
+        });
+      } catch (saveErr) {
+        console.error("[GenerateResponse] ❌ No se pudo guardar mensaje de error:", saveErr);
+      }
+
+      // Re-throw para que Convex lo registre como action fallida
+      throw globalError;
+    }
   },
 });
 
