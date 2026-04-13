@@ -217,6 +217,7 @@ export const validateUserForClientTool = createTool({
       corClientId: corClient.id,
       corClientName: corClient.name,
       localClientId: localClient._id,
+      nomenclature: localClient.nomenclature || undefined,
     });
   },
 });

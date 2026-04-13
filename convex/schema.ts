@@ -214,8 +214,9 @@ export default defineSchema({
   // COR Clients — Clientes sincronizados desde COR
   // =====================================================
   corClients: defineTable({
-    corClientId: v.number(),                // ID del cliente en COR
-    name: v.string(),                       // Nombre del cliente
+    corClientId: v.number(),
+    name: v.string(),
+    nomenclature: v.optional(v.string()),   // Abreviatura/iniciales del cliente (ej: "AD" para American Deli). Se usa como prefijo en nombres de proyectos.
     businessName: v.optional(v.string()),
     nameContact: v.optional(v.string()),
     lastNameContact: v.optional(v.string()),
@@ -223,7 +224,7 @@ export default defineSchema({
     website: v.optional(v.string()),
     description: v.optional(v.string()),
     phone: v.optional(v.string()),
-    syncedAt: v.number(),                   // Última sincronización con COR
+    syncedAt: v.number(),
   })
     .index("by_corClientId", ["corClientId"])
     .index("by_name", ["name"]),

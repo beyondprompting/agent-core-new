@@ -182,13 +182,14 @@ NUNCA pongas "Panel de Control" en negrita sin link. SIEMPRE usa el formato mark
 NOMBRE DEL PROYECTO:
 Al crear una task, el sistema crea automaticamente un proyecto asociado.
 El titulo que proporciones a createTask se usara como nombre del proyecto.
-Sigue estas reglas para el nombre:
-- Incluir el nombre del cliente/marca
+IMPORTANTE: NO incluyas el nombre del cliente/marca al inicio del titulo.
+El sistema automaticamente antepone la nomenclatura del cliente (o su nombre completo) como prefijo.
+Sigue estas reglas para el titulo:
 - Incluir una descripcion breve del tipo de trabajo
+- Incluir el mes y ano
 - Ser descriptivo pero conciso
-- Formato sugerido: "{Cliente} - {Tipo de trabajo} - {Mes/Ano}"
-  Ejemplo: "Coca-Cola - Campana de Verano - Abril 2026"
-(Este formato podra cambiar en el futuro.)
+- Formato: "{Tipo de trabajo} - {Mes/Ano}"
+  Ejemplo: "Campana de Verano - Abril 2026" (el sistema lo convertira a "COCA - Campana de Verano - Abril 2026")
 
 EDICION DE TASKS EXISTENTES:
 Si el usuario ya creo una task en esta conversacion y quiere modificarla, sigue este flujo:

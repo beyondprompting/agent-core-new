@@ -49,6 +49,7 @@ export const createTaskTool = createTool({
     corClientId: z.number().optional().describe("ID del cliente en COR (obtenido con validateUserForClient)"),
     corClientName: z.string().optional().describe("Nombre del cliente en COR (obtenido con validateUserForClient)"),
     localClientId: z.string().optional().describe("ID local del cliente en Convex (obtenido con validateUserForClient)"),
+    nomenclature: z.string().optional().describe("Abreviatura del cliente (obtenido con validateUserForClient). NO la inventes, solo pasala si validateUserForClient la devolvio."),
     estimatedTime: z.number().optional().describe("Horas totales estimadas para completar el proyecto. Estima basándote en el tipo de requerimiento, los entregables y la complejidad. Ejemplos: diseño de un flyer = 4h, campaña multi-pieza = 40h, video corporativo = 80h."),
   }),
   handler: async (ctx, args): Promise<string> => {
@@ -104,6 +105,14 @@ export const createTaskTool = createTool({
     console.log(`[CreateTask] ✅ Validación OK — UserId: ${userId || "no encontrado"}`);
 
     // ====================================================
+    // Prefijo del título: nomenclature > corClientName
+    // El agente envía el título SIN prefijo de cliente.
+    // El sistema lo antepone automáticamente.
+    // ====================================================
+    const clientPrefix = args.nomenclature || args.corClientName;
+    const fullTitle = clientPrefix ? `${clientPrefix} - ${args.title}` : args.title;
+
+    // ====================================================
     // Construir description con toda la info del brief
     // (sin strategicPriority — se añade en background después)
     // ====================================================
@@ -157,7 +166,7 @@ export const createTaskTool = createTool({
     try {
       result = await ctx.runMutation(internal.data.tasks.createProjectAndTask, {
         // Project
-        projectName: args.title,
+        projectName: fullTitle,
         projectBrief: fileUrls.length > 0 ? fileUrls.join(", ") : undefined,
         projectEndDate: args.deadline,
         projectDeliverables: args.deliverables,
@@ -167,7 +176,7 @@ export const createTaskTool = createTool({
         projectClientId: localClientId as any,
         projectCreatedBy: userId,
         // Task
-        taskTitle: args.title,
+        taskTitle: fullTitle,
         taskDescription: description,
         taskDeadline: args.deadline,
         taskPriority: args.priority ?? 1,
