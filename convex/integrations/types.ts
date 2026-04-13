@@ -102,6 +102,7 @@ export interface UpdateProjectInput {
   endDate?: string;
   deliverables?: string;
   estimatedTime?: number;
+  status?: string;
 }
 
 export interface UploadTaskAttachmentInput {

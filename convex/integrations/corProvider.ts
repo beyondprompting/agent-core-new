@@ -555,6 +555,7 @@ export function createCORProvider(): ProjectManagementProvider {
           brief: data.brief ?? currentProject.brief,
           deliverables: data.deliverables ?? currentProject.deliverables,
           estimated_time: data.estimatedTime ?? currentProject.estimated_time,
+          status: data.status ?? currentProject.status,
           start: currentProject.start,
           end: currentProject.end,
         };

@@ -283,7 +283,7 @@ export const scheduleProjectSyncToCOR = internalMutation({
  * Campos de proyecto que tienen equivalente directo en COR.
  */
 const COR_PROJECT_SYNCABLE_FIELDS = new Set([
-  "name", "brief", "startDate", "endDate", "deliverables", "estimatedTime",
+  "name", "brief", "startDate", "endDate", "deliverables", "estimatedTime", "status",
 ]);
 
 /**
@@ -347,6 +347,7 @@ export const syncProjectEditToCORAction = internalAction({
       if (syncableChanges.includes("endDate")) updatePayload.endDate = project.endDate;
       if (syncableChanges.includes("deliverables")) updatePayload.deliverables = project.deliverables;
       if (syncableChanges.includes("estimatedTime")) updatePayload.estimatedTime = project.estimatedTime;
+      if (syncableChanges.includes("status")) updatePayload.status = project.status;
 
       const provider = getProjectManagementProvider();
       const result = await provider.updateProject(corProjectId, updatePayload as any);
