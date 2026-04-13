@@ -453,6 +453,344 @@ export const getFileInfoInternal = internalQuery({
 });
 
 
+// ==================== CONSOLIDATED FUNCTIONS ====================
+// Optimización: Reducir múltiples runQuery/runMutation a menos transacciones.
+// Ref: https://docs.convex.dev/functions/actions#avoid-await-ctxrunmutation--await-ctxrunquery
+
+/**
+ * Validación consolidada para createTaskTool.
+ * Una sola transacción que:
+ * 1. Obtiene userId del thread
+ * 2. Verifica idempotencia (no crear task duplicada)
+ * 3. Verifica corUser (si integración habilitada)
+ * 4. Verifica cliente local y autorización
+ * 5. Verifica proyecto existente
+ * 6. Resuelve localClientId y pmId
+ */
+export const validateAndPrepareTask = internalQuery({
+  args: {
+    threadId: v.string(),
+    corClientId: v.optional(v.number()),
+    corUserId: v.optional(v.number()),
+    requireIntegration: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    // 1. userId del thread
+    const chatThread = await ctx.db
+      .query("chatThreads")
+      .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
+      .first();
+    const userId = chatThread?.userId || null;
+
+    // 2. Idempotencia — ¿ya existe task para este thread?
+    const existingTask = await ctx.db
+      .query("tasks")
+      .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
+      .first();
+
+    if (existingTask) {
+      return {
+        ok: false as const,
+        error: `Ya existe un requerimiento para esta conversación.\n\nID del requerimiento: ${existingTask._id}\nEstado: ${existingTask.status}\n\nSi necesitas crear un nuevo requerimiento, por favor inicia una nueva conversación.\nSi quieres modificar el existente, usa la herramienta "editTask".`,
+      };
+    }
+
+    // 3-4. Validaciones de integración (si está habilitada)
+    let localClientId: string | undefined;
+    let pmId: number | undefined = args.corUserId;
+
+    if (args.requireIntegration) {
+      if (!userId) {
+        return { ok: false as const, error: "❌ No se pudo identificar al usuario de esta conversación." };
+      }
+
+      // corUser
+      const corUser = await ctx.db
+        .query("corUsers")
+        .withIndex("by_userId", (q) => q.eq("userId", userId))
+        .unique();
+      if (!corUser) {
+        return { ok: false as const, error: "❌ Tu usuario no está registrado en el sistema de gestión de proyectos (COR). Usa primero la herramienta 'validateUserForClient'." };
+      }
+      if (!pmId) pmId = corUser.corUserId;
+
+      // cliente local
+      if (args.corClientId) {
+        const localClient = await ctx.db
+          .query("corClients")
+          .withIndex("by_corClientId", (q) => q.eq("corClientId", args.corClientId))
+          .unique();
+        if (!localClient) {
+          return { ok: false as const, error: "❌ El cliente no está registrado localmente. Usa primero la herramienta 'validateUserForClient'." };
+        }
+        localClientId = localClient._id;
+
+        // autorización
+        const assignment = await ctx.db
+          .query("clientUserAssignments")
+          .withIndex("by_client_and_user", (q) =>
+            q.eq("clientId", localClient._id).eq("userId", userId)
+          )
+          .unique();
+        if (!assignment) {
+          return { ok: false as const, error: `❌ No tienes autorización para crear briefs para este cliente. Contacta al administrador.` };
+        }
+      }
+    } else {
+      // Sin integración, resolver pmId si posible
+      if (!pmId && userId) {
+        const corUser = await ctx.db
+          .query("corUsers")
+          .withIndex("by_userId", (q) => q.eq("userId", userId))
+          .unique();
+        if (corUser) pmId = corUser.corUserId;
+      }
+    }
+
+    // 5. Proyecto existente para este thread
+    const existingProject = await ctx.db
+      .query("projects")
+      .withIndex("by_threadId", (q) => q.eq("threadId", args.threadId))
+      .unique();
+
+    // Si no hay integración y no resolvimos localClientId, intentar buscar
+    if (!localClientId && args.corClientId) {
+      const localClient = await ctx.db
+        .query("corClients")
+        .withIndex("by_corClientId", (q) => q.eq("corClientId", args.corClientId))
+        .unique();
+      if (localClient) localClientId = localClient._id;
+    }
+
+    return {
+      ok: true as const,
+      userId: userId ? String(userId) : undefined,
+      localClientId,
+      pmId,
+      existingProjectId: existingProject?._id || undefined,
+    };
+  },
+});
+
+/**
+ * Crea proyecto + task atómicamente en una sola mutation.
+ * Reemplaza createProjectInternal + createTaskInternal como calls separados.
+ */
+export const createProjectAndTask = internalMutation({
+  args: {
+    // Project fields
+    projectName: v.string(),
+    projectBrief: v.optional(v.string()),
+    projectEndDate: v.optional(v.string()),
+    projectDeliverables: v.optional(v.string()),
+    projectEstimatedTime: v.optional(v.number()),
+    projectPmId: v.optional(v.number()),
+    projectCorClientId: v.optional(v.number()),
+    projectClientId: v.optional(v.id("corClients")),
+    projectCreatedBy: v.optional(v.string()),
+    // Task fields
+    taskTitle: v.string(),
+    taskDescription: v.optional(v.string()),
+    taskDeadline: v.optional(v.string()),
+    taskPriority: v.optional(v.number()),
+    taskStatus: v.string(),
+    taskCreatedBy: v.optional(v.string()),
+    taskCorClientId: v.optional(v.number()),
+    taskCorClientName: v.optional(v.string()),
+    // Shared
+    threadId: v.string(),
+    existingProjectId: v.optional(v.id("projects")),
+  },
+  handler: async (ctx, args) => {
+    // 1. Crear o reutilizar proyecto
+    let projectId: string;
+    if (args.existingProjectId) {
+      projectId = args.existingProjectId;
+      console.log(`[CreateProjectAndTask] ℹ️ Proyecto ya existe: ${projectId}`);
+    } else {
+      projectId = await ctx.db.insert("projects", {
+        name: args.projectName,
+        brief: args.projectBrief,
+        startDate: new Date().toISOString().split("T")[0],
+        endDate: args.projectEndDate,
+        status: "active",
+        pmId: args.projectPmId,
+        deliverables: args.projectDeliverables,
+        estimatedTime: args.projectEstimatedTime,
+        createdBy: args.projectCreatedBy,
+        threadId: args.threadId,
+        corClientId: args.projectCorClientId,
+        clientId: args.projectClientId,
+        corSyncStatus: "pending",
+      });
+      console.log(`[CreateProjectAndTask] ✅ Proyecto creado: ${projectId}`);
+    }
+
+    // 2. Crear task
+    const taskId = await ctx.db.insert("tasks", {
+      title: args.taskTitle,
+      description: args.taskDescription,
+      deadline: args.taskDeadline,
+      priority: args.taskPriority ?? 1,
+      threadId: args.threadId,
+      status: args.taskStatus,
+      createdBy: args.taskCreatedBy,
+      projectId: projectId as any,
+      corSyncStatus: "pending",
+      corClientId: args.taskCorClientId,
+      corClientName: args.taskCorClientName,
+    });
+    console.log(`[CreateProjectAndTask] ✅ Task creada: ${taskId}`);
+
+    return { projectId, taskId: taskId as string };
+  },
+});
+
+/**
+ * Programa la clasificación de prioridad estratégica en background.
+ * La clasificación corre como un action separado (via scheduler) sin bloquear la creación.
+ */
+export const schedulePriorityClassification = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    title: v.string(),
+    requestType: v.string(),
+    brand: v.string(),
+    objective: v.optional(v.string()),
+    keyMessage: v.optional(v.string()),
+    kpis: v.optional(v.string()),
+    deadline: v.optional(v.string()),
+    budget: v.optional(v.string()),
+    approvers: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    console.log(`[SchedulePriority] 🎯 Programando clasificación para task ${args.taskId}`);
+    await ctx.scheduler.runAfter(0, internal.data.tasks.classifyAndUpdatePriority, {
+      taskId: args.taskId,
+      title: args.title,
+      requestType: args.requestType,
+      brand: args.brand,
+      objective: args.objective,
+      keyMessage: args.keyMessage,
+      kpis: args.kpis,
+      deadline: args.deadline,
+      budget: args.budget,
+      approvers: args.approvers,
+    });
+  },
+});
+
+/**
+ * Action que clasifica la prioridad y actualiza la task (corre en background).
+ * Llama al priorityAgent (cross-runtime, "use node") y luego actualiza description.
+ */
+export const classifyAndUpdatePriority = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+    title: v.string(),
+    requestType: v.string(),
+    brand: v.string(),
+    objective: v.optional(v.string()),
+    keyMessage: v.optional(v.string()),
+    kpis: v.optional(v.string()),
+    deadline: v.optional(v.string()),
+    budget: v.optional(v.string()),
+    approvers: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    try {
+      const classification = await ctx.runAction(internal.agents.priorityAgent.classifyPriorityAction, {
+        title: args.title,
+        requestType: args.requestType,
+        brand: args.brand,
+        objective: args.objective,
+        keyMessage: args.keyMessage,
+        kpis: args.kpis,
+        deadline: args.deadline,
+        budget: args.budget,
+        approvers: args.approvers,
+      });
+
+      if (classification) {
+        // Leer task actual y re-generar description con la prioridad
+        const task = await ctx.runQuery(internal.data.tasks.getTaskByIdInternal, {
+          taskId: args.taskId as string,
+        });
+        if (task?.description) {
+          // Append al final del description existente
+          const updatedDesc = task.description + `\nPrioridad Estratégica: ${classification}`;
+          await ctx.runMutation(internal.data.tasks.updateTaskInternal, {
+            taskId: args.taskId as string,
+            updates: { description: updatedDesc },
+          });
+          console.log(`[ClassifyAndUpdate] ✅ Prioridad ${classification} añadida a task ${args.taskId}`);
+        }
+      }
+    } catch (error) {
+      console.log(`[ClassifyAndUpdate] ⚠️ No se pudo clasificar prioridad (task ${args.taskId}):`, error);
+      // No falla — la task ya fue creada exitosamente
+    }
+  },
+});
+
+/**
+ * Helper para asociar archivos del thread a una task.
+ * Se ejecuta directamente como función TypeScript (sin runAction).
+ * Ref: https://docs.convex.dev/functions/actions#await-ctxrunaction-should-only-be-used-for-crossing-js-runtimes
+ */
+export async function associateFilesHelper(
+  ctx: ActionCtx,
+  taskId: string,
+  threadId: string,
+): Promise<void> {
+  console.log(`[AssociateFiles] Buscando archivos para task ${taskId}...`);
+
+  try {
+    const messagesResult = await listMessages(ctx, components.agent, {
+      threadId,
+      paginationOpts: { cursor: null, numItems: 20 },
+    });
+
+    const allFileIds: string[] = [];
+    for (const msg of messagesResult.page) {
+      const msgAny = msg as any;
+      if (msgAny.fileIds && Array.isArray(msgAny.fileIds)) {
+        allFileIds.push(...msgAny.fileIds);
+      }
+    }
+
+    if (allFileIds.length === 0) {
+      console.log(`[AssociateFiles] No se encontraron archivos en el thread`);
+      return;
+    }
+
+    console.log(`[AssociateFiles] Creando ${allFileIds.length} registros en taskAttachments...`);
+
+    for (const fileId of allFileIds) {
+      try {
+        const fileInfo = await ctx.runQuery(internal.data.tasks.getFileInfoInternal, { fileId });
+        if (fileInfo) {
+          await ctx.runMutation(internal.data.tasks.createTaskAttachment, {
+            taskId: taskId as any,
+            fileId,
+            storageId: fileInfo.storageId,
+            filename: fileInfo.filename,
+            mimeType: fileInfo.mimeType,
+            size: fileInfo.size,
+          });
+          console.log(`[AssociateFiles] ✅ Attachment creado: ${fileInfo.filename}`);
+        }
+      } catch (fileError) {
+        console.error(`[AssociateFiles] ⚠️ Error con archivo ${fileId}:`, fileError);
+      }
+    }
+
+    console.log(`[AssociateFiles] ✅ Archivos asociados exitosamente`);
+  } catch (error) {
+    console.error(`[AssociateFiles] Error:`, error);
+  }
+}
+
 
 // ==================== QUERIES ====================
 

@@ -38,7 +38,10 @@ export const briefAgent = new Agent(components.agent, {
   
   tools: agentTools,
   
-  maxSteps: 15,
+  // Reducido de 15 a 8: un flujo típico usa 4-6 steps
+  // (pensar → review → pensar → crear → pensar → responder).
+  // Con thinking model (~30-60s/step), 8 × 60s = 480s máx (dentro del límite de 600s).
+  maxSteps: 8,
 
   // Limitar contexto para evitar sobrecargar la ventana de tokens
   // (el default es 100 mensajes recientes, lo cual con imágenes pesadas

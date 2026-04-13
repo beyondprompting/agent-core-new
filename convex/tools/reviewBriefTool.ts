@@ -1,12 +1,12 @@
 // convex/tools/reviewBriefTool.ts
 // Tool de validación del brief usando el reviewerAgent (agente supervisor de calidad)
+// NOTA: Se llama a reviewerAgent.generateText() directamente en lugar de via runAction,
+// porque el tool handler ya corre dentro de un ActionCtx (mismo runtime, sin necesidad de cruzar).
+// Esto evita el overhead de un action anidado que congela el parent y duplica recursos.
+// Ref: https://docs.convex.dev/functions/actions#await-ctxrunaction-should-only-be-used-for-crossing-js-runtimes
 import { createTool } from "@convex-dev/agent";
 import { z } from "zod";
-import { internal } from "../_generated/api";
 import { reviewerAgent } from "../agents/reviewerAgent";
-
-// Action interna para generar respuesta del reviewer
-export const generateReviewerResponse = reviewerAgent.asTextAction({});
 
 // Tool que el briefAgent usa para validar si la información recolectada es suficiente.
 // Delega la evaluación al reviewerAgent, que tiene instrucciones detalladas
@@ -47,11 +47,12 @@ export const reviewBriefTool = createTool({
     const prompt = `Evalúa el siguiente brief recolectado y responde en el formato JSON especificado en tus instrucciones:\n\n${briefSummary}`;
     
     try {
-      // Llamar al reviewerAgent via su action registrada
-      // Se pasa userId del contexto del tool (requerido por @convex-dev/agent)
-      const result = await ctx.runAction(
-        internal.tools.reviewBriefTool.generateReviewerResponse,
-        { prompt, userId: ctx.userId }
+      // Llamar al reviewerAgent directamente (sin runAction — mismo runtime)
+      // El ctx del tool ya es un ActionCtx, generateText funciona directamente.
+      const result = await reviewerAgent.generateText(
+        ctx,
+        { userId: ctx.userId },
+        { prompt }
       );
       console.log("[ReviewTool] ✅ Evaluación del reviewer completada");
       return `EVALUACION DEL SUPERVISOR:\n\n${result.text}`;

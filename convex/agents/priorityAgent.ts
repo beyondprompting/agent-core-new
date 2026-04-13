@@ -16,6 +16,7 @@ import {
   classifyError,
   extractErrorMessage,
   logLLMAttempt,
+  LLM_CALL_TIMEOUT_MS,
 } from "../lib/llmFallback";
 
 // Schema de respuesta — garantiza output válido
@@ -82,10 +83,16 @@ export const classifyPriorityAction = internalAction({
     let result: z.infer<typeof prioritySchema> | null = null;
     let usedProvider: "gemini" | "openai" | null = null;
 
-    // Intento 1: Gemini
+    // Intento 1: Gemini (con abort timeout)
     if (geminiEnabled) {
       const geminiStart = Date.now();
       console.log("[PriorityAgent] 📍 Intentando con Gemini...");
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        console.warn(`[PriorityAgent] ⏱️ Gemini excedió ${LLM_CALL_TIMEOUT_MS / 1000}s — abortando`);
+        controller.abort();
+      }, LLM_CALL_TIMEOUT_MS);
 
       try {
         const response = await generateObject({
@@ -95,12 +102,15 @@ export const classifyPriorityAction = internalAction({
           system: systemPrompt,
           prompt: userPrompt,
           maxRetries: 0,
+          abortSignal: controller.signal,
         });
+        clearTimeout(timer);
 
         result = response.object;
         usedProvider = "gemini";
         logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
       } catch (error) {
+        clearTimeout(timer);
         logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
         console.error(`[PriorityAgent] ❌ Gemini falló: ${extractErrorMessage(error)}`);
 
@@ -116,10 +126,16 @@ export const classifyPriorityAction = internalAction({
       }
     }
 
-    // Intento 2: Fallback a OpenAI
+    // Intento 2: Fallback a OpenAI (con abort timeout)
     if (!result && openaiEnabled) {
       const openaiStart = Date.now();
       console.log("[PriorityAgent] 📍 Fallback a OpenAI...");
+
+      const oaiController = new AbortController();
+      const oaiTimer = setTimeout(() => {
+        console.warn(`[PriorityAgent] ⏱️ OpenAI excedió ${LLM_CALL_TIMEOUT_MS / 1000}s — abortando`);
+        oaiController.abort();
+      }, LLM_CALL_TIMEOUT_MS);
 
       try {
         const response = await generateObject({
@@ -128,12 +144,15 @@ export const classifyPriorityAction = internalAction({
           system: systemPrompt,
           prompt: userPrompt,
           maxRetries: 0,
+          abortSignal: oaiController.signal,
         });
+        clearTimeout(oaiTimer);
 
         result = response.object;
         usedProvider = "openai";
         logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, true, Date.now() - openaiStart);
       } catch (error) {
+        clearTimeout(oaiTimer);
         logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, false, Date.now() - openaiStart);
         console.error(`[PriorityAgent] ❌ OpenAI falló: ${extractErrorMessage(error)}`);
 

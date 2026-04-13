@@ -222,16 +222,18 @@ export const generateEvaluationAsync = internalAction({
       threadId,
       geminiEnabled,
       openaiEnabled,
-      primaryFn: () => generateText({
+      primaryFn: (signal) => generateText({
         ...preparedArgs,
         model: geminiConfig.model,
         providerOptions: geminiConfig.providerOptions as any,
         maxRetries: 0,
+        abortSignal: signal,
       }),
-      fallbackFn: () => generateText({
+      fallbackFn: (signal) => generateText({
         ...preparedArgs,
         model: openaiConfig.model,
         maxRetries: 0,
+        abortSignal: signal,
       }),
       logError: async (log) => {
         await ctx.runMutation(internal.data.llmConfig.logLLMError, log);

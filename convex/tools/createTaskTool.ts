@@ -1,12 +1,20 @@
 // convex/tools/createTaskTool.ts
 // Tool principal para crear una task/requerimiento en Convex
 // También crea el proyecto local asociado (obligatorio)
+//
+// OPTIMIZACIÓN: Usa funciones consolidadas para minimizar runQuery/runMutation.
+// - validateAndPrepareTask: 1 query en vez de ~6 queries separadas
+// - createProjectAndTask: 1 mutation en vez de 2 mutations separadas
+// - associateFilesHelper: helper TS directo (no runAction en mismo runtime)
+// - schedulePriorityClassification: no-bloqueante (via scheduler)
+// Ref: https://docs.convex.dev/functions/actions#avoid-await-ctxrunmutation--await-ctxrunquery
 import { createTool } from "@convex-dev/agent";
 import { z } from "zod";
 import { listMessages } from "@convex-dev/agent";
 import { internal, components } from "../_generated/api";
 import { isProjectManagementEnabled } from "../integrations/registry";
 import { buildBriefDescription } from "../lib/briefFormat";
+import { associateFilesHelper } from "../data/tasks";
 
 // SOLO crea en Convex — la publicación en COR/externo se hace desde el Panel de Control
 export const createTaskTool = createTool({
@@ -72,82 +80,32 @@ export const createTaskTool = createTool({
     }
 
     // 3. Validaciones de integración con COR
-    if (isProjectManagementEnabled()) {
-      if (!args.corClientId) {
-        return `❌ No se puede crear el requerimiento sin un cliente válido en COR.\n\nAntes de crear el requerimiento, debes usar la herramienta "validateUserForClient" para validar al usuario y al cliente.\nNO crees el requerimiento hasta tener un corClientId válido.`;
-      }
-
-      // Obtener userId de Convex
-      const userId = await ctx.runQuery(internal.data.tasks.getUserIdFromThread, { threadId });
-      if (!userId) {
-        return "❌ No se pudo identificar al usuario de esta conversación.";
-      }
-
-      // Verificar que el usuario existe en COR (cache)
-      const corUser = await ctx.runQuery(internal.data.corUsers.getCorUserByUserId, {
-        userId: userId as any,
-      });
-      if (!corUser) {
-        return "❌ Tu usuario no está registrado en el sistema de gestión de proyectos (COR). Usa primero la herramienta 'validateUserForClient'.";
-      }
-
-      // Verificar cliente local existe
-      const localClient = await ctx.runQuery(internal.data.corClients.getClientByCorId, {
-        corClientId: args.corClientId,
-      });
-      if (!localClient) {
-        return "❌ El cliente no está registrado localmente. Usa primero la herramienta 'validateUserForClient'.";
-      }
-
-      // Verificar autorización usuario → cliente
-      const isAuthorized = await ctx.runQuery(internal.data.corClients.isUserAuthorizedForClient, {
-        clientId: localClient._id,
-        userId: userId as any,
-      });
-      if (!isAuthorized) {
-        return `❌ No tienes autorización para crear briefs para el cliente "${args.corClientName || args.corClientId}". Contacta al administrador.`;
-      }
+    const integrationEnabled = isProjectManagementEnabled();
+    if (integrationEnabled && !args.corClientId) {
+      return `❌ No se puede crear el requerimiento sin un cliente válido en COR.\n\nAntes de crear el requerimiento, debes usar la herramienta "validateUserForClient" para validar al usuario y al cliente.\nNO crees el requerimiento hasta tener un corClientId válido.`;
     }
-
-    // 4. Verificar IDEMPOTENCIA: Si ya existe una task para este thread, no crear otra
-    const existingTask = await ctx.runQuery(internal.data.tasks.getTaskByThreadInternal, { threadId });
-    
-    if (existingTask) {
-      console.log(`[CreateTask] ⚠️ Ya existe task para este thread: ${existingTask._id}`);
-      return `Ya existe un requerimiento para esta conversación.\n\nID del requerimiento: ${existingTask._id}\nEstado: ${existingTask.status}\n\nSi necesitas crear un nuevo requerimiento, por favor inicia una nueva conversación.\nSi quieres modificar el existente, usa la herramienta "editTask".`;
-    }
-
-    // Obtener el userId del thread para el campo createdBy
-    const userId = await ctx.runQuery(internal.data.tasks.getUserIdFromThread, { threadId });
-    console.log(`[CreateTask] UserId: ${userId || "no encontrado"}`);
 
     // ====================================================
-    // Clasificar prioridad estratégica (no bloquea la creación si falla)
+    // VALIDACIÓN CONSOLIDADA (1 query en vez de ~6)
     // ====================================================
-    let strategicPriority: string | undefined;
-    try {
-      console.log("[CreateTask] 🎯 Clasificando prioridad estratégica...");
-      const classification = await ctx.runAction(internal.agents.priorityAgent.classifyPriorityAction, {
-        title: args.title,
-        requestType: args.requestType,
-        brand: args.brand,
-        objective: args.objective,
-        keyMessage: args.keyMessage,
-        kpis: args.kpis,
-        deadline: args.deadline,
-        budget: args.budget,
-        approvers: args.approvers,
-      });
-      if (classification) {
-        strategicPriority = classification;
-        console.log(`[CreateTask] ✅ Prioridad estratégica: ${strategicPriority}`);
-      }
-    } catch (error) {
-      console.log("[CreateTask] ⚠️ No se pudo clasificar prioridad estratégica (continuando):", error);
+    console.log("[CreateTask] 🔍 Validando y preparando...");
+    const preparation = await ctx.runQuery(internal.data.tasks.validateAndPrepareTask, {
+      threadId,
+      corClientId: args.corClientId,
+      corUserId: args.corUserId,
+      requireIntegration: integrationEnabled,
+    });
+
+    if (!preparation.ok) {
+      return preparation.error;
     }
+
+    const { userId, localClientId, pmId, existingProjectId } = preparation;
+    console.log(`[CreateTask] ✅ Validación OK — UserId: ${userId || "no encontrado"}`);
 
     // ====================================================
     // Construir description con toda la info del brief
+    // (sin strategicPriority — se añade en background después)
     // ====================================================
     const description = buildBriefDescription({
       requestType: args.requestType,
@@ -159,7 +117,6 @@ export const createTaskTool = createTool({
       kpis: args.kpis,
       budget: args.budget,
       approvers: args.approvers,
-      strategicPriority,
     });
 
     // ====================================================
@@ -193,94 +150,69 @@ export const createTaskTool = createTool({
     }
 
     // ====================================================
-    // Resolver localClientId
+    // CREAR PROYECTO + TASK ATÓMICAMENTE (1 mutation en vez de 2)
     // ====================================================
-    let localClientId: string | undefined = args.localClientId;
-    if (!localClientId && args.corClientId) {
-      const localClient = await ctx.runQuery(internal.data.corClients.getClientByCorId, {
-        corClientId: args.corClientId,
-      });
-      if (localClient) {
-        localClientId = localClient._id;
-      }
-    }
-
-    // ====================================================
-    // CREAR PROYECTO (OBLIGATORIO — antes de la task)
-    // ====================================================
-    let projectId: string | undefined;
+    console.log("[CreateTask] ⏳ Creando proyecto y task...");
+    let result: { projectId: string; taskId: string };
     try {
-      console.log("[CreateTask] 📁 Verificando proyecto para este thread...");
-      const existingProject = await ctx.runQuery(internal.data.projects.getProjectByThread, { threadId });
-
-      if (existingProject) {
-        projectId = existingProject._id;
-        console.log(`[CreateTask] ℹ️ Proyecto ya existe: ${projectId}`);
-      } else {
-        // Obtener corUserId para pmId
-        let pmId: number | undefined = args.corUserId;
-        if (!pmId && userId) {
-          const corUser = await ctx.runQuery(internal.data.corUsers.getCorUserByUserId, {
-            userId: userId as any,
-          });
-          if (corUser) {
-            pmId = corUser.corUserId;
-          }
-        }
-
-        projectId = await ctx.runMutation(internal.data.projects.createProjectInternal, {
-          name: args.title, // El nombre del proyecto lo define el LLM siguiendo el prompt de naming
-          brief: fileUrls.length > 0 ? fileUrls.join(", ") : undefined,
-          startDate: new Date().toISOString().split("T")[0], // Fecha de hoy YYYY-MM-DD
-          endDate: args.deadline,
-          status: "active",
-          pmId,
-          deliverables: args.deliverables,
-          estimatedTime: args.estimatedTime,
-          createdBy: userId ? String(userId) : undefined,
-          threadId,
-          corClientId: args.corClientId,
-          ...(localClientId ? { clientId: localClientId as any } : {}),
-        });
-        console.log(`[CreateTask] ✅ Proyecto creado: ${projectId}`);
-      }
-    } catch (error) {
-      console.error("[CreateTask] ❌ Error creando proyecto:", error);
-      return "❌ Error: No se pudo crear el proyecto asociado. No se puede crear una task sin proyecto.";
-    }
-
-    if (!projectId) {
-      return "❌ Error: No se pudo crear el proyecto asociado. No se puede crear una task sin proyecto.";
-    }
-
-    // ====================================================
-    // Crear task SOLO en Convex (sin sincronización con COR)
-    // ====================================================
-    console.log("[CreateTask] ⏳ Creando task en Convex...");
-    
-    const taskId = await ctx.runMutation(internal.data.tasks.createTaskInternal, {
-      title: args.title,
-      description,
-      deadline: args.deadline,
-      priority: args.priority ?? 1,
-      threadId,
-      status: "nueva",
-      createdBy: userId ? String(userId) : undefined,
-      corSyncStatus: "pending",
-      corClientId: args.corClientId,
-      corClientName: args.corClientName,
-      projectId: projectId,
-    });
-
-    console.log(`[CreateTask] ✅ Task creada: ${taskId}`);
-
-    // Asociar archivos del thread a la task (en background, sin bloquear)
-    try {
-      await ctx.runAction(internal.data.tasks.associateFilesToTask, {
-        taskId,
+      result = await ctx.runMutation(internal.data.tasks.createProjectAndTask, {
+        // Project
+        projectName: args.title,
+        projectBrief: fileUrls.length > 0 ? fileUrls.join(", ") : undefined,
+        projectEndDate: args.deadline,
+        projectDeliverables: args.deliverables,
+        projectEstimatedTime: args.estimatedTime,
+        projectPmId: pmId,
+        projectCorClientId: args.corClientId,
+        projectClientId: localClientId as any,
+        projectCreatedBy: userId,
+        // Task
+        taskTitle: args.title,
+        taskDescription: description,
+        taskDeadline: args.deadline,
+        taskPriority: args.priority ?? 1,
+        taskStatus: "nueva",
+        taskCreatedBy: userId,
+        taskCorClientId: args.corClientId,
+        taskCorClientName: args.corClientName,
+        // Shared
         threadId,
-        // Sin corTaskId — no hay task en COR todavía
+        existingProjectId: existingProjectId as any,
       });
+    } catch (error) {
+      console.error("[CreateTask] ❌ Error creando proyecto/task:", error);
+      return "❌ Error: No se pudo crear el proyecto y task asociados.";
+    }
+
+    const { projectId, taskId } = result;
+    console.log(`[CreateTask] ✅ Proyecto: ${projectId}, Task: ${taskId}`);
+
+    // ====================================================
+    // BACKGROUND: Clasificar prioridad estratégica (no-bloqueante)
+    // Se ejecuta via scheduler — no bloquea la respuesta al usuario
+    // ====================================================
+    try {
+      await ctx.runMutation(internal.data.tasks.schedulePriorityClassification, {
+        taskId: taskId as any,
+        title: args.title,
+        requestType: args.requestType,
+        brand: args.brand,
+        objective: args.objective,
+        keyMessage: args.keyMessage,
+        kpis: args.kpis,
+        deadline: args.deadline,
+        budget: args.budget,
+        approvers: args.approvers,
+      });
+    } catch (error) {
+      console.log("[CreateTask] ⚠️ No se pudo programar clasificación de prioridad (continuando):", error);
+    }
+
+    // ====================================================
+    // Asociar archivos del thread a la task (helper directo, sin runAction)
+    // ====================================================
+    try {
+      await associateFilesHelper(ctx, taskId, threadId);
       console.log("[CreateTask] ✅ Archivos asociados");
     } catch (error) {
       console.log("[CreateTask] ⚠️ No se pudieron asociar archivos (continuando):", error);

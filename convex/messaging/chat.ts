@@ -16,6 +16,7 @@ import {
   logLLMAttempt,
   geminiConfig,
   openaiConfig,
+  LLM_CALL_TIMEOUT_MS,
 } from "../lib/llmFallback";
 
 // NOTA: La creación de threads ahora se hace a través de convex/threads.ts
@@ -355,6 +356,13 @@ export const generateResponseAsync = internalAction({
         const geminiStart = Date.now();
         console.log("[GenerateResponse] 📍 STREAM 3A: Intentando streamText con Gemini...");
 
+        // NOTA: NO usar AbortController con streamText + saveStreamDeltas.
+        // @convex-dev/agent guarda deltas incrementales en la DB durante el stream.
+        // Si se aborta, la mutación finalizeMessage intenta procesar datos parciales
+        // y crashea con "tp(...).map is not a function" en fromUIMessages.
+        // La protección contra timeouts en streaming viene de maxSteps: 8 + el límite de 600s de Convex.
+        // Los AbortController se usan solo en generateText (sync), que no tiene estado incremental.
+
         try {
           const streamResult = await briefAgent.streamText(
             ctx,
@@ -460,30 +468,41 @@ export const generateResponseAsync = internalAction({
     if (geminiEnabled) {
       const geminiStart = Date.now();
       console.log("[GenerateResponse] 📍 PASO 3A: Intentando con Gemini...");
-      
+
+      // Abort timeout: si Gemini tarda >120s, abortar y caer al fallback OpenAI
+      const syncGeminiController = new AbortController();
+      const syncGeminiTimer = setTimeout(() => {
+        console.warn(`[GenerateResponse] ⏱️ Gemini generateText excedió ${LLM_CALL_TIMEOUT_MS / 1000}s — abortando`);
+        syncGeminiController.abort();
+      }, LLM_CALL_TIMEOUT_MS);
+
       try {
         result = await generateText({
           ...preparedArgs,
           model: geminiConfig.model,
           providerOptions: geminiConfig.providerOptions as any,
           maxRetries: 0,
+          abortSignal: syncGeminiController.signal,
         });
-        
+        clearTimeout(syncGeminiTimer);
+
         usedProvider = "gemini";
         logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, true, Date.now() - geminiStart);
         console.log(`[GenerateResponse] ✅ Gemini respondió en ${Date.now() - geminiStart}ms`);
         
       } catch (error) {
+        clearTimeout(syncGeminiTimer);
         geminiError = error instanceof Error ? error : new Error(String(error));
         logLLMAttempt(geminiConfig.provider, geminiConfig.modelId, false, Date.now() - geminiStart);
-        console.error(`[GenerateResponse] ❌ Gemini falló: ${extractErrorMessage(error)}`);
+        const isAbort = geminiError.name === "AbortError";
+        console.error(`[GenerateResponse] ❌ Gemini falló${isAbort ? " (timeout)" : ""}: ${extractErrorMessage(error)}`);
         
         await ctx.runMutation(internal.data.llmConfig.logLLMError, {
           provider: geminiConfig.provider,
           model: geminiConfig.modelId,
           agentName: selectedAgentName,
           errorType: classifyError(error),
-          errorMessage: extractErrorMessage(error),
+          errorMessage: isAbort ? `Timeout: Gemini no respondió en ${LLM_CALL_TIMEOUT_MS / 1000}s` : extractErrorMessage(error),
           threadId,
           resolved: false,
           fallbackUsed: undefined,
@@ -497,13 +516,22 @@ export const generateResponseAsync = internalAction({
     if (!result && openaiEnabled) {
       const openaiStart = Date.now();
       console.log("[GenerateResponse] 📍 PASO 3B: Intentando con OpenAI (fallback)...");
-      
+
+      // Abort timeout para OpenAI también
+      const syncOpenaiController = new AbortController();
+      const syncOpenaiTimer = setTimeout(() => {
+        console.warn(`[GenerateResponse] ⏱️ OpenAI generateText excedió ${LLM_CALL_TIMEOUT_MS / 1000}s — abortando`);
+        syncOpenaiController.abort();
+      }, LLM_CALL_TIMEOUT_MS);
+
       try {
         result = await generateText({
           ...preparedArgs,
           model: openaiConfig.model,
           maxRetries: 0,
+          abortSignal: syncOpenaiController.signal,
         });
+        clearTimeout(syncOpenaiTimer);
         
         usedProvider = "openai";
         logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, true, Date.now() - openaiStart);
@@ -524,6 +552,7 @@ export const generateResponseAsync = internalAction({
         }
         
       } catch (error) {
+        clearTimeout(syncOpenaiTimer);
         openaiError = error instanceof Error ? error : new Error(String(error));
         logLLMAttempt(openaiConfig.provider, openaiConfig.modelId, false, Date.now() - openaiStart);
         console.error(`[GenerateResponse] ❌ OpenAI también falló: ${extractErrorMessage(error)}`);
