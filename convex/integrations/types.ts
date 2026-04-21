@@ -103,6 +103,7 @@ export interface UpdateProjectInput {
   startDate?: string;
   endDate?: string;
   deliverables?: number;
+  pmId?: number;
   estimatedTime?: number;
   status?: string;
 }

@@ -1470,6 +1470,7 @@ export const publishTaskToExternalAction = internalAction({
       // Verificar si existe un proyecto local en la tabla projects
       let corProjectId: number | undefined;
       let localProjectDeliverables: number | undefined;
+      let localProjectPmId: number | undefined;
       const projectId = (task as any).projectId as string | undefined;
 
       if (projectId) {
@@ -1478,6 +1479,7 @@ export const publishTaskToExternalAction = internalAction({
           projectId: projectId as any,
         });
         localProjectDeliverables = localProject?.deliverables;
+        localProjectPmId = localProject?.pmId;
 
         if (localProject?.corProjectId) {
           // El proyecto ya fue publicado en COR — reutilizar
@@ -1522,21 +1524,30 @@ export const publishTaskToExternalAction = internalAction({
         console.log(`[PublishTask] ✅ Proyecto creado en COR: ID ${corProjectId}`);
       }
 
-      // 3.5 Guardar deliverables en COR (solo soportado por endpoint de update)
-      if (corProjectId && localProjectDeliverables !== undefined) {
-        console.log(`[PublishTask] 📝 Guardando deliverables en proyecto COR ${corProjectId}...`);
-        const deliverablesUpdate = await provider.updateProject(corProjectId, {
+      // 3.5 Guardar campos soportados solo por update (deliverables, pm_id)
+      if (
+        corProjectId &&
+        (localProjectDeliverables !== undefined || localProjectPmId !== undefined)
+      ) {
+        console.log(
+          `[PublishTask] 📝 Guardando deliverables/pm_id en proyecto COR ${corProjectId}...`
+        );
+
+        const projectUpdate = await provider.updateProject(corProjectId, {
           deliverables: localProjectDeliverables,
+          pmId: localProjectPmId,
         });
 
-        if (!deliverablesUpdate.success) {
+        if (!projectUpdate.success) {
           throw new Error(
-            deliverablesUpdate.error ||
-              `No se pudo guardar deliverables en proyecto COR ${corProjectId}`
+            projectUpdate.error ||
+              `No se pudo guardar deliverables/pm_id en proyecto COR ${corProjectId}`
           );
         }
 
-        console.log(`[PublishTask] ✅ Deliverables guardados en proyecto COR ${corProjectId}`);
+        console.log(
+          `[PublishTask] ✅ Deliverables/pm_id guardados en proyecto COR ${corProjectId}`
+        );
       }
 
       console.log(`[PublishTask] ✅ Proyecto listo: corProjectId=${corProjectId}`);

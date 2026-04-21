@@ -141,6 +141,18 @@ function parseDeliverablesFromCOR(value: unknown): number | undefined {
   return undefined;
 }
 
+function mapPmIdToCOR(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 10);
+      return parsed > 0 ? parsed : undefined;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Normaliza description al formato esperado por COR.
  * Si ya viene como HTML, se envía tal cual.
@@ -598,6 +610,12 @@ export function createCORProvider(): ProjectManagementProvider {
         const deliverables = mapDeliverablesToCOR(deliverablesCandidate);
         if (deliverables !== undefined) {
           updateBody.deliverables = deliverables;
+        }
+
+        const pmIdCandidate = data.pmId ?? currentProject.pm_id;
+        const pmId = mapPmIdToCOR(pmIdCandidate);
+        if (pmId !== undefined) {
+          updateBody.pm_id = pmId;
         }
 
         if (data.startDate) {
