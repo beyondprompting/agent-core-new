@@ -5,6 +5,7 @@ import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Pencil, Check, X as XIcon, Cloud } from "lucide-react";
 import type { Id, Doc } from "@/convex/_generated/dataModel";
+import DOMPurify from "dompurify";
 
 // ==================== Tipos ====================
 
@@ -21,6 +22,7 @@ interface EditableFieldProps {
   multiline?: boolean;
   editable?: boolean;
   inputType?: "text" | "date" | "number";
+  renderHtml?: boolean;
   onSave?: (fieldKey: string, newValue: string) => Promise<void>;
 }
 
@@ -32,6 +34,7 @@ function EditableField({
   multiline = false,
   editable = false,
   inputType = "text",
+  renderHtml = false,
   onSave,
 }: EditableFieldProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -139,6 +142,28 @@ function EditableField({
                 </button>
               </div>
             </div>
+          ) : renderHtml ? (
+            <div
+              className="text-sm text-foreground mt-0.5 whitespace-pre-wrap [&_a]:text-primary [&_a]:underline"
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(value || "No especificado", {
+                  ALLOWED_TAGS: [
+                    "br",
+                    "strong",
+                    "em",
+                    "u",
+                    "s",
+                    "a",
+                    "span",
+                    "p",
+                    "ul",
+                    "ol",
+                    "li",
+                  ],
+                  ALLOWED_ATTR: ["href", "target", "rel", "style"],
+                }),
+              }}
+            />
           ) : (
             <p
               className={`text-sm text-foreground mt-0.5 ${
@@ -432,6 +457,7 @@ export function ProjectBriefContent({
           value={project.brief || ""}
           fieldKey="brief"
           multiline
+          renderHtml
           editable={editable}
           onSave={handleSaveField}
         />

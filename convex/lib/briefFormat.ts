@@ -36,12 +36,7 @@ function escapeHtml(value: string): string {
 }
 
 function textToParagraphs(text: string): string {
-  return text
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`)
-    .join("\n");
+  return escapeHtml(text).replace(/\n/g, "<br>\n");
 }
 
 export function isStrategicPriority(value: string): value is StrategicPriority {
@@ -50,7 +45,7 @@ export function isStrategicPriority(value: string): value is StrategicPriority {
 
 export function renderStrategicPriorityHtml(priority: StrategicPriority): string {
   const color = STRATEGIC_PRIORITY_COLORS[priority];
-  return `<p>Prioridad Estratégica: <span style=\"font-weight:600;color:${color};\">${priority}</span></p>`;
+  return `Prioridad Estratégica: <span style=\"font-weight:600;color:${color};\">${priority}</span>`;
 }
 
 /**
@@ -59,6 +54,10 @@ export function renderStrategicPriorityHtml(priority: StrategicPriority): string
  */
 export function removeStrategicPriority(description: string): string {
   const withoutHtmlPriority = description
+    .replace(
+      /\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<span[^>]*>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?:<\/span>)?\s*<br\s*\/?>\s*/gi,
+      ""
+    )
     .replace(
       /<p[^>]*>\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<span[^>]*>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?:<\/span>)?\s*<\/p>\s*/gi,
       ""
@@ -90,7 +89,7 @@ export function prependStrategicPriority(description: string, priority: Strategi
   const clean = removeStrategicPriority(description);
   const baseHtml = ensureHtmlDescription(clean);
   const priorityHtml = renderStrategicPriorityHtml(priority);
-  return baseHtml ? `${priorityHtml}\n${baseHtml}` : priorityHtml;
+  return baseHtml ? `${priorityHtml}<br>\n${baseHtml}` : priorityHtml;
 }
 
 /**
@@ -118,25 +117,25 @@ export function buildBriefDescription(fields: {
   additionalNotes?: string;
   strategicPriority?: string;
 }): string {
-  const paragraphs: string[] = [];
+  const lines: string[] = [];
 
   if (fields.strategicPriority && isStrategicPriority(fields.strategicPriority)) {
-    paragraphs.push(renderStrategicPriorityHtml(fields.strategicPriority));
+    lines.push(renderStrategicPriorityHtml(fields.strategicPriority));
   }
 
-  paragraphs.push(`<p>Tipo de requerimiento: ${escapeHtml(fields.requestType)}</p>`);
+  lines.push(`Tipo de requerimiento: ${escapeHtml(fields.requestType)}`);
   // Marca NO se incluye — se guarda en task.corClientName (field dedicado)
   // deadline y deliverables NO se incluyen — tienen fields dedicados
-  if (fields.objective) paragraphs.push(`<p>Objetivo: ${escapeHtml(fields.objective)}</p>`);
-  if (fields.keyMessage) paragraphs.push(`<p>Mensaje clave: ${escapeHtml(fields.keyMessage)}</p>`);
-  if (fields.kpis) paragraphs.push(`<p>KPIs: ${escapeHtml(fields.kpis)}</p>`);
-  if (fields.budget) paragraphs.push(`<p>Presupuesto: ${escapeHtml(fields.budget)}</p>`);
-  if (fields.approvers) paragraphs.push(`<p>Aprobadores: ${escapeHtml(fields.approvers)}</p>`);
+  if (fields.objective) lines.push(`Objetivo: ${escapeHtml(fields.objective)}`);
+  if (fields.keyMessage) lines.push(`Mensaje clave: ${escapeHtml(fields.keyMessage)}`);
+  if (fields.kpis) lines.push(`KPIs: ${escapeHtml(fields.kpis)}`);
+  if (fields.budget) lines.push(`Presupuesto: ${escapeHtml(fields.budget)}`);
+  if (fields.approvers) lines.push(`Aprobadores: ${escapeHtml(fields.approvers)}`);
   if (fields.additionalNotes) {
-    paragraphs.push(`<p>Notas adicionales:<br>${escapeHtml(fields.additionalNotes).replace(/\n/g, "<br>")}</p>`);
+    lines.push(`Notas adicionales: ${escapeHtml(fields.additionalNotes).replace(/\n/g, "<br>")}`);
   }
 
-  return paragraphs.join("\n");
+  return lines.join("<br>\n");
 }
 
 // ==================== MAPEO DE PRIORIDADES ====================

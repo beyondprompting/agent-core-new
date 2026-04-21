@@ -1485,10 +1485,12 @@ export const publishTaskToExternalAction = internalAction({
           // Crear el proyecto en COR
           console.log(`[PublishTask] 📁 Creando proyecto en COR para cliente ID: ${clientId}...`);
           const projectName = localProject?.name || `${task.corClientName || "Sin cliente"} - ${task.title}`;
+          const corProjectBrief = localProject?.brief ? `Brief: ${localProject.brief}` : undefined;
 
           const project = await provider.createProject({
             name: projectName,
             clientId,
+            description: corProjectBrief,
             deadline: localProject?.endDate || task.deadline,
             estimatedTime: localProject?.estimatedTime,
           });
