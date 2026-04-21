@@ -45,7 +45,7 @@ export function isStrategicPriority(value: string): value is StrategicPriority {
 
 export function renderStrategicPriorityHtml(priority: StrategicPriority): string {
   const color = STRATEGIC_PRIORITY_COLORS[priority];
-  return `Prioridad Estratégica: <span style=\"font-weight:600;color:${color};\">${priority}</span>`;
+  return `<strong>Prioridad Estratégica:</strong> <span style=\"font-weight:600;color:${color};\">${priority}</span>`;
 }
 
 /**
@@ -55,15 +55,15 @@ export function renderStrategicPriorityHtml(priority: StrategicPriority): string
 export function removeStrategicPriority(description: string): string {
   const withoutHtmlPriority = description
     .replace(
-      /\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<span[^>]*>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?:<\/span>)?\s*<br\s*\/?>\s*/gi,
+      /\s*(?:<strong[^>]*>)?\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<\/strong>)?\s*(?:<span[^>]*>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?:<\/span>)?\s*<br\s*\/?>\s*/gi,
       ""
     )
     .replace(
-      /<p[^>]*>\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<span[^>]*>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?:<\/span>)?\s*<\/p>\s*/gi,
+      /<p[^>]*>\s*(?:<strong[^>]*>)?\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<\/strong>)?\s*(?:<span[^>]*>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?:<\/span>)?\s*<\/p>\s*/gi,
       ""
     )
     .replace(
-      /(^|\n)\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?=\n|$)/gi,
+      /(^|\n)\s*(?:<strong[^>]*>)?\s*Prioridad\s*Estrat[eé]gica\s*:\s*(?:<\/strong>)?\s*(?:I_U|I_NU|NI_U|NI_NU)\s*(?=\n|$)/gi,
       "\n"
     )
     .trim();
@@ -123,19 +123,19 @@ export function buildBriefDescription(fields: {
     lines.push(renderStrategicPriorityHtml(fields.strategicPriority));
   }
 
-  lines.push(`Tipo de requerimiento: ${escapeHtml(fields.requestType)}`);
+  lines.push(`<strong>Tipo de requerimiento:</strong> ${escapeHtml(fields.requestType)}`);
   // Marca NO se incluye — se guarda en task.corClientName (field dedicado)
   // deadline NO se incluye — tiene field dedicado
   if (fields.deliverables) {
-    lines.push(`Entregables: ${escapeHtml(fields.deliverables).replace(/\n/g, "<br>")}`);
+    lines.push(`<strong>Entregables:</strong> ${escapeHtml(fields.deliverables).replace(/\n/g, "<br>")}`);
   }
-  if (fields.objective) lines.push(`Objetivo: ${escapeHtml(fields.objective)}`);
-  if (fields.keyMessage) lines.push(`Mensaje clave: ${escapeHtml(fields.keyMessage)}`);
-  if (fields.kpis) lines.push(`KPIs: ${escapeHtml(fields.kpis)}`);
-  if (fields.budget) lines.push(`Presupuesto: ${escapeHtml(fields.budget)}`);
-  if (fields.approvers) lines.push(`Aprobadores: ${escapeHtml(fields.approvers)}`);
+  if (fields.objective) lines.push(`<strong>Objetivo:</strong> ${escapeHtml(fields.objective)}`);
+  if (fields.keyMessage) lines.push(`<strong>Mensaje clave:</strong> ${escapeHtml(fields.keyMessage)}`);
+  if (fields.kpis) lines.push(`<strong>KPIs:</strong> ${escapeHtml(fields.kpis)}`);
+  if (fields.budget) lines.push(`<strong>Presupuesto:</strong> ${escapeHtml(fields.budget)}`);
+  if (fields.approvers) lines.push(`<strong>Aprobadores:</strong> ${escapeHtml(fields.approvers)}`);
   if (fields.additionalNotes) {
-    lines.push(`Notas adicionales: ${escapeHtml(fields.additionalNotes).replace(/\n/g, "<br>")}`);
+    lines.push(`<strong>Notas adicionales:</strong> ${escapeHtml(fields.additionalNotes).replace(/\n/g, "<br>")}`);
   }
 
   return lines.join("<br>\n");
