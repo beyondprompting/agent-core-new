@@ -16,13 +16,19 @@
 import { v } from "convex/values";
 import {
   mutation,
+  internalQuery,
   internalMutation,
   internalAction,
 } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
+import { paginationOptsValidator } from "convex/server";
 import { internal } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getProjectManagementProvider } from "../integrations/registry";
 import { hashText } from "../lib/briefFormat";
+
+const SCHEDULED_SYNC_BATCH_SIZE = 100;
+const TASK_LOCAL_EDIT_GRACE_MS = 60_000;
 
 // ==================== ENTRY POINT (pública) ====================
 
@@ -186,6 +192,239 @@ export const pullFromCORAction = internalAction({
         error instanceof Error ? error.message : error
       );
     }
+  },
+});
+
+// ==================== SCHEDULED INBOUND SYNC (cron) ====================
+
+/**
+ * Lista paginada de tasks locales para sync programado.
+ * Incluye todas las tasks de la tabla; las no publicadas se omiten en worker.
+ */
+export const listTasksForScheduledPull = internalQuery({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("tasks")
+      .order("asc")
+      .paginate(args.paginationOpts);
+  },
+});
+
+/**
+ * Lista paginada de proyectos locales para sync programado.
+ * Incluye todos los proyectos de la tabla; los no publicados se omiten en worker.
+ */
+export const listProjectsForScheduledPull = internalQuery({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("projects")
+      .order("asc")
+      .paginate(args.paginationOpts);
+  },
+});
+
+/**
+ * Orquestador programado por cron (cada 10 min).
+ * Recorre completamente tasks y proyectos en lotes y schedula workers para cada entidad.
+ */
+export const runScheduledInboundSyncAction = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    console.log("\n========================================");
+    console.log("[InboundSync][Cron] ⏱️ Inicio corrida programada COR → Convex");
+    console.log("========================================\n");
+
+    let taskCount = 0;
+    let projectCount = 0;
+
+    let taskCursor: string | null = null;
+    while (true) {
+      const tasksPage: {
+        page: Array<{ _id: Id<"tasks"> }>;
+        isDone: boolean;
+        continueCursor: string;
+      } = await ctx.runQuery(
+        internal.data.corInboundSync.listTasksForScheduledPull,
+        {
+          paginationOpts: { cursor: taskCursor, numItems: SCHEDULED_SYNC_BATCH_SIZE },
+        }
+      );
+
+      for (const task of tasksPage.page) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.data.corInboundSync.pullTaskFromCORWorker,
+          { taskId: task._id }
+        );
+        taskCount += 1;
+      }
+
+      if (tasksPage.isDone) break;
+      taskCursor = tasksPage.continueCursor;
+    }
+
+    let projectCursor: string | null = null;
+    while (true) {
+      const projectsPage: {
+        page: Array<{ _id: Id<"projects"> }>;
+        isDone: boolean;
+        continueCursor: string;
+      } = await ctx.runQuery(
+        internal.data.corInboundSync.listProjectsForScheduledPull,
+        {
+          paginationOpts: {
+            cursor: projectCursor,
+            numItems: SCHEDULED_SYNC_BATCH_SIZE,
+          },
+        }
+      );
+
+      for (const project of projectsPage.page) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.data.corInboundSync.pullProjectFromCORWorker,
+          { projectId: project._id }
+        );
+        projectCount += 1;
+      }
+
+      if (projectsPage.isDone) break;
+      projectCursor = projectsPage.continueCursor;
+    }
+
+    console.log(
+      `[InboundSync][Cron] ✅ Corrida programada despachada. Tasks: ${taskCount}, Proyectos: ${projectCount}`
+    );
+  },
+});
+
+/**
+ * Worker de task para sync inbound programado.
+ * Evita conflictos saltando tasks en syncing/retrying o recién editadas localmente.
+ */
+export const pullTaskFromCORWorker = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const task = await ctx.runQuery(internal.data.tasks.getTaskByIdInternal, {
+      taskId: args.taskId as unknown as string,
+    });
+
+    if (!task) return;
+
+    if (!task.corTaskId) {
+      console.log(
+        `[InboundSync][Cron] ⏭️ Task ${args.taskId} sin corTaskId, se omite` 
+      );
+      return;
+    }
+
+    if (task.corSyncStatus === "syncing" || task.corSyncStatus === "retrying") {
+      console.log(
+        `[InboundSync][Cron] ⏭️ Task ${args.taskId} en ${task.corSyncStatus}, se omite` 
+      );
+      return;
+    }
+
+    if (
+      task.lastLocalEditAt &&
+      Date.now() - task.lastLocalEditAt < TASK_LOCAL_EDIT_GRACE_MS
+    ) {
+      console.log(
+        `[InboundSync][Cron] ⏭️ Task ${args.taskId} editada recientemente, se omite` 
+      );
+      return;
+    }
+
+    const corTaskId = Number(task.corTaskId);
+    if (!Number.isFinite(corTaskId)) {
+      console.warn(
+        `[InboundSync][Cron] ⚠️ Task ${args.taskId} tiene corTaskId inválido (${task.corTaskId})`
+      );
+      return;
+    }
+
+    const provider = getProjectManagementProvider();
+    const corTask = await provider.getTask(corTaskId);
+    if (!corTask) {
+      console.warn(
+        `[InboundSync][Cron] ⚠️ Task COR ${task.corTaskId} no encontrada para task ${args.taskId}`
+      );
+      return;
+    }
+
+    await ctx.runMutation(internal.data.corInboundSync.applyInboundTaskUpdate, {
+      taskId: args.taskId,
+      corTitle: corTask.title,
+      corDescription: corTask.description ?? undefined,
+      corDeadline: corTask.deadline ?? undefined,
+      corPriority: corTask.priority ?? undefined,
+      corStatus: corTask.status ?? undefined,
+    });
+  },
+});
+
+/**
+ * Worker de proyecto para sync inbound programado.
+ * Evita conflictos saltando proyectos en syncing/retrying.
+ */
+export const pullProjectFromCORWorker = internalAction({
+  args: {
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    const project = await ctx.runQuery(internal.data.projects.getProjectInternal, {
+      projectId: args.projectId,
+    });
+
+    if (!project) return;
+
+    if (!project.corProjectId) {
+      console.log(
+        `[InboundSync][Cron] ⏭️ Proyecto ${args.projectId} sin corProjectId, se omite`
+      );
+      return;
+    }
+
+    if (
+      project.corSyncStatus === "syncing" ||
+      project.corSyncStatus === "retrying"
+    ) {
+      console.log(
+        `[InboundSync][Cron] ⏭️ Proyecto ${args.projectId} en ${project.corSyncStatus}, se omite`
+      );
+      return;
+    }
+
+    const provider = getProjectManagementProvider();
+    const corProject = await provider.getProject(project.corProjectId);
+    if (!corProject) {
+      console.warn(
+        `[InboundSync][Cron] ⚠️ Proyecto COR ${project.corProjectId} no encontrado para proyecto ${args.projectId}`
+      );
+      return;
+    }
+
+    await ctx.runMutation(
+      internal.data.corInboundSync.applyInboundProjectUpdate,
+      {
+        projectId: args.projectId,
+        corName: corProject.name,
+        corBrief: corProject.brief ?? undefined,
+        corStartDate: corProject.startDate ?? undefined,
+        corEndDate: corProject.endDate ?? undefined,
+        corDeliverables: corProject.deliverables ?? undefined,
+        corStatus: corProject.status ?? undefined,
+        corEstimatedTime: corProject.estimatedTime ?? undefined,
+      }
+    );
   },
 });
 

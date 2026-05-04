@@ -15,6 +15,7 @@ import type * as agents_orchestratorAgent from "../agents/orchestratorAgent.js";
 import type * as agents_priorityAgent from "../agents/priorityAgent.js";
 import type * as agents_reviewerAgent from "../agents/reviewerAgent.js";
 import type * as auth from "../auth.js";
+import type * as crons from "../crons.js";
 import type * as data_backfill from "../data/backfill.js";
 import type * as data_corClients from "../data/corClients.js";
 import type * as data_corInboundSync from "../data/corInboundSync.js";
@@ -75,6 +76,7 @@ declare const fullApi: ApiFromModules<{
   "agents/priorityAgent": typeof agents_priorityAgent;
   "agents/reviewerAgent": typeof agents_reviewerAgent;
   auth: typeof auth;
+  crons: typeof crons;
   "data/backfill": typeof data_backfill;
   "data/corClients": typeof data_corClients;
   "data/corInboundSync": typeof data_corInboundSync;
