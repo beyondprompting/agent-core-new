@@ -49,6 +49,12 @@ export default defineSchema({
     description: v.optional(v.string()),     // Contiene todos los datos del brief formateados
     deadline: v.optional(v.string()),
     priority: v.optional(v.number()),         // 0=Low, 1=Medium, 2=High, 3=Urgent
+    strategicPriority: v.optional(v.union(    // Prioridad estratégica (label en COR)
+      v.literal("I_U"),
+      v.literal("I_NU"),
+      v.literal("NI_U"),
+      v.literal("NI_NU")
+    )),
     status: v.string(),
     // === Campos internos (no van a COR) ===
     threadId: v.string(),

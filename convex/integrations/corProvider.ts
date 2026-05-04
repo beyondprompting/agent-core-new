@@ -17,6 +17,7 @@ import type {
   CreateProjectInput,
   CreateTaskInput,
   UpdateTaskInput,
+  SetTaskLabelInput,
   UpdateProjectInput,
   UploadTaskAttachmentInput,
   ExternalAttachmentResult,
@@ -566,6 +567,49 @@ export function createCORProvider(): ProjectManagementProvider {
         }
 
         console.log(`[COR Provider] ✅ Task ${taskId} actualizada correctamente`);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+
+    // ==================== SET TASK LABEL ====================
+
+    async setTaskLabel(
+      data: SetTaskLabelInput
+    ): Promise<{ success: boolean; error?: string }> {
+      console.log(
+        `[COR Provider] 🏷️ ${data.unassign ? "Desasignando" : "Asignando"} etiqueta ${data.labelId} en task ${data.taskId}`
+      );
+
+      try {
+        const body: Record<string, unknown> = {
+          label_id: data.labelId,
+        };
+
+        if (data.unassign) {
+          body.unassign = true;
+        }
+
+        const response = await corApiFetch(`/tasks/${data.taskId}/labels`, {
+          method: "PUT",
+          body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return {
+            success: false,
+            error: `COR API error: ${response.status} - ${errorText}`,
+          };
+        }
+
+        console.log(
+          `[COR Provider] ✅ Etiqueta ${data.labelId} ${data.unassign ? "desasignada" : "asignada"} en task ${data.taskId}`
+        );
         return { success: true };
       } catch (error) {
         return {

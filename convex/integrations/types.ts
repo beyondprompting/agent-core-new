@@ -97,6 +97,12 @@ export interface UpdateTaskInput {
   status?: string;
 }
 
+export interface SetTaskLabelInput {
+  taskId: number;
+  labelId: number;
+  unassign?: boolean;
+}
+
 export interface UpdateProjectInput {
   name?: string;
   brief?: string;
@@ -189,6 +195,14 @@ export interface ProjectManagementProvider {
   updateTask(
     taskId: number,
     data: UpdateTaskInput
+  ): Promise<{ success: boolean; error?: string }>;
+
+  /**
+   * Asignar o desasignar una etiqueta de una task.
+   * En COR: PUT /tasks/{task_id}/labels
+   */
+  setTaskLabel(
+    data: SetTaskLabelInput
   ): Promise<{ success: boolean; error?: string }>;
 
   /**
