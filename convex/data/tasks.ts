@@ -233,6 +233,12 @@ export const updateTaskFields = mutation({
       deadline: v.optional(v.string()),
       priority: v.optional(v.number()),     // 0=Low, 1=Medium, 2=High, 3=Urgent
       status: v.optional(v.string()),       // nueva, en_proceso, estancada, finalizada
+      strategicPriority: v.optional(v.union(
+        v.literal("I_U"),
+        v.literal("I_NU"),
+        v.literal("NI_U"),
+        v.literal("NI_NU"),
+      )),
     }),
   },
   handler: async (ctx, args) => {
@@ -973,7 +979,7 @@ export const listMyTasks = query({
  *   priority      →  priority
  *   status        →  status
  */
-const COR_SYNCABLE_FIELDS = new Set(["title", "description", "deadline", "priority", "status"]);
+const COR_SYNCABLE_FIELDS = new Set(["title", "description", "deadline", "priority", "status", "strategicPriority"]);
 
 /**
  * Mutation interna: programa la sincronización de ediciones locales hacia COR.
@@ -1135,21 +1141,41 @@ export const syncEditToCORAction = internalAction({
       } else {
         console.log(`[SyncEdit] 📝 Campos a sincronizar: ${syncableChanges.join(", ")}`);
 
+        const strategicPriorityChanged = syncableChanges.includes("strategicPriority");
+        const shouldSyncStrategicLabel =
+          strategicPriorityChanged &&
+          !!task.strategicPriority &&
+          isStrategicPriority(task.strategicPriority);
+
+        const taskFieldChanges = syncableChanges.filter((f) => f !== "strategicPriority");
+
         // Mapeo directo 1:1
-        if (syncableChanges.includes("title")) updatePayload.title = task.title;
-        if (syncableChanges.includes("description")) updatePayload.description = task.description || "";
-        if (syncableChanges.includes("deadline")) updatePayload.deadline = task.deadline;
-        if (syncableChanges.includes("priority")) updatePayload.priority = task.priority;
-        if (syncableChanges.includes("status")) updatePayload.status = task.status;
+        if (taskFieldChanges.includes("title")) updatePayload.title = task.title;
+        if (taskFieldChanges.includes("description")) updatePayload.description = task.description || "";
+        if (taskFieldChanges.includes("deadline")) updatePayload.deadline = task.deadline;
+        if (taskFieldChanges.includes("priority")) updatePayload.priority = task.priority;
+        if (taskFieldChanges.includes("status")) updatePayload.status = task.status;
 
         // 4. Actualizar la task en COR
-        console.log(`[SyncEdit] 🚀 Enviando actualización a COR task ${corTaskId}:`, Object.keys(updatePayload));
-        
-        const result = await provider.updateTask(parseInt(corTaskId), updatePayload as any);
+        if (Object.keys(updatePayload).length > 0) {
+          console.log(`[SyncEdit] 🚀 Enviando actualización a COR task ${corTaskId}:`, Object.keys(updatePayload));
 
-        if (!result.success) {
-          console.error(`[SyncEdit] ❌ Error actualizando COR: ${result.error}`);
-          throw new Error(result.error || "Error desconocido de COR");
+          const result = await provider.updateTask(parseInt(corTaskId), updatePayload as any);
+
+          if (!result.success) {
+            console.error(`[SyncEdit] ❌ Error actualizando COR: ${result.error}`);
+            throw new Error(result.error || "Error desconocido de COR");
+          }
+        }
+
+        if (shouldSyncStrategicLabel) {
+          console.log(
+            `[SyncEdit] 🏷️ Sincronizando etiqueta estratégica ${task.strategicPriority} en task COR ${corTaskId}`,
+          );
+          await syncStrategicPriorityLabelInCOR(
+            parseInt(corTaskId),
+            task.strategicPriority as StrategicPriority,
+          );
         }
       }
 
@@ -1318,7 +1344,7 @@ export const retryTaskSync = mutation({
     });
 
     // Sincronizar todos los campos sincronizables
-    const allSyncFields = ["title", "description", "deadline", "priority", "status"];
+    const allSyncFields = ["title", "description", "deadline", "priority", "status", "strategicPriority"];
     await ctx.scheduler.runAfter(0, internal.data.tasks.syncEditToCORAction, {
       taskId: args.taskId,
       changedFields: allSyncFields,
