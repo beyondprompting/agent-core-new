@@ -57,6 +57,15 @@ export interface ExternalTask {
   priority?: number;
 }
 
+/** Attachment de una task en sistema externo */
+export interface ExternalTaskAttachment {
+  id: number;
+  name: string;
+  url?: string;
+  mimeType?: string;
+  size?: number;
+}
+
 // ==================== INPUTS ====================
 
 export interface CreateProjectInput {
@@ -236,6 +245,11 @@ export interface ProjectManagementProvider {
    * Usado para backfill masivo de corClients.
    */
   listAllClients(): Promise<ExternalClient[]>;
+
+  /**
+   * Listar attachments de una task en el sistema externo.
+   */
+  getTaskAttachments(taskId: number): Promise<ExternalTaskAttachment[]>;
 }
 
 // ==================== TIPO DE CONFIGURACIÓN ====================

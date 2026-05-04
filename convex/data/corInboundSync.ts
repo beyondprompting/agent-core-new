@@ -22,14 +22,109 @@ import {
 } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
-import { internal } from "../_generated/api";
+import { internal, components } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { storeFile } from "@convex-dev/agent";
 import { getProjectManagementProvider } from "../integrations/registry";
 import { CORNotFoundError } from "../integrations/corProvider";
 import { hashText } from "../lib/briefFormat";
 
 const SCHEDULED_SYNC_BATCH_SIZE = 100;
 const TASK_LOCAL_EDIT_GRACE_MS = 60_000;
+
+async function syncTaskAttachmentsFromCOR(
+  ctx: any,
+  taskId: Id<"tasks">,
+  corTaskId: number,
+): Promise<void> {
+  const provider = getProjectManagementProvider();
+  const remoteAttachments = await provider.getTaskAttachments(corTaskId);
+  const localAttachments = await ctx.runQuery(internal.data.tasks.getTaskAttachments, {
+    taskId,
+  });
+
+  const remoteById = new Map<number, (typeof remoteAttachments)[number]>();
+  for (const remote of remoteAttachments) {
+    if (Number.isFinite(remote.id)) remoteById.set(remote.id, remote);
+  }
+
+  const localByCorId = new Map<number, (typeof localAttachments)[number]>();
+  for (const local of localAttachments) {
+    if (typeof local.corAttachmentId === "number") {
+      localByCorId.set(local.corAttachmentId, local);
+    }
+  }
+
+  let deletedCount = 0;
+  for (const [corAttachmentId, localAttachment] of localByCorId.entries()) {
+    if (!remoteById.has(corAttachmentId)) {
+      await ctx.runMutation(internal.data.tasks.deleteTaskAttachment, {
+        attachmentId: localAttachment._id,
+      });
+      deletedCount += 1;
+    }
+  }
+
+  let addedCount = 0;
+  for (const [corAttachmentId, remoteAttachment] of remoteById.entries()) {
+    if (localByCorId.has(corAttachmentId)) continue;
+    if (!remoteAttachment.url) {
+      console.warn(
+        `[InboundSync][Attachments] ⚠️ Attachment ${corAttachmentId} sin URL en COR, se omite`
+      );
+      continue;
+    }
+
+    try {
+      const response = await fetch(remoteAttachment.url);
+      if (!response.ok) {
+        console.warn(
+          `[InboundSync][Attachments] ⚠️ No se pudo descargar attachment ${corAttachmentId} (${response.status})`
+        );
+        continue;
+      }
+
+      const buffer = await response.arrayBuffer();
+      const mimeType = remoteAttachment.mimeType || response.headers.get("content-type") || "application/octet-stream";
+      const filename = remoteAttachment.name || `attachment_${corAttachmentId}`;
+
+      const { file } = await storeFile(
+        ctx,
+        components.agent,
+        new Blob([buffer], { type: mimeType }),
+        { filename },
+      );
+
+      const attachmentId = await ctx.runMutation(internal.data.tasks.createTaskAttachment, {
+        taskId,
+        fileId: file.fileId,
+        storageId: String(file.storageId),
+        filename,
+        mimeType,
+        size: remoteAttachment.size ?? buffer.byteLength,
+      });
+
+      await ctx.runMutation(internal.data.tasks.updateAttachmentCORSync, {
+        attachmentId,
+        corAttachmentId,
+        corUrl: remoteAttachment.url,
+      });
+
+      addedCount += 1;
+    } catch (error) {
+      console.warn(
+        `[InboundSync][Attachments] ⚠️ Error sincronizando attachment ${corAttachmentId}:`,
+        error
+      );
+    }
+  }
+
+  if (addedCount > 0 || deletedCount > 0) {
+    console.log(
+      `[InboundSync][Attachments] ✅ Task ${taskId}: +${addedCount} / -${deletedCount}`
+    );
+  }
+}
 
 // ==================== ENTRY POINT (pública) ====================
 
@@ -166,6 +261,7 @@ export const pullFromCORAction = internalAction({
           taskId: args.taskId,
           missing: false,
         });
+
         // Aplicar cambios de la task
         await ctx.runMutation(
           internal.data.corInboundSync.applyInboundTaskUpdate,
@@ -177,6 +273,12 @@ export const pullFromCORAction = internalAction({
             corPriority: corTask.priority ?? undefined,
             corStatus: corTask.status ?? undefined,
           }
+        );
+
+        await syncTaskAttachmentsFromCOR(
+          ctx,
+          args.taskId,
+          Number(task.corTaskId),
         );
       }
 
@@ -440,6 +542,12 @@ export const pullTaskFromCORWorker = internalAction({
       corPriority: corTask.priority ?? undefined,
       corStatus: corTask.status ?? undefined,
     });
+
+    await syncTaskAttachmentsFromCOR(
+      ctx,
+      args.taskId,
+      corTaskId,
+    );
   },
 });
 

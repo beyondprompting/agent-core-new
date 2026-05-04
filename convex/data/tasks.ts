@@ -435,6 +435,16 @@ export const updateAttachmentCORSync = internalMutation({
   },
 });
 
+// Mutation interna para eliminar un attachment local de task
+export const deleteTaskAttachment = internalMutation({
+  args: {
+    attachmentId: v.id("taskAttachments"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.attachmentId);
+  },
+});
+
 // Query interna para obtener attachments pendientes de sync (sin corAttachmentId)
 export const getPendingAttachments = internalQuery({
   args: {

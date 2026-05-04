@@ -14,6 +14,7 @@ import type {
   ExternalClient,
   ExternalProject,
   ExternalTask,
+  ExternalTaskAttachment,
   CreateProjectInput,
   CreateTaskInput,
   UpdateTaskInput,
@@ -492,6 +493,55 @@ export function createCORProvider(): ProjectManagementProvider {
         if (error instanceof CORNotFoundError) throw error;
         console.error(`[COR Provider] ❌ Error en getTask:`, error);
         return null;
+      }
+    },
+
+    // ==================== GET TASK ATTACHMENTS ====================
+
+    async getTaskAttachments(taskId: number): Promise<ExternalTaskAttachment[]> {
+      console.log(`[COR Provider] 📎 Obteniendo attachments de task: ${taskId}`);
+
+      try {
+        const response = await corApiFetch(`/tasks/${taskId}/attachments`);
+
+        if (!response.ok) {
+          console.error(`[COR Provider] ❌ Error obteniendo attachments: ${response.status}`);
+          return [];
+        }
+
+        const raw = await response.text();
+        if (!raw.trim()) return [];
+
+        const parsed = JSON.parse(raw);
+        const files = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed?.files)
+            ? parsed.files
+            : Array.isArray(parsed?.data)
+              ? parsed.data
+              : [];
+
+        const attachments: ExternalTaskAttachment[] = files
+          .map((f: Record<string, unknown>) => ({
+            id: Number(f.id),
+            name:
+              (f.originalname as string) ||
+              (f.name as string) ||
+              (f.filename as string) ||
+              `attachment_${String(f.id || "unknown")}`,
+            url: (f.url as string) || undefined,
+            mimeType: (f.mimetype as string) || (f.mimeType as string) || undefined,
+            size:
+              typeof f.size === "number"
+                ? (f.size as number)
+                : undefined,
+          }))
+          .filter((f: ExternalTaskAttachment) => Number.isFinite(f.id));
+
+        return attachments;
+      } catch (error) {
+        console.error(`[COR Provider] ❌ Error en getTaskAttachments:`, error);
+        return [];
       }
     },
 

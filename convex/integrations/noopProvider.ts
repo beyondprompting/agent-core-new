@@ -15,6 +15,7 @@ import type {
   ExternalClient,
   ExternalProject,
   ExternalTask,
+  ExternalTaskAttachment,
   CreateProjectInput,
   CreateTaskInput,
   UpdateTaskInput,
@@ -61,6 +62,11 @@ export function createNoopProvider(): ProjectManagementProvider {
     async getTask(_taskId: number): Promise<ExternalTask | null> {
       console.log("[Noop Provider] getTask — no hay integración externa configurada");
       return null;
+    },
+
+    async getTaskAttachments(_taskId: number): Promise<ExternalTaskAttachment[]> {
+      console.log("[Noop Provider] getTaskAttachments — no hay integración externa configurada");
+      return [];
     },
 
     async getProject(_projectId: number): Promise<ExternalProject | null> {
