@@ -87,6 +87,7 @@ export const createTaskInternal = internalMutation({
       priority: args.priority ?? 1,
       threadId: args.threadId,
       status: args.status,
+      convexStatus: "active",
       createdBy: args.createdBy,
       // Referencia al proyecto local
       projectId: args.projectId as any,
@@ -170,6 +171,7 @@ export const getTaskByThreadInternal = internalQuery({
       .query("tasks")
       .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
       .first();
+    if (task?.convexStatus === "deleted") return null;
     return task;
   },
 });
@@ -186,7 +188,9 @@ export const getTaskByIdInternal = internalQuery({
         .query("tasks")
         .filter((q) => q.eq(q.field("_id"), args.taskId))
         .collect();
-      return tasks[0] || null;
+      const task = tasks[0] || null;
+      if (task?.convexStatus === "deleted") return null;
+      return task;
     } catch {
       return null;
     }
@@ -204,6 +208,7 @@ export const getTaskByCORIdInternal = internalQuery({
       .query("tasks")
       .filter((q) => q.eq(q.field("corTaskId"), args.corTaskId))
       .first();
+    if (task?.convexStatus === "deleted") return null;
     return task;
   },
 });
@@ -686,6 +691,7 @@ export const createProjectAndTask = internalMutation({
         startDate: new Date().toISOString().split("T")[0],
         endDate: args.projectEndDate,
         status: "active",
+        convexStatus: "active",
         pmId: args.projectPmId,
         deliverables: args.projectDeliverables,
         estimatedTime: args.projectEstimatedTime,
@@ -706,6 +712,7 @@ export const createProjectAndTask = internalMutation({
       priority: args.taskPriority ?? 1,
       threadId: args.threadId,
       status: args.taskStatus,
+      convexStatus: "active",
       createdBy: args.taskCreatedBy,
       projectId: projectId as any,
       corSyncStatus: "pending",
@@ -885,6 +892,7 @@ export const getTaskByThread = query({
       .query("tasks")
       .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
       .first();
+    if (task?.convexStatus === "deleted") return null;
     
     return task;
   },
@@ -896,7 +904,9 @@ export const getTask = query({
     taskId: v.id("tasks"),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.taskId);
+    const task = await ctx.db.get(args.taskId);
+    if (task?.convexStatus === "deleted") return null;
+    return task;
   },
 });
 
@@ -907,12 +917,14 @@ export const listTasks = query({
   },
   handler: async (ctx, args) => {
     if (args.status) {
-      return await ctx.db
+      const tasks = await ctx.db
         .query("tasks")
         .withIndex("by_status", (q) => q.eq("status", args.status!))
         .collect();
+      return tasks.filter((t) => t.convexStatus !== "deleted");
     }
-    return await ctx.db.query("tasks").collect();
+    const allTasks = await ctx.db.query("tasks").collect();
+    return allTasks.filter((t) => t.convexStatus !== "deleted");
   },
 });
 
@@ -922,10 +934,11 @@ export const listByThread = query({
     threadId: v.string(),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const tasks = await ctx.db
       .query("tasks")
       .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
       .collect();
+    return tasks.filter((t) => t.convexStatus !== "deleted");
   },
 });
 
@@ -956,6 +969,8 @@ export const listMyTasks = query({
       .withIndex("by_createdBy", (q) => q.eq("createdBy", userIdStr))
       .order("desc")
       .collect();
+
+    tasks = tasks.filter((t) => t.convexStatus !== "deleted");
     
     // Filtrar por status si se proporcionó
     if (args.status) {
@@ -963,6 +978,33 @@ export const listMyTasks = query({
     }
     
     return tasks;
+  },
+});
+
+/**
+ * Soft delete de task local (Convex): marca convexStatus="deleted".
+ * No elimina ni modifica nada en COR.
+ */
+export const softDeleteTask = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("No autenticado");
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task no encontrada");
+
+    if (task.convexStatus === "deleted") {
+      return { success: true, message: "La task ya estaba eliminada." };
+    }
+
+    await ctx.db.patch(args.taskId, {
+      convexStatus: "deleted",
+    });
+
+    return { success: true, message: "Task eliminada del panel." };
   },
 });
 

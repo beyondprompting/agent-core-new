@@ -36,6 +36,18 @@ interface CORTokenResponse {
   refresh_token?: string;
 }
 
+export class CORNotFoundError extends Error {
+  readonly entity: "task" | "project";
+  readonly externalId: number;
+
+  constructor(entity: "task" | "project", externalId: number) {
+    super(`${entity} not found in COR (${externalId})`);
+    this.name = "CORNotFoundError";
+    this.entity = entity;
+    this.externalId = externalId;
+  }
+}
+
 // ==================== HELPERS HTTP ====================
 
 /**
@@ -453,11 +465,19 @@ export function createCORProvider(): ProjectManagementProvider {
         const response = await corApiFetch(`/tasks/${taskId}`);
 
         if (!response.ok) {
+          if (response.status === 404) {
+            throw new CORNotFoundError("task", taskId);
+          }
           console.error(`[COR Provider] ❌ Error obteniendo task: ${response.status}`);
           return null;
         }
 
-        const task = await response.json();
+        const rawTask = await response.text();
+        if (!rawTask.trim()) {
+          throw new CORNotFoundError("task", taskId);
+        }
+
+        const task = JSON.parse(rawTask);
 
         return {
           id: task.id,
@@ -469,6 +489,7 @@ export function createCORProvider(): ProjectManagementProvider {
           priority: task.priority,
         };
       } catch (error) {
+        if (error instanceof CORNotFoundError) throw error;
         console.error(`[COR Provider] ❌ Error en getTask:`, error);
         return null;
       }
@@ -483,11 +504,19 @@ export function createCORProvider(): ProjectManagementProvider {
         const response = await corApiFetch(`/projects/${projectId}`);
 
         if (!response.ok) {
+          if (response.status === 404) {
+            throw new CORNotFoundError("project", projectId);
+          }
           console.error(`[COR Provider] ❌ Error obteniendo proyecto: ${response.status}`);
           return null;
         }
 
-        const project = await response.json();
+        const rawProject = await response.text();
+        if (!rawProject.trim()) {
+          throw new CORNotFoundError("project", projectId);
+        }
+
+        const project = JSON.parse(rawProject);
 
         return {
           id: project.id,
@@ -501,6 +530,7 @@ export function createCORProvider(): ProjectManagementProvider {
           estimatedTime: project.estimated_time,
         };
       } catch (error) {
+        if (error instanceof CORNotFoundError) throw error;
         console.error(`[COR Provider] ❌ Error en getProject:`, error);
         return null;
       }

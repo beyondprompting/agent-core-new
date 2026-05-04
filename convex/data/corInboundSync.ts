@@ -25,6 +25,7 @@ import { paginationOptsValidator } from "convex/server";
 import { internal } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getProjectManagementProvider } from "../integrations/registry";
+import { CORNotFoundError } from "../integrations/corProvider";
 import { hashText } from "../lib/briefFormat";
 
 const SCHEDULED_SYNC_BATCH_SIZE = 100;
@@ -135,13 +136,36 @@ export const pullFromCORAction = internalAction({
       console.log(
         `[InboundSync] 📡 Consultando task COR ${task.corTaskId}...`
       );
-      const corTask = await provider.getTask(parseInt(task.corTaskId));
+      let corTask = null;
+      try {
+        corTask = await provider.getTask(parseInt(task.corTaskId));
+      } catch (error) {
+        if (error instanceof CORNotFoundError) {
+          await ctx.runMutation(
+            internal.data.corInboundSync.setTaskNotFoundInCOR,
+            {
+              taskId: args.taskId,
+              missing: true,
+            }
+          );
+          console.warn(
+            `[InboundSync] ⚠️ Task COR ${task.corTaskId} no encontrada para task ${args.taskId}`
+          );
+          corTask = null;
+        } else {
+          throw error;
+        }
+      }
 
       if (!corTask) {
         console.warn(
           `[InboundSync] ⚠️ Task COR ${task.corTaskId} no encontrada (¿eliminada?)`
         );
       } else {
+        await ctx.runMutation(internal.data.corInboundSync.setTaskNotFoundInCOR, {
+          taskId: args.taskId,
+          missing: false,
+        });
         // Aplicar cambios de la task
         await ctx.runMutation(
           internal.data.corInboundSync.applyInboundTaskUpdate,
@@ -161,13 +185,39 @@ export const pullFromCORAction = internalAction({
         console.log(
           `[InboundSync] 📡 Consultando proyecto COR ${task.corProjectId}...`
         );
-        const corProject = await provider.getProject(task.corProjectId);
+        let corProject = null;
+        try {
+          corProject = await provider.getProject(task.corProjectId);
+        } catch (error) {
+          if (error instanceof CORNotFoundError) {
+            await ctx.runMutation(
+              internal.data.corInboundSync.setProjectNotFoundInCOR,
+              {
+                projectId: task.projectId,
+                missing: true,
+              }
+            );
+            console.warn(
+              `[InboundSync] ⚠️ Proyecto COR ${task.corProjectId} no encontrado para proyecto ${task.projectId}`
+            );
+            corProject = null;
+          } else {
+            throw error;
+          }
+        }
 
         if (!corProject) {
           console.warn(
             `[InboundSync] ⚠️ Proyecto COR ${task.corProjectId} no encontrado (¿eliminado?)`
           );
         } else {
+          await ctx.runMutation(
+            internal.data.corInboundSync.setProjectNotFoundInCOR,
+            {
+              projectId: task.projectId,
+              missing: false,
+            }
+          );
           await ctx.runMutation(
             internal.data.corInboundSync.applyInboundProjectUpdate,
             {
@@ -208,6 +258,7 @@ export const listTasksForScheduledPull = internalQuery({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("tasks")
+      .filter((q) => q.neq(q.field("convexStatus"), "deleted"))
       .order("asc")
       .paginate(args.paginationOpts);
   },
@@ -224,6 +275,7 @@ export const listProjectsForScheduledPull = internalQuery({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("projects")
+      .filter((q) => q.neq(q.field("convexStatus"), "deleted"))
       .order("asc")
       .paginate(args.paginationOpts);
   },
@@ -352,13 +404,33 @@ export const pullTaskFromCORWorker = internalAction({
     }
 
     const provider = getProjectManagementProvider();
-    const corTask = await provider.getTask(corTaskId);
+    let corTask = null;
+    try {
+      corTask = await provider.getTask(corTaskId);
+    } catch (error) {
+      if (error instanceof CORNotFoundError) {
+        await ctx.runMutation(internal.data.corInboundSync.setTaskNotFoundInCOR, {
+          taskId: args.taskId,
+          missing: true,
+        });
+        console.warn(
+          `[InboundSync][Cron] ⚠️ Task COR ${task.corTaskId} no encontrada para task ${args.taskId}`
+        );
+        return;
+      }
+      throw error;
+    }
     if (!corTask) {
       console.warn(
         `[InboundSync][Cron] ⚠️ Task COR ${task.corTaskId} no encontrada para task ${args.taskId}`
       );
       return;
     }
+
+    await ctx.runMutation(internal.data.corInboundSync.setTaskNotFoundInCOR, {
+      taskId: args.taskId,
+      missing: false,
+    });
 
     await ctx.runMutation(internal.data.corInboundSync.applyInboundTaskUpdate, {
       taskId: args.taskId,
@@ -404,13 +476,36 @@ export const pullProjectFromCORWorker = internalAction({
     }
 
     const provider = getProjectManagementProvider();
-    const corProject = await provider.getProject(project.corProjectId);
+    let corProject = null;
+    try {
+      corProject = await provider.getProject(project.corProjectId);
+    } catch (error) {
+      if (error instanceof CORNotFoundError) {
+        await ctx.runMutation(
+          internal.data.corInboundSync.setProjectNotFoundInCOR,
+          {
+            projectId: args.projectId,
+            missing: true,
+          }
+        );
+        console.warn(
+          `[InboundSync][Cron] ⚠️ Proyecto COR ${project.corProjectId} no encontrado para proyecto ${args.projectId}`
+        );
+        return;
+      }
+      throw error;
+    }
     if (!corProject) {
       console.warn(
         `[InboundSync][Cron] ⚠️ Proyecto COR ${project.corProjectId} no encontrado para proyecto ${args.projectId}`
       );
       return;
     }
+
+    await ctx.runMutation(internal.data.corInboundSync.setProjectNotFoundInCOR, {
+      projectId: args.projectId,
+      missing: false,
+    });
 
     await ctx.runMutation(
       internal.data.corInboundSync.applyInboundProjectUpdate,
@@ -425,6 +520,88 @@ export const pullProjectFromCORWorker = internalAction({
         corEstimatedTime: corProject.estimatedTime ?? undefined,
       }
     );
+  },
+});
+
+/**
+ * Marca si la task local ya no existe en COR.
+ */
+export const setTaskNotFoundInCOR = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    missing: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (!task) return;
+
+    if (args.missing) {
+      await ctx.db.patch(args.taskId, {
+        corTaskMissingInCOR: true,
+        corSyncError:
+          "No encontrada en COR: la tarea no fue encontrada en COR y posiblemente fue eliminada.",
+      });
+      return;
+    }
+
+    const patch: Record<string, string | boolean> = {
+      corTaskMissingInCOR: false,
+    };
+
+    if (
+      task.corSyncError?.startsWith("Eliminado en COR:") ||
+      task.corSyncError?.startsWith("No encontrada en COR:")
+    ) {
+      patch.corSyncError = "";
+    }
+
+    await ctx.db.patch(args.taskId, patch as any);
+  },
+});
+
+/**
+ * Marca si el proyecto local ya no existe en COR y propaga el estado a sus tasks.
+ */
+export const setProjectNotFoundInCOR = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    missing: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project) return;
+
+    if (args.missing) {
+      await ctx.db.patch(args.projectId, {
+        corMissingInCOR: true,
+        corSyncError:
+          "No encontrado en COR: el proyecto no fue encontrado en COR y posiblemente fue eliminado.",
+      });
+    } else {
+      const patch: Record<string, string | boolean> = {
+        corMissingInCOR: false,
+      };
+
+      if (
+        project.corSyncError?.startsWith("Eliminado en COR:") ||
+        project.corSyncError?.startsWith("No encontrado en COR:")
+      ) {
+        patch.corSyncError = "";
+      }
+
+      await ctx.db.patch(args.projectId, patch as any);
+    }
+
+    const tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_projectId", (q) => q.eq("projectId", args.projectId))
+      .collect();
+
+    for (const task of tasks) {
+      await ctx.db.patch(task._id, {
+        corProjectMissingInCOR: args.missing,
+      });
+    }
   },
 });
 
