@@ -425,7 +425,10 @@ const STRATEGIC_PRIORITY_OPTIONS: { value: string; label: string }[] = [
   { value: "NI_NU", label: "NI_NU" },
 ];
 
-const STRATEGIC_PRIORITY_DISPLAY: Record<string, { label: string; color: string }> = {
+const STRATEGIC_PRIORITY_DISPLAY: Record<
+  string,
+  { label: string; color: string }
+> = {
   I_NU: {
     label: "I_NU",
     color: "bg-[#F5D1A0] text-amber-900 border-amber-300",
@@ -445,7 +448,8 @@ const STRATEGIC_PRIORITY_DISPLAY: Record<string, { label: string; color: string 
 };
 
 const getStrategicPriorityColor = (value: string): string =>
-  STRATEGIC_PRIORITY_DISPLAY[value]?.color || "bg-muted text-muted-foreground border-border";
+  STRATEGIC_PRIORITY_DISPLAY[value]?.color ||
+  "bg-muted text-muted-foreground border-border";
 
 // Opciones de estado para COR
 // Códigos reales del API: nueva, en_proceso, en_revision, en_diseno, estancada, finalizada
