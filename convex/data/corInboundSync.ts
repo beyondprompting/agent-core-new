@@ -32,6 +32,12 @@ import { hashText } from "../lib/briefFormat";
 const SCHEDULED_SYNC_BATCH_SIZE = 100;
 const TASK_LOCAL_EDIT_GRACE_MS = 60_000;
 
+function parseCORTaskId(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = parseInt(String(raw).trim(), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function syncTaskAttachmentsFromCOR(
   ctx: any,
   taskId: Id<"tasks">,
@@ -226,6 +232,13 @@ export const pullFromCORAction = internalAction({
       }
 
       const provider = getProjectManagementProvider();
+      const corTaskId = parseCORTaskId(task.corTaskId);
+      if (corTaskId === null) {
+        console.error(
+          `[InboundSync] ❌ corTaskId inválido para task ${args.taskId}: ${String(task.corTaskId)}`
+        );
+        return;
+      }
 
       // 2. Traer task de COR
       console.log(
@@ -233,7 +246,7 @@ export const pullFromCORAction = internalAction({
       );
       let corTask = null;
       try {
-        corTask = await provider.getTask(parseInt(task.corTaskId));
+        corTask = await provider.getTask(corTaskId);
       } catch (error) {
         if (error instanceof CORNotFoundError) {
           await ctx.runMutation(
@@ -278,7 +291,7 @@ export const pullFromCORAction = internalAction({
         await syncTaskAttachmentsFromCOR(
           ctx,
           args.taskId,
-          Number(task.corTaskId),
+          corTaskId,
         );
       }
 
@@ -497,8 +510,8 @@ export const pullTaskFromCORWorker = internalAction({
       return;
     }
 
-    const corTaskId = Number(task.corTaskId);
-    if (!Number.isFinite(corTaskId)) {
+    const corTaskId = parseCORTaskId(task.corTaskId);
+    if (corTaskId === null) {
       console.warn(
         `[InboundSync][Cron] ⚠️ Task ${args.taskId} tiene corTaskId inválido (${task.corTaskId})`
       );
