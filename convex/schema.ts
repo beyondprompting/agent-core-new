@@ -30,6 +30,15 @@ export default defineSchema({
     email: v.string(),
     name: v.optional(v.string()),
     userId: v.optional(v.id("users")),
+    preapprovedClientAccess: v.optional(
+      v.array(
+        v.object({
+          clientId: v.id("corClients"),
+          // undefined = acceso completo al cliente. Array = categorías específicas.
+          brandIds: v.optional(v.array(v.id("clientBrands"))),
+        }),
+      ),
+    ),
     trelloMemberId: v.optional(v.string()),
     trelloUsername: v.optional(v.string()),
     trelloMemberEmail: v.optional(v.string()),

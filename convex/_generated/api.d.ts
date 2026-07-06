@@ -55,6 +55,7 @@ import type * as lib_briefFormat from "../lib/briefFormat.js";
 import type * as lib_corRetry from "../lib/corRetry.js";
 import type * as lib_deliverableAnalytics from "../lib/deliverableAnalytics.js";
 import type * as lib_excludedUsers from "../lib/excludedUsers.js";
+import type * as lib_externalUserPreapproval from "../lib/externalUserPreapproval.js";
 import type * as lib_internalUserAdminAccess from "../lib/internalUserAdminAccess.js";
 import type * as lib_llmFallback from "../lib/llmFallback.js";
 import type * as lib_math from "../lib/math.js";
@@ -146,6 +147,7 @@ declare const fullApi: ApiFromModules<{
   "lib/corRetry": typeof lib_corRetry;
   "lib/deliverableAnalytics": typeof lib_deliverableAnalytics;
   "lib/excludedUsers": typeof lib_excludedUsers;
+  "lib/externalUserPreapproval": typeof lib_externalUserPreapproval;
   "lib/internalUserAdminAccess": typeof lib_internalUserAdminAccess;
   "lib/llmFallback": typeof lib_llmFallback;
   "lib/math": typeof lib_math;
