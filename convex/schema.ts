@@ -186,6 +186,7 @@ export default defineSchema({
       "corTaskId",
       "deadline",
     ])
+    .index("by_convexStatus", ["convexStatus"])
     .index("by_corSyncStatus", ["corSyncStatus"])
     .index("by_trelloCardId", ["trelloCardId"])
     .index("by_trelloSyncStatus", ["trelloSyncStatus"])
@@ -250,8 +251,10 @@ export default defineSchema({
     key: v.string(),
     taskStatusIndex: v.number(),
     taskCursor: v.optional(v.string()),
+    taskBucketCursorsJson: v.optional(v.string()),
     projectStatusIndex: v.number(),
     projectCursor: v.optional(v.string()),
+    projectBucketCursorsJson: v.optional(v.string()),
     leaseUntil: v.optional(v.number()),
     lastRunAt: v.optional(v.number()),
     lastCompletedAt: v.optional(v.number()),
@@ -570,6 +573,7 @@ export default defineSchema({
     .index("by_corClientId", ["corClientId"])
     .index("by_corProjectId", ["corProjectId"])
     .index("by_convexStatus_endDate", ["convexStatus", "endDate"])
+    .index("by_convexStatus", ["convexStatus"])
     .index("by_createdBy", ["createdBy"])
     .index("by_threadId", ["threadId"])
     .index("by_corSyncStatus", ["corSyncStatus"])
