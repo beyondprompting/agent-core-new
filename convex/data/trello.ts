@@ -40,6 +40,15 @@ const LABEL_SYNC_STALE_MS = 60_000;
 const LABEL_SYNC_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
 const CONVEX_TRELLO_CLIENT_IDENTIFIER = "agent-core-convex-trello-sync";
 const BUSINESS_TIME_ZONE = "America/Guayaquil";
+const TRELLO_OUTBOUND_QUEUE_STATE_KEY = "cor-to-trello-outbound";
+const TRELLO_OUTBOUND_SPACING_MS = 30_000;
+const TRELLO_OUTBOUND_PROCESSOR_LEASE_MS = 2 * 60_000;
+const TRELLO_OUTBOUND_RETRY_DELAYS_MS = [
+  60_000,
+  2 * 60_000,
+  5 * 60_000,
+  10 * 60_000,
+];
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
@@ -144,24 +153,6 @@ function jsonValue(value: unknown) {
   return value === undefined ? undefined : JSON.stringify(value);
 }
 
-function formatDateInBusinessTimeZone(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  const day = parts.find((part) => part.type === "day")?.value;
-
-  if (!year || !month || !day) return null;
-  return `${year}-${month}-${day}`;
-}
 
 function formatDeadlineForTrelloDue(value: string | undefined) {
   if (!value) return undefined;
@@ -205,96 +196,6 @@ function formatInlineMarkdownWithoutLinks(value: string) {
     .replace(/__([^_]+)__/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
     .replace(/_([^_\n]+)_/g, "<em>$1</em>");
-}
-
-function formatInlineMarkdown(value: string) {
-  const links: string[] = [];
-  const textWithPlaceholders = value.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g,
-    (_match, label: string, href: string) => {
-      const index = links.length;
-      links.push(
-        `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${formatInlineMarkdownWithoutLinks(label)}</a>`,
-      );
-      return `\u0000LINK${index}\u0000`;
-    },
-  );
-
-  return formatInlineMarkdownWithoutLinks(textWithPlaceholders).replace(
-    /\u0000LINK(\d+)\u0000/g,
-    (_match, index: string) => links[Number(index)] ?? "",
-  );
-}
-
-function trelloMarkdownToConvexHtml(value: string | undefined) {
-  if (!value) return "";
-
-  const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const blocks: string[] = [];
-  let paragraph: string[] = [];
-  let listItems: string[] = [];
-  let listType: "ul" | "ol" | null = null;
-
-  const flushParagraph = () => {
-    if (paragraph.length === 0) return;
-    blocks.push(`<p>${paragraph.map(formatInlineMarkdown).join("<br>")}</p>`);
-    paragraph = [];
-  };
-
-  const flushList = () => {
-    if (!listType || listItems.length === 0) return;
-    blocks.push(`<${listType}>${listItems.join("")}</${listType}>`);
-    listItems = [];
-    listType = null;
-  };
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-
-    if (!line) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    const heading = line.match(/^#{1,6}\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      blocks.push(`<p><strong>${formatInlineMarkdown(heading[1])}</strong></p>`);
-      continue;
-    }
-
-    const unorderedItem = line.match(/^[-*]\s+(.+)$/);
-    if (unorderedItem) {
-      flushParagraph();
-      if (listType !== "ul") {
-        flushList();
-        listType = "ul";
-      }
-      listItems.push(`<li>${formatInlineMarkdown(unorderedItem[1])}</li>`);
-      continue;
-    }
-
-    const orderedItem = line.match(/^\d+[.)]\s+(.+)$/);
-    if (orderedItem) {
-      flushParagraph();
-      if (listType !== "ol") {
-        flushList();
-        listType = "ol";
-      }
-      listItems.push(`<li>${formatInlineMarkdown(orderedItem[1])}</li>`);
-      continue;
-    }
-
-    flushList();
-    paragraph.push(line);
-  }
-
-  flushParagraph();
-  flushList();
-
-  return blocks.join("\n").trim();
 }
 
 function buildTrelloDescription(args: { task: any }) {
@@ -2065,6 +1966,369 @@ export const createCardForExternalTask: any = internalAction({
       });
       return { success: false, error: message };
     }
+  },
+});
+
+function isTrelloRateLimitError(message: string) {
+  return (
+    message.includes("429") ||
+    message.includes("API_TOKEN_LIMIT_EXCEEDED") ||
+    message.toLowerCase().includes("rate limit")
+  );
+}
+
+function getTrelloOutboundRetryDelayMs(message: string, attempt: number) {
+  const index = Math.min(attempt, TRELLO_OUTBOUND_RETRY_DELAYS_MS.length - 1);
+  const delay = TRELLO_OUTBOUND_RETRY_DELAYS_MS[index];
+  return isTrelloRateLimitError(message)
+    ? Math.max(delay, 5 * 60_000)
+    : delay;
+}
+
+export const enqueueTrelloOutboundSyncFromCOR = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    kind: v.union(v.literal("status"), v.literal("fields")),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("trelloOutboundSyncQueue")
+      .withIndex("by_task_kind", (q) =>
+        q.eq("taskId", args.taskId).eq("kind", args.kind),
+      )
+      .first();
+
+    if (
+      existing &&
+      (existing.status === "pending" ||
+        existing.status === "retrying" ||
+        existing.status === "processing")
+    ) {
+      await ctx.db.patch(existing._id, {
+        updatedAt: now,
+        lastError: undefined,
+      });
+      return {
+        queued: true,
+        deduped: true,
+        queueId: existing._id,
+        nextRunAt: existing.nextRunAt,
+      };
+    }
+
+    const state = await ctx.db
+      .query("trelloOutboundSyncState")
+      .withIndex("by_key", (q) => q.eq("key", TRELLO_OUTBOUND_QUEUE_STATE_KEY))
+      .unique();
+    const nextRunAt = Math.max(now, state?.nextRunAt ?? now);
+    const statePatch = {
+      nextRunAt: nextRunAt + TRELLO_OUTBOUND_SPACING_MS,
+      updatedAt: now,
+    };
+
+    if (state) {
+      await ctx.db.patch(state._id, statePatch);
+    } else {
+      await ctx.db.insert("trelloOutboundSyncState", {
+        key: TRELLO_OUTBOUND_QUEUE_STATE_KEY,
+        ...statePatch,
+      });
+    }
+
+    const queuePatch = {
+      status: "pending",
+      nextRunAt,
+      processingUntil: undefined,
+      attempt: 0,
+      lastError: undefined,
+      updatedAt: now,
+    };
+
+    const queueId = existing
+      ? existing._id
+      : await ctx.db.insert("trelloOutboundSyncQueue", {
+          taskId: args.taskId,
+          kind: args.kind,
+          createdAt: now,
+          ...queuePatch,
+        });
+
+    if (existing) {
+      await ctx.db.patch(existing._id, queuePatch);
+    }
+
+    await ctx.scheduler.runAfter(
+      Math.max(0, nextRunAt - now),
+      internalTrello.processTrelloOutboundSyncQueue,
+      {},
+    );
+
+    return { queued: true, deduped: false, queueId, nextRunAt };
+  },
+});
+
+export const claimNextTrelloOutboundSync = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const state = await ctx.db
+      .query("trelloOutboundSyncState")
+      .withIndex("by_key", (q) => q.eq("key", TRELLO_OUTBOUND_QUEUE_STATE_KEY))
+      .unique();
+
+    if (state?.processorLeaseUntil && state.processorLeaseUntil > now) {
+      return {
+        claimed: false as const,
+        waitMs: null,
+      };
+    }
+
+    let item = await ctx.db
+      .query("trelloOutboundSyncQueue")
+      .withIndex("by_status_nextRunAt", (q) =>
+        q.eq("status", "pending").lte("nextRunAt", now),
+      )
+      .order("asc")
+      .first();
+
+    if (!item) {
+      item = await ctx.db
+        .query("trelloOutboundSyncQueue")
+        .withIndex("by_status_nextRunAt", (q) =>
+          q.eq("status", "retrying").lte("nextRunAt", now),
+        )
+        .order("asc")
+        .first();
+    }
+
+    if (!item) {
+      item = await ctx.db
+        .query("trelloOutboundSyncQueue")
+        .withIndex("by_status_processingUntil", (q) =>
+          q.eq("status", "processing").lte("processingUntil", now),
+        )
+        .order("asc")
+        .first();
+    }
+
+    if (!item) {
+      const nextPending = await ctx.db
+        .query("trelloOutboundSyncQueue")
+        .withIndex("by_status_nextRunAt", (q) => q.eq("status", "pending"))
+        .order("asc")
+        .first();
+      const nextRetrying = await ctx.db
+        .query("trelloOutboundSyncQueue")
+        .withIndex("by_status_nextRunAt", (q) => q.eq("status", "retrying"))
+        .order("asc")
+        .first();
+      const nextRunAt = [nextPending?.nextRunAt, nextRetrying?.nextRunAt]
+        .filter((value): value is number => typeof value === "number")
+        .sort((a, b) => a - b)[0];
+
+      return {
+        claimed: false as const,
+        waitMs:
+          typeof nextRunAt === "number" ? Math.max(0, nextRunAt - now) : null,
+      };
+    }
+
+    await ctx.db.patch(item._id, {
+      status: "processing",
+      processingUntil: now + TRELLO_OUTBOUND_PROCESSOR_LEASE_MS,
+      updatedAt: now,
+    });
+
+    const statePatch = {
+      processorLeaseUntil: now + TRELLO_OUTBOUND_PROCESSOR_LEASE_MS,
+      updatedAt: now,
+    };
+    if (state) {
+      await ctx.db.patch(state._id, statePatch);
+    } else {
+      await ctx.db.insert("trelloOutboundSyncState", {
+        key: TRELLO_OUTBOUND_QUEUE_STATE_KEY,
+        nextRunAt: now,
+        ...statePatch,
+      });
+    }
+
+    await ctx.scheduler.runAfter(
+      TRELLO_OUTBOUND_PROCESSOR_LEASE_MS + 1000,
+      internalTrello.processTrelloOutboundSyncQueue,
+      {},
+    );
+
+    return {
+      claimed: true as const,
+      queueId: item._id,
+      taskId: item.taskId,
+      kind: item.kind,
+      attempt: item.attempt,
+    };
+  },
+});
+
+export const markTrelloOutboundSyncSuccess = internalMutation({
+  args: {
+    queueId: v.id("trelloOutboundSyncQueue"),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    await ctx.db.patch(args.queueId, {
+      status: "synced",
+      processingUntil: undefined,
+      lastError: undefined,
+      updatedAt: now,
+    });
+
+    const state = await ctx.db
+      .query("trelloOutboundSyncState")
+      .withIndex("by_key", (q) => q.eq("key", TRELLO_OUTBOUND_QUEUE_STATE_KEY))
+      .unique();
+    if (state) {
+      await ctx.db.patch(state._id, {
+        processorLeaseUntil: undefined,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+export const markTrelloOutboundSyncFailure = internalMutation({
+  args: {
+    queueId: v.id("trelloOutboundSyncQueue"),
+    error: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const item = await ctx.db.get(args.queueId);
+    if (!item) return;
+
+    const now = Date.now();
+    const attempt = item.attempt + 1;
+    const shouldRetry = attempt < 8;
+    const nextRunAt = shouldRetry
+      ? now + getTrelloOutboundRetryDelayMs(args.error, item.attempt)
+      : item.nextRunAt;
+
+    await ctx.db.patch(args.queueId, {
+      status: shouldRetry ? "retrying" : "error",
+      nextRunAt,
+      processingUntil: undefined,
+      attempt,
+      lastError: args.error,
+      updatedAt: now,
+    });
+
+    const state = await ctx.db
+      .query("trelloOutboundSyncState")
+      .withIndex("by_key", (q) => q.eq("key", TRELLO_OUTBOUND_QUEUE_STATE_KEY))
+      .unique();
+    if (state) {
+      await ctx.db.patch(state._id, {
+        processorLeaseUntil: undefined,
+        updatedAt: now,
+      });
+    }
+
+    if (shouldRetry) {
+      await ctx.scheduler.runAfter(
+        Math.max(0, nextRunAt - now),
+        internalTrello.processTrelloOutboundSyncQueue,
+        {},
+      );
+    }
+  },
+});
+
+export const scheduleNextTrelloOutboundSyncProcessor = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const state = await ctx.db
+      .query("trelloOutboundSyncState")
+      .withIndex("by_key", (q) => q.eq("key", TRELLO_OUTBOUND_QUEUE_STATE_KEY))
+      .unique();
+    if (state?.processorLeaseUntil && state.processorLeaseUntil > now) return;
+
+    const nextPending = await ctx.db
+      .query("trelloOutboundSyncQueue")
+      .withIndex("by_status_nextRunAt", (q) => q.eq("status", "pending"))
+      .order("asc")
+      .first();
+    const nextRetrying = await ctx.db
+      .query("trelloOutboundSyncQueue")
+      .withIndex("by_status_nextRunAt", (q) => q.eq("status", "retrying"))
+      .order("asc")
+      .first();
+    const nextRunAt = [nextPending?.nextRunAt, nextRetrying?.nextRunAt]
+      .filter((value): value is number => typeof value === "number")
+      .sort((a, b) => a - b)[0];
+
+    if (typeof nextRunAt !== "number") return;
+
+    await ctx.scheduler.runAfter(
+      Math.max(0, nextRunAt - now),
+      internalTrello.processTrelloOutboundSyncQueue,
+      {},
+    );
+  },
+});
+
+export const processTrelloOutboundSyncQueue: any = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const claim = await ctx.runMutation(
+      internalTrello.claimNextTrelloOutboundSync,
+      {},
+    );
+
+    if (!claim.claimed) {
+      if (typeof claim.waitMs === "number") {
+        await ctx.scheduler.runAfter(
+          Math.max(0, claim.waitMs),
+          internalTrello.processTrelloOutboundSyncQueue,
+          {},
+        );
+      }
+      return { success: true, claimed: false };
+    }
+
+    let result: any;
+    try {
+      result =
+        claim.kind === "status"
+          ? await ctx.runAction(internalTrello.syncTaskStatusFromCORToTrello, {
+              taskId: claim.taskId,
+            })
+          : await ctx.runAction(internalTrello.syncTaskFieldsFromCORToTrello, {
+              taskId: claim.taskId,
+            });
+
+      if (result?.success || result?.skipped) {
+        await ctx.runMutation(internalTrello.markTrelloOutboundSyncSuccess, {
+          queueId: claim.queueId,
+        });
+      } else {
+        await ctx.runMutation(internalTrello.markTrelloOutboundSyncFailure, {
+          queueId: claim.queueId,
+          error: result?.error || "Sync Trello falló sin detalle.",
+        });
+      }
+    } catch (error) {
+      await ctx.runMutation(internalTrello.markTrelloOutboundSyncFailure, {
+        queueId: claim.queueId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    await ctx.runMutation(
+      internalTrello.scheduleNextTrelloOutboundSyncProcessor,
+      {},
+    );
+
+    return { success: true, claimed: true, kind: claim.kind };
   },
 });
 

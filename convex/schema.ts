@@ -660,6 +660,28 @@ export default defineSchema({
     .index("by_card", ["trelloCardId"])
     .index("by_syncStatus", ["syncStatus"]),
 
+  trelloOutboundSyncState: defineTable({
+    key: v.string(),
+    nextRunAt: v.number(),
+    processorLeaseUntil: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  trelloOutboundSyncQueue: defineTable({
+    taskId: v.id("tasks"),
+    kind: v.union(v.literal("status"), v.literal("fields")),
+    status: v.string(), // "pending" | "processing" | "retrying" | "synced" | "error"
+    nextRunAt: v.number(),
+    processingUntil: v.optional(v.number()),
+    attempt: v.number(),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_task_kind", ["taskId", "kind"])
+    .index("by_status_nextRunAt", ["status", "nextRunAt"])
+    .index("by_status_processingUntil", ["status", "processingUntil"]),
+
   // =====================================================
   // Trello Webhooks — Suscripciones por board/categoría
   // =====================================================

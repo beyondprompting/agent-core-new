@@ -455,18 +455,16 @@ export const pullFromCORAction = internalAction({
         );
 
         if (taskUpdateResult?.statusChanged) {
-          await ctx.scheduler.runAfter(
-            0,
-            (internal as any).data.trello.syncTaskStatusFromCORToTrello,
-            { taskId: args.taskId },
+          await ctx.runMutation(
+            (internal as any).data.trello.enqueueTrelloOutboundSyncFromCOR,
+            { taskId: args.taskId, kind: "status" },
           );
         }
 
         if (taskUpdateResult?.trelloFieldsChanged) {
-          await ctx.scheduler.runAfter(
-            0,
-            (internal as any).data.trello.syncTaskFieldsFromCORToTrello,
-            { taskId: args.taskId },
+          await ctx.runMutation(
+            (internal as any).data.trello.enqueueTrelloOutboundSyncFromCOR,
+            { taskId: args.taskId, kind: "fields" },
           );
         }
 
@@ -552,6 +550,7 @@ export const emergencyCancelInboundSchedules = mutation({
       const serialized = JSON.stringify(item);
       if (
         serialized.includes("corInboundSync") ||
+        serialized.includes("processTrelloOutboundSyncQueue") ||
         serialized.includes("syncTaskFieldsFromCORToTrello") ||
         serialized.includes("syncTaskStatusFromCORToTrello")
       ) {
@@ -1364,18 +1363,16 @@ export const pullTaskFromCORWorker = internalAction({
     );
 
     if (taskUpdateResult?.statusChanged) {
-      await ctx.scheduler.runAfter(
-        0,
-        (internal as any).data.trello.syncTaskStatusFromCORToTrello,
-        { taskId: args.taskId },
+      await ctx.runMutation(
+        (internal as any).data.trello.enqueueTrelloOutboundSyncFromCOR,
+        { taskId: args.taskId, kind: "status" },
       );
     }
 
     if (taskUpdateResult?.trelloFieldsChanged) {
-      await ctx.scheduler.runAfter(
-        0,
-        (internal as any).data.trello.syncTaskFieldsFromCORToTrello,
-        { taskId: args.taskId },
+      await ctx.runMutation(
+        (internal as any).data.trello.enqueueTrelloOutboundSyncFromCOR,
+        { taskId: args.taskId, kind: "fields" },
       );
     }
 
