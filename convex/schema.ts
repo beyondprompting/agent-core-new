@@ -218,8 +218,9 @@ export default defineSchema({
     // === Sincronización con Trello ===
     trelloAttachmentId: v.optional(v.string()),
     trelloAttachmentUrl: v.optional(v.string()),
-    trelloSyncStatus: v.optional(v.string()), // "pending" | "synced" | "error"
+    trelloSyncStatus: v.optional(v.string()), // "pending" | "syncing" | "synced" | "error"
     trelloSyncError: v.optional(v.string()),
+    trelloSyncStartedAt: v.optional(v.number()),
     trelloSyncedAt: v.optional(v.number()),
     // === Metadata ===
     createdAt: v.number(),

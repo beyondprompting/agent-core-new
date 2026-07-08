@@ -1789,6 +1789,130 @@ async function syncTaskAttachmentsToTrello(ctx: any, args: {
   return { total: attachments.length, synced, failed };
 }
 
+function isClientFacingAttachmentFilename(filename: string | undefined) {
+  return Boolean(filename && filename.toLowerCase().includes("cliente"));
+}
+
+export const syncClientAttachmentsFromCORToTrello: any = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const context = await ctx.runQuery(
+      internalTrello.getTaskFieldsFromCORTrelloContext,
+      { taskId: args.taskId },
+    );
+
+    if (!context.ok) {
+      console.log(
+        `[TrelloSync][Attachments][COR] No se suben attachments para task ${args.taskId}: ${context.error}`,
+      );
+      return { success: false, skipped: true, error: context.error };
+    }
+
+    const attachments = await ctx.runQuery(
+      internal.data.tasks.getTaskAttachmentsForTrello,
+      { taskId: args.taskId },
+    );
+    const clientAttachments = attachments.filter((attachment: any) =>
+      isClientFacingAttachmentFilename(attachment.filename),
+    );
+    const pendingAttachments = clientAttachments.filter(
+      (attachment: any) => !attachment.trelloAttachmentId,
+    );
+
+    if (pendingAttachments.length === 0) {
+      console.log(
+        `[TrelloSync][Attachments][COR] Task ${args.taskId}: no hay attachments cliente pendientes para Trello`,
+      );
+      return {
+        success: true,
+        total: clientAttachments.length,
+        synced: 0,
+        failed: 0,
+      };
+    }
+
+    console.log(
+      `[TrelloSync][Attachments][COR] Subiendo ${pendingAttachments.length} attachment(s) cliente a card ${context.trelloCardId}`,
+    );
+
+    let synced = 0;
+    let failed = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const attachment of pendingAttachments) {
+      const claimed = await ctx.runMutation(
+        internal.data.tasks.claimAttachmentTrelloSync,
+        {
+          taskId: args.taskId,
+          attachmentId: attachment._id,
+        },
+      );
+
+      if (!claimed) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const blob = await ctx.storage.get(claimed.storageId as any);
+        if (!blob) {
+          throw new Error(`Blob no encontrado para storageId ${claimed.storageId}`);
+        }
+
+        const trelloAttachment = await trelloProvider.addCardAttachment({
+          cardId: context.trelloCardId,
+          name: claimed.filename,
+          file: blob,
+        });
+
+        await ctx.runMutation(internal.data.tasks.updateAttachmentTrelloSync, {
+          attachmentId: claimed._id,
+          trelloAttachmentId: trelloAttachment.id,
+          trelloAttachmentUrl: trelloAttachment.url,
+        });
+
+        synced += 1;
+        console.log(
+          `[TrelloSync][Attachments][COR] ✅ ${claimed.filename} → Trello attachment ${trelloAttachment.id}`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failed += 1;
+        errors.push(`${claimed.filename}: ${message}`);
+        console.error(
+          `[TrelloSync][Attachments][COR] ⚠️ Error subiendo ${claimed.filename}: ${message}`,
+        );
+
+        await ctx.runMutation(internal.data.tasks.updateAttachmentTrelloError, {
+          attachmentId: claimed._id,
+          error: message,
+        });
+      }
+    }
+
+    if (synced > 0 || failed > 0) {
+      const status =
+        failed === 0 ? "synced" : synced > 0 ? "partial" : "error";
+      await ctx.runMutation(internal.data.tasks.updateTaskTrelloAttachmentSummary, {
+        taskId: args.taskId,
+        status,
+        error: errors.length > 0 ? errors.join(" | ") : undefined,
+      });
+    }
+
+    return {
+      success: failed === 0,
+      total: clientAttachments.length,
+      synced,
+      failed,
+      skipped,
+    };
+  },
+});
+
 export const scheduleCreateCardForExternalTask = internalMutation({
   args: {
     taskId: v.id("tasks"),
