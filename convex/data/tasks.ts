@@ -905,15 +905,6 @@ export const updateTaskFields = mutation({
       );
     }
 
-    const updateKeys = Object.keys(updateData);
-    if (updateKeys.includes("description")) {
-      const descriptionError = validateDescriptionUpdate(
-        task.description,
-        updateData.description,
-      );
-      if (descriptionError) throw new Error(descriptionError);
-    }
-
     // Agregar timestamp de edición local
     updateData.lastLocalEditAt = Date.now();
 
