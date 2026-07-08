@@ -522,14 +522,6 @@ export const validateExternalUserBoardMembership: any = internalAction({
       };
     }
 
-    if (!approvedExternalUser.trelloMemberId) {
-      return {
-        ok: false as const,
-        error:
-          "No tienes un usuario de Trello vinculado. Pide a un administrador que configure tu acceso antes de crear este requerimiento.",
-      };
-    }
-
     if (!brand.trelloBoardId) {
       return {
         ok: false as const,
@@ -539,25 +531,124 @@ export const validateExternalUserBoardMembership: any = internalAction({
     }
 
     const members = await trelloProvider.getBoardMembers(brand.trelloBoardId);
-    const member = members.find(
-      (candidate) => candidate.id === approvedExternalUser.trelloMemberId,
+    if (approvedExternalUser.trelloMemberId) {
+      const member = members.find(
+        (candidate) => candidate.id === approvedExternalUser.trelloMemberId,
+      );
+
+      if (!member) {
+        return {
+          ok: false as const,
+          error:
+            "No tienes permiso en el tablero de Trello de esta categoría. Pide a un administrador que te agregue a Trello antes de crear este requerimiento.",
+        };
+      }
+
+      return {
+        ok: true as const,
+        trelloBoardId: brand.trelloBoardId,
+        trelloMemberId: member.id,
+        trelloUsername: member.username,
+        trelloMemberFullName: member.fullName,
+        trelloMemberEmail: member.email,
+      };
+    }
+
+    const normalizeMemberText = (value: string | undefined) =>
+      (value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+    const approvedName = normalizeMemberText(approvedExternalUser.name);
+    const emailLocalPart = normalizeMemberText(
+      approvedExternalUser.email.split("@")[0],
     );
 
-    if (!member) {
+    const pendingInvitation = members.find(
+      (candidate) =>
+        candidate.confirmed === false &&
+        normalizeMemberText(candidate.fullName) === emailLocalPart,
+    );
+    if (pendingInvitation) {
+      await ctx.runMutation(
+        internal.data.externalUserAdmin.markExternalTrelloStatus,
+        {
+          approvedExternalUserId: approvedExternalUser._id,
+          status: "pending_invitation",
+          error:
+            "Invitación pendiente al tablero de Trello. Debe aceptar la invitación para continuar.",
+          trelloMemberEmail: pendingInvitation.email,
+          trelloMemberFullName: pendingInvitation.fullName,
+          trelloUsername: pendingInvitation.username,
+        },
+      );
       return {
         ok: false as const,
         error:
-          "No tienes permiso en el tablero de Trello de esta categoría. Pide a un administrador que te agregue a Trello antes de crear este requerimiento.",
+          "Veo una invitación pendiente al tablero de Trello de esta categoría. Revisa tu correo y acepta la invitación para poder continuar.",
+      };
+    }
+
+    const confirmedMatches = approvedName
+      ? members.filter(
+          (candidate) =>
+            candidate.confirmed === true &&
+            normalizeMemberText(candidate.fullName) === approvedName,
+        )
+      : [];
+
+    if (confirmedMatches.length === 1) {
+      const member = confirmedMatches[0];
+      await ctx.runMutation(
+        internal.data.externalUserAdmin.markExternalTrelloStatus,
+        {
+          approvedExternalUserId: approvedExternalUser._id,
+          status: "verified",
+          verifiedAt: Date.now(),
+          error: undefined,
+          trelloMemberId: member.id,
+          trelloMemberEmail: member.email,
+          trelloMemberFullName: member.fullName,
+          trelloUsername: member.username,
+        },
+      );
+
+      return {
+        ok: true as const,
+        trelloBoardId: brand.trelloBoardId,
+        trelloMemberId: member.id,
+        trelloUsername: member.username,
+        trelloMemberFullName: member.fullName,
+        trelloMemberEmail: member.email,
+      };
+    }
+
+    await ctx.runMutation(
+      internal.data.externalUserAdmin.markExternalTrelloStatus,
+      {
+        approvedExternalUserId: approvedExternalUser._id,
+        status: "manual_required",
+        error:
+          confirmedMatches.length > 1
+            ? "Hay más de un miembro de Trello con el mismo nombre."
+            : "No se pudo identificar automáticamente el usuario de Trello.",
+      },
+    );
+
+    if (confirmedMatches.length > 1) {
+      return {
+        ok: false as const,
+        error:
+          "No pude identificar automáticamente tu usuario de Trello porque hay más de una coincidencia posible. Avisaremos a un administrador para revisar tu acceso.",
       };
     }
 
     return {
-      ok: true as const,
-      trelloBoardId: brand.trelloBoardId,
-      trelloMemberId: member.id,
-      trelloUsername: member.username,
-      trelloMemberFullName: member.fullName,
-      trelloMemberEmail: member.email,
+      ok: false as const,
+      error:
+        "No pude identificar automáticamente tu usuario de Trello. Avisaremos a un administrador para revisar tu acceso.",
     };
   },
 });

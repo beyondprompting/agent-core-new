@@ -466,19 +466,25 @@ export const markExternalTrelloStatus = internalMutation({
     status: v.string(),
     error: v.optional(v.string()),
     verifiedAt: v.optional(v.number()),
+    trelloMemberId: v.optional(v.string()),
     trelloMemberEmail: v.optional(v.string()),
     trelloMemberFullName: v.optional(v.string()),
     trelloUsername: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.approvedExternalUserId, {
+    const patch: Record<string, unknown> = {
       trelloMemberSyncStatus: args.status,
       trelloMemberSyncError: args.error,
       trelloMemberVerifiedAt: args.verifiedAt,
       trelloMemberEmail: args.trelloMemberEmail,
       trelloMemberFullName: args.trelloMemberFullName,
       trelloUsername: args.trelloUsername,
-    });
+    };
+    if (args.trelloMemberId !== undefined) {
+      patch.trelloMemberId = args.trelloMemberId;
+    }
+
+    await ctx.db.patch(args.approvedExternalUserId, patch);
   },
 });
 
