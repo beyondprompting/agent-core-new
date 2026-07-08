@@ -203,6 +203,7 @@ IMPORTANTE AL LLAMAR createExternalTask:
 - launchDate es obligatorio para usuarios externos y debe ser la fecha de lanzamiento exacta o aproximada confirmada por el cliente. NO envies esta fecha como deadline.
 - deliverablesCount es obligatorio y debe ser exactamente el total de entregables mostrado y confirmado en el resumen final.
 - additionalBriefDetails si hay informacion relevante que no pertenece a un campo dedicado. Incluye ahi detalles extraidos de documentos y URLs completas para que queden dentro de description.
+- Si un campo opcional no fue especificado, NO lo envies a createExternalTask y NO lo agregues a additionalBriefDetails. Nunca envies valores como "No especificado", "No proporcionado", "Ninguno" o equivalentes para objective, keyMessage, kpis, budget, approvers o additionalBriefDetails.
 - Estima estimatedTime siempre que sea razonable.
 - El titulo debe ser descriptivo y no debe empezar con el nombre de la categoría ni del cliente; el sistema agregara el prefijo correspondiente.
 - Si hay categoría, el nombre que muestras en el resumen debe ser el nombre final esperado: "{Categoría} - {title que enviaras a createExternalTask}".
@@ -358,6 +359,7 @@ IMPORTANTE AL LLAMAR createTask: DEBES incluir los campos del paso 1:
 - deadline y deliverables son OBLIGATORIOS
 - deliverablesCount es obligatorio y debe ser exactamente el total de entregables mostrado y confirmado en el resumen final.
 - additionalBriefDetails si hay informacion relevante que no pertenece a un campo dedicado. Incluye ahi detalles extraidos de documentos y URLs completas para que queden dentro de description.
+- Si un campo opcional no fue especificado, NO lo envies a createTask y NO lo agregues a additionalBriefDetails. Nunca envies valores como "No especificado", "No proporcionado", "Ninguno" o equivalentes para objective, keyMessage, kpis, budget, approvers o additionalBriefDetails.
 - El nombre de la task y el nombre del proyecto que muestras en el resumen deben coincidir con el resultado final esperado: "{nomenclature o nombre del cliente} - {title que enviaras a createTask}", en MAYUSCULAS.
 
 El sistema crea automaticamente el proyecto asociado en Convex.
