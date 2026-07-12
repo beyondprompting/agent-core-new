@@ -522,14 +522,6 @@ export const validateExternalUserBoardMembership: any = internalAction({
       };
     }
 
-    if (!approvedExternalUser.trelloMemberId) {
-      return {
-        ok: false as const,
-        error:
-          "No tienes un usuario de Trello vinculado. Pide a un administrador que configure tu acceso antes de crear este requerimiento.",
-      };
-    }
-
     if (!brand.trelloBoardId) {
       return {
         ok: false as const,
@@ -539,25 +531,124 @@ export const validateExternalUserBoardMembership: any = internalAction({
     }
 
     const members = await trelloProvider.getBoardMembers(brand.trelloBoardId);
-    const member = members.find(
-      (candidate) => candidate.id === approvedExternalUser.trelloMemberId,
+    if (approvedExternalUser.trelloMemberId) {
+      const member = members.find(
+        (candidate) => candidate.id === approvedExternalUser.trelloMemberId,
+      );
+
+      if (!member) {
+        return {
+          ok: false as const,
+          error:
+            "No tienes permiso en el tablero de Trello de esta categoría. Pide a un administrador que te agregue a Trello antes de crear este requerimiento.",
+        };
+      }
+
+      return {
+        ok: true as const,
+        trelloBoardId: brand.trelloBoardId,
+        trelloMemberId: member.id,
+        trelloUsername: member.username,
+        trelloMemberFullName: member.fullName,
+        trelloMemberEmail: member.email,
+      };
+    }
+
+    const normalizeMemberText = (value: string | undefined) =>
+      (value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+    const approvedName = normalizeMemberText(approvedExternalUser.name);
+    const emailLocalPart = normalizeMemberText(
+      approvedExternalUser.email.split("@")[0],
     );
 
-    if (!member) {
+    const pendingInvitation = members.find(
+      (candidate) =>
+        candidate.confirmed === false &&
+        normalizeMemberText(candidate.fullName) === emailLocalPart,
+    );
+    if (pendingInvitation) {
+      await ctx.runMutation(
+        internal.data.externalUserAdmin.markExternalTrelloStatus,
+        {
+          approvedExternalUserId: approvedExternalUser._id,
+          status: "pending_invitation",
+          error:
+            "Invitación pendiente al tablero de Trello. Debe aceptar la invitación para continuar.",
+          trelloMemberEmail: pendingInvitation.email,
+          trelloMemberFullName: pendingInvitation.fullName,
+          trelloUsername: pendingInvitation.username,
+        },
+      );
       return {
         ok: false as const,
         error:
-          "No tienes permiso en el tablero de Trello de esta categoría. Pide a un administrador que te agregue a Trello antes de crear este requerimiento.",
+          "Veo una invitación pendiente al tablero de Trello de esta categoría. Revisa tu correo y acepta la invitación para poder continuar.",
+      };
+    }
+
+    const confirmedMatches = approvedName
+      ? members.filter(
+          (candidate) =>
+            candidate.confirmed === true &&
+            normalizeMemberText(candidate.fullName) === approvedName,
+        )
+      : [];
+
+    if (confirmedMatches.length === 1) {
+      const member = confirmedMatches[0];
+      await ctx.runMutation(
+        internal.data.externalUserAdmin.markExternalTrelloStatus,
+        {
+          approvedExternalUserId: approvedExternalUser._id,
+          status: "verified",
+          verifiedAt: Date.now(),
+          error: undefined,
+          trelloMemberId: member.id,
+          trelloMemberEmail: member.email,
+          trelloMemberFullName: member.fullName,
+          trelloUsername: member.username,
+        },
+      );
+
+      return {
+        ok: true as const,
+        trelloBoardId: brand.trelloBoardId,
+        trelloMemberId: member.id,
+        trelloUsername: member.username,
+        trelloMemberFullName: member.fullName,
+        trelloMemberEmail: member.email,
+      };
+    }
+
+    await ctx.runMutation(
+      internal.data.externalUserAdmin.markExternalTrelloStatus,
+      {
+        approvedExternalUserId: approvedExternalUser._id,
+        status: "manual_required",
+        error:
+          confirmedMatches.length > 1
+            ? "Hay más de un miembro de Trello con el mismo nombre."
+            : "No se pudo identificar automáticamente el usuario de Trello.",
+      },
+    );
+
+    if (confirmedMatches.length > 1) {
+      return {
+        ok: false as const,
+        error:
+          "No pude identificar automáticamente tu usuario de Trello porque hay más de una coincidencia posible. Avisaremos a un administrador para revisar tu acceso.",
       };
     }
 
     return {
-      ok: true as const,
-      trelloBoardId: brand.trelloBoardId,
-      trelloMemberId: member.id,
-      trelloUsername: member.username,
-      trelloMemberFullName: member.fullName,
-      trelloMemberEmail: member.email,
+      ok: false as const,
+      error:
+        "No pude identificar automáticamente tu usuario de Trello. Avisaremos a un administrador para revisar tu acceso.",
     };
   },
 });
@@ -1697,6 +1788,130 @@ async function syncTaskAttachmentsToTrello(ctx: any, args: {
 
   return { total: attachments.length, synced, failed };
 }
+
+function isClientFacingAttachmentFilename(filename: string | undefined) {
+  return Boolean(filename && filename.toLowerCase().includes("cliente"));
+}
+
+export const syncClientAttachmentsFromCORToTrello: any = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const context = await ctx.runQuery(
+      internalTrello.getTaskFieldsFromCORTrelloContext,
+      { taskId: args.taskId },
+    );
+
+    if (!context.ok) {
+      console.log(
+        `[TrelloSync][Attachments][COR] No se suben attachments para task ${args.taskId}: ${context.error}`,
+      );
+      return { success: false, skipped: true, error: context.error };
+    }
+
+    const attachments = await ctx.runQuery(
+      internal.data.tasks.getTaskAttachmentsForTrello,
+      { taskId: args.taskId },
+    );
+    const clientAttachments = attachments.filter((attachment: any) =>
+      isClientFacingAttachmentFilename(attachment.filename),
+    );
+    const pendingAttachments = clientAttachments.filter(
+      (attachment: any) => !attachment.trelloAttachmentId,
+    );
+
+    if (pendingAttachments.length === 0) {
+      console.log(
+        `[TrelloSync][Attachments][COR] Task ${args.taskId}: no hay attachments cliente pendientes para Trello`,
+      );
+      return {
+        success: true,
+        total: clientAttachments.length,
+        synced: 0,
+        failed: 0,
+      };
+    }
+
+    console.log(
+      `[TrelloSync][Attachments][COR] Subiendo ${pendingAttachments.length} attachment(s) cliente a card ${context.trelloCardId}`,
+    );
+
+    let synced = 0;
+    let failed = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const attachment of pendingAttachments) {
+      const claimed = await ctx.runMutation(
+        internal.data.tasks.claimAttachmentTrelloSync,
+        {
+          taskId: args.taskId,
+          attachmentId: attachment._id,
+        },
+      );
+
+      if (!claimed) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const blob = await ctx.storage.get(claimed.storageId as any);
+        if (!blob) {
+          throw new Error(`Blob no encontrado para storageId ${claimed.storageId}`);
+        }
+
+        const trelloAttachment = await trelloProvider.addCardAttachment({
+          cardId: context.trelloCardId,
+          name: claimed.filename,
+          file: blob,
+        });
+
+        await ctx.runMutation(internal.data.tasks.updateAttachmentTrelloSync, {
+          attachmentId: claimed._id,
+          trelloAttachmentId: trelloAttachment.id,
+          trelloAttachmentUrl: trelloAttachment.url,
+        });
+
+        synced += 1;
+        console.log(
+          `[TrelloSync][Attachments][COR] ✅ ${claimed.filename} → Trello attachment ${trelloAttachment.id}`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failed += 1;
+        errors.push(`${claimed.filename}: ${message}`);
+        console.error(
+          `[TrelloSync][Attachments][COR] ⚠️ Error subiendo ${claimed.filename}: ${message}`,
+        );
+
+        await ctx.runMutation(internal.data.tasks.updateAttachmentTrelloError, {
+          attachmentId: claimed._id,
+          error: message,
+        });
+      }
+    }
+
+    if (synced > 0 || failed > 0) {
+      const status =
+        failed === 0 ? "synced" : synced > 0 ? "partial" : "error";
+      await ctx.runMutation(internal.data.tasks.updateTaskTrelloAttachmentSummary, {
+        taskId: args.taskId,
+        status,
+        error: errors.length > 0 ? errors.join(" | ") : undefined,
+      });
+    }
+
+    return {
+      success: failed === 0,
+      total: clientAttachments.length,
+      synced,
+      failed,
+      skipped,
+    };
+  },
+});
 
 export const scheduleCreateCardForExternalTask = internalMutation({
   args: {

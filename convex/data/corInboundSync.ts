@@ -1427,6 +1427,18 @@ export const pullTaskAttachmentsFromCORWorker = internalAction({
     }
 
     await syncTaskAttachmentsFromCOR(ctx, args.taskId, args.corTaskId);
+
+    try {
+      await ctx.runAction(
+        (internal as any).data.trello.syncClientAttachmentsFromCORToTrello,
+        { taskId: args.taskId },
+      );
+    } catch (error) {
+      console.warn(
+        `[InboundSync][Attachments] ⚠️ No se pudieron sincronizar attachments cliente a Trello para task ${args.taskId}:`,
+        error,
+      );
+    }
   },
 });
 
