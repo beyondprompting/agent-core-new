@@ -22,6 +22,7 @@ import type * as data_approvedExternalUsers from "../data/approvedExternalUsers.
 import type * as data_backfill from "../data/backfill.js";
 import type * as data_clientAssignmentsDashboard from "../data/clientAssignmentsDashboard.js";
 import type * as data_clientBrands from "../data/clientBrands.js";
+import type * as data_clientKnowledge from "../data/clientKnowledge.js";
 import type * as data_controlPanel from "../data/controlPanel.js";
 import type * as data_corClientRelatedUsersDashboard from "../data/corClientRelatedUsersDashboard.js";
 import type * as data_corClients from "../data/corClients.js";
@@ -80,6 +81,7 @@ import type * as tools_createTaskTool from "../tools/createTaskTool.js";
 import type * as tools_editExternalTaskTool from "../tools/editExternalTaskTool.js";
 import type * as tools_editProjectTool from "../tools/editProjectTool.js";
 import type * as tools_editTaskTool from "../tools/editTaskTool.js";
+import type * as tools_getClientKnowledgeTool from "../tools/getClientKnowledgeTool.js";
 import type * as tools_getProjectTool from "../tools/getProjectTool.js";
 import type * as tools_getTaskFromCORTool from "../tools/getTaskFromCORTool.js";
 import type * as tools_getTaskTool from "../tools/getTaskTool.js";
@@ -114,6 +116,7 @@ declare const fullApi: ApiFromModules<{
   "data/backfill": typeof data_backfill;
   "data/clientAssignmentsDashboard": typeof data_clientAssignmentsDashboard;
   "data/clientBrands": typeof data_clientBrands;
+  "data/clientKnowledge": typeof data_clientKnowledge;
   "data/controlPanel": typeof data_controlPanel;
   "data/corClientRelatedUsersDashboard": typeof data_corClientRelatedUsersDashboard;
   "data/corClients": typeof data_corClients;
@@ -172,6 +175,7 @@ declare const fullApi: ApiFromModules<{
   "tools/editExternalTaskTool": typeof tools_editExternalTaskTool;
   "tools/editProjectTool": typeof tools_editProjectTool;
   "tools/editTaskTool": typeof tools_editTaskTool;
+  "tools/getClientKnowledgeTool": typeof tools_getClientKnowledgeTool;
   "tools/getProjectTool": typeof tools_getProjectTool;
   "tools/getTaskFromCORTool": typeof tools_getTaskFromCORTool;
   "tools/getTaskTool": typeof tools_getTaskTool;

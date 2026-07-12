@@ -490,6 +490,26 @@ export default defineSchema({
     .index("by_corClientId_and_corBrandId", ["corClientId", "corBrandId"]),
 
   // =====================================================
+  // Client Knowledge — Lineamientos contextuales para agentes
+  // =====================================================
+  clientKnowledge: defineTable({
+    scope: v.union(v.literal("agency"), v.literal("client")),
+    // Para scope="client" este valor debe ser el ID real del cliente en COR.
+    // Para scope="agency" se omite: Punto99 no es cliente.
+    corClientId: v.optional(v.number()),
+    // undefined = disponible para agentes internos y externos.
+    audience: v.optional(v.union(v.literal("internal"), v.literal("external"))),
+    name: v.string(),
+    text: v.string(), // Markdown flexible con toda la informacion de conocimiento.
+    source: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_scope", ["scope"])
+    .index("by_corClientId", ["corClientId"])
+    .index("by_audience", ["audience"])
+    .index("by_corClientId_audience", ["corClientId", "audience"]),
+
+  // =====================================================
   // Sub Brands — Productos de COR asociados a una marca
   // =====================================================
   subBrands: defineTable({
