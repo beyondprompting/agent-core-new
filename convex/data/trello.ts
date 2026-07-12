@@ -87,6 +87,155 @@ function getTrelloBoardUrl(value: {
   return undefined;
 }
 
+async function notifyAdminsExternalTrelloManualRequired(
+  ctx: any,
+  args: {
+    approvedExternalUserId: any;
+    clientBrandId: any;
+  },
+) {
+  try {
+    const notificationContext = await ctx.runQuery(
+      internal.data.externalUserAdmin
+        .getExternalTrelloManualReviewNotificationContext,
+      {
+        approvedExternalUserId: args.approvedExternalUserId,
+        clientBrandId: args.clientBrandId,
+      },
+    );
+
+    const adminEmails = notificationContext.adminEmails ?? [];
+    if (adminEmails.length === 0) {
+      await ctx.runMutation(
+        internal.data.externalUserAdmin
+          .markExternalTrelloManualReviewNotification,
+        {
+          approvedExternalUserId: args.approvedExternalUserId,
+          error: "No hay emails de administradores configurados.",
+        },
+      );
+      return;
+    }
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      await ctx.runMutation(
+        internal.data.externalUserAdmin
+          .markExternalTrelloManualReviewNotification,
+        {
+          approvedExternalUserId: args.approvedExternalUserId,
+          error: "RESEND_API_KEY no está configurada en Convex.",
+        },
+      );
+      return;
+    }
+
+    const approvedUser = notificationContext.approvedUser;
+    const brand = notificationContext.brand;
+    const client = notificationContext.client;
+    const externalName = approvedUser?.name || "Usuario externo sin nombre";
+    const externalEmail = approvedUser?.email || "sin email";
+    const clientName = client?.name || "Cliente no identificado";
+    const brandName = brand?.name || "Categoría no identificada";
+    const trelloBoardUrl = getTrelloBoardUrl({
+      trelloBoardUrl: brand?.trelloBoardUrl,
+      trelloBoardId: brand?.trelloBoardId,
+    });
+    const reason =
+      approvedUser?.trelloMemberSyncError ||
+      "No se pudo identificar automáticamente el usuario de Trello.";
+    const subject = `Revisar acceso Trello de ${externalName}`;
+    const escapedExternalName = escapeHtml(externalName);
+    const escapedExternalEmail = escapeHtml(externalEmail);
+    const escapedClientName = escapeHtml(clientName);
+    const escapedBrandName = escapeHtml(brandName);
+    const escapedReason = escapeHtml(reason);
+    const escapedTrelloBoardUrl = trelloBoardUrl
+      ? escapeHtml(trelloBoardUrl)
+      : undefined;
+    const text = [
+      "Se requiere asociar manualmente un usuario externo con Trello.",
+      "",
+      `Usuario externo: ${externalName} <${externalEmail}>`,
+      `Cliente: ${clientName}`,
+      `Categoría: ${brandName}`,
+      trelloBoardUrl ? `Board: ${trelloBoardUrl}` : undefined,
+      `Motivo: ${reason}`,
+      "",
+      "Acción requerida: entrar a Usuarios externos y asociar manualmente el miembro de Trello correspondiente.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <p>Se requiere asociar manualmente un usuario externo con Trello.</p>
+        <ul>
+          <li><strong>Usuario externo:</strong> ${escapedExternalName} &lt;${escapedExternalEmail}&gt;</li>
+          <li><strong>Cliente:</strong> ${escapedClientName}</li>
+          <li><strong>Categoría:</strong> ${escapedBrandName}</li>
+          ${
+            escapedTrelloBoardUrl
+              ? `<li><strong>Board:</strong> <a href="${escapedTrelloBoardUrl}">${escapedTrelloBoardUrl}</a></li>`
+              : ""
+          }
+          <li><strong>Motivo:</strong> ${escapedReason}</li>
+        </ul>
+        <p>Acción requerida: entrar a Usuarios externos y asociar manualmente el miembro de Trello correspondiente.</p>
+      </div>
+    `;
+    const from =
+      process.env.RESEND_FROM_EMAIL ?? "Punto99 <digital@pto99.com>";
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: adminEmails,
+        subject,
+        text,
+        html,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      await ctx.runMutation(
+        internal.data.externalUserAdmin
+          .markExternalTrelloManualReviewNotification,
+        {
+          approvedExternalUserId: args.approvedExternalUserId,
+          error: `Resend no pudo enviar el aviso: ${response.status} ${body}`,
+        },
+      );
+      return;
+    }
+
+    await ctx.runMutation(
+      internal.data.externalUserAdmin
+        .markExternalTrelloManualReviewNotification,
+      {
+        approvedExternalUserId: args.approvedExternalUserId,
+        sentAt: Date.now(),
+        error: undefined,
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[TrelloManualReviewEmail] Error:", message);
+    await ctx.runMutation(
+      internal.data.externalUserAdmin
+        .markExternalTrelloManualReviewNotification,
+      {
+        approvedExternalUserId: args.approvedExternalUserId,
+        error: message,
+      },
+    );
+  }
+}
+
 async function getLatestExternalCommentFileLinks(
   ctx: any,
   args: {
@@ -625,7 +774,7 @@ export const validateExternalUserBoardMembership: any = internalAction({
       };
     }
 
-    await ctx.runMutation(
+    const manualStatusResult = await ctx.runMutation(
       internal.data.externalUserAdmin.markExternalTrelloStatus,
       {
         approvedExternalUserId: approvedExternalUser._id,
@@ -636,6 +785,12 @@ export const validateExternalUserBoardMembership: any = internalAction({
             : "No se pudo identificar automáticamente el usuario de Trello.",
       },
     );
+    if (manualStatusResult?.shouldNotifyManualReview) {
+      await notifyAdminsExternalTrelloManualRequired(ctx, {
+        approvedExternalUserId: approvedExternalUser._id,
+        clientBrandId: args.clientBrandId,
+      });
+    }
 
     if (confirmedMatches.length > 1) {
       return {

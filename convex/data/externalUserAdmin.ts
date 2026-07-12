@@ -6,7 +6,10 @@ import {
   mutation,
   query,
 } from "../_generated/server";
-import { canUserAccessInternalUserAdmin } from "../lib/internalUserAdminAccess";
+import {
+  INTERNAL_USER_ADMIN_ALLOWED_USER_IDS,
+  canUserAccessInternalUserAdmin,
+} from "../lib/internalUserAdminAccess";
 import {
   syncClientAssignmentsFromAccess,
   validatePreapprovedClientAccess,
@@ -472,6 +475,14 @@ export const markExternalTrelloStatus = internalMutation({
     trelloUsername: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const approvedUser = await ctx.db.get(args.approvedExternalUserId);
+    if (!approvedUser) return { ok: false, shouldNotifyManualReview: false };
+
+    const shouldNotifyManualReview =
+      args.status === "manual_required" &&
+      (approvedUser.trelloMemberSyncStatus !== "manual_required" ||
+        (!approvedUser.trelloManualReviewNotificationSentAt &&
+          !approvedUser.trelloManualReviewNotificationError));
     const patch: Record<string, unknown> = {
       trelloMemberSyncStatus: args.status,
       trelloMemberSyncError: args.error,
@@ -483,8 +494,78 @@ export const markExternalTrelloStatus = internalMutation({
     if (args.trelloMemberId !== undefined) {
       patch.trelloMemberId = args.trelloMemberId;
     }
+    if (args.status === "verified") {
+      patch.trelloManualReviewNotificationError = undefined;
+    }
 
     await ctx.db.patch(args.approvedExternalUserId, patch);
+    return { ok: true, shouldNotifyManualReview };
+  },
+});
+
+export const markExternalTrelloManualReviewNotification = internalMutation({
+  args: {
+    approvedExternalUserId: v.id("approvedExternalUsers"),
+    sentAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.approvedExternalUserId, {
+      trelloManualReviewNotificationSentAt: args.sentAt,
+      trelloManualReviewNotificationError: args.error,
+    });
+  },
+});
+
+export const getExternalTrelloManualReviewNotificationContext = internalQuery({
+  args: {
+    approvedExternalUserId: v.id("approvedExternalUsers"),
+    clientBrandId: v.id("clientBrands"),
+  },
+  handler: async (ctx, args) => {
+    const approvedUser = await ctx.db.get(args.approvedExternalUserId);
+    const brand = await ctx.db.get(args.clientBrandId);
+    const client = brand?.clientId ? await ctx.db.get(brand.clientId) : null;
+
+    const adminEmails = [];
+    for (const adminUserIdString of INTERNAL_USER_ADMIN_ALLOWED_USER_IDS) {
+      const adminUserId = ctx.db.normalizeId("users", adminUserIdString);
+      if (!adminUserId) continue;
+      const adminUser = await ctx.db.get(adminUserId);
+      const email =
+        typeof (adminUser as Record<string, unknown> | null)?.email ===
+        "string"
+          ? ((adminUser as Record<string, unknown>).email as string).trim()
+          : "";
+      if (email) adminEmails.push(email);
+    }
+
+    return {
+      approvedUser: approvedUser
+        ? {
+            _id: approvedUser._id,
+            name: approvedUser.name,
+            email: approvedUser.email,
+            trelloMemberSyncError: approvedUser.trelloMemberSyncError,
+          }
+        : null,
+      brand: brand
+        ? {
+            _id: brand._id,
+            name: brand.name,
+            trelloBoardId: brand.trelloBoardId,
+            trelloBoardUrl: brand.trelloBoardUrl,
+          }
+        : null,
+      client: client
+        ? {
+            _id: client._id,
+            name: client.name,
+            corClientId: client.corClientId,
+          }
+        : null,
+      adminEmails: Array.from(new Set(adminEmails)),
+    };
   },
 });
 

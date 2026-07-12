@@ -46,6 +46,8 @@ export default defineSchema({
     trelloMemberSyncStatus: v.optional(v.string()),
     trelloMemberSyncError: v.optional(v.string()),
     trelloMemberVerifiedAt: v.optional(v.number()),
+    trelloManualReviewNotificationSentAt: v.optional(v.number()),
+    trelloManualReviewNotificationError: v.optional(v.string()),
     createdAt: v.number(),
     addedBy: v.optional(v.id("users")),
   })
