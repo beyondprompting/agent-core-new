@@ -28,6 +28,12 @@ type Message = {
   reasoningDetails?: ReasoningDetail[];
 };
 
+function isImageFilePart(part: MessagePart, hasWordContent: boolean) {
+  if (part.type !== "file" || !part.url) return false;
+  if (hasWordContent && part.mediaType?.startsWith("image/")) return false;
+  return part.mediaType?.startsWith("image/") ?? false;
+}
+
 interface MessageContentProps {
   message: Message;
   showLinkPreviews?: boolean;
@@ -57,9 +63,29 @@ export function MessageContent({
         part.text.includes("--- Fin del documento ---"),
     );
 
+    const imageParts = message.content.filter((part) =>
+      isImageFilePart(part, hasWordContent),
+    );
+
     return (
       <div className="space-y-2">
+        {imageParts.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {imageParts.map((part, idx) => (
+              <FilePart
+                key={`${part.url}-${idx}`}
+                url={part.url!}
+                mediaType={part.mediaType}
+                hasWordContent={hasWordContent}
+              />
+            ))}
+          </div>
+        )}
+
         {message.content.map((part, idx) => {
+          if (isImageFilePart(part, hasWordContent)) {
+            return null;
+          }
           if (part.type === "text" && part.text) {
             return (
               <TextPart
@@ -352,7 +378,7 @@ function FilePart({ url, mediaType, hasWordContent }: FilePartProps) {
     <img
       src={url}
       alt="Imagen adjunta"
-      className="max-w-[140px] rounded-lg border border-gray-300"
+      className="h-28 w-28 rounded-lg border border-gray-300 object-cover"
     />
   );
 }
