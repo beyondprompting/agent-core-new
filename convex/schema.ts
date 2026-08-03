@@ -129,8 +129,12 @@ export default defineSchema({
     // === Campos para tracking de sincronización bidireccional ===
     corDescriptionHash: v.optional(v.string()),
     lastLocalEditAt: v.optional(v.number()),
-    // Solo se usa mientras una task creada por un usuario externo se publica.
-    // Permite reanudar el alta de colaboradores sin duplicar la task en COR.
+    // Selección final de colaboradores COR propia de la task.
+    // undefined = usar defaults del cliente (solo para tasks externas).
+    // [] = selección explícitamente vacía.
+    corCollaboratorUserIds: v.optional(v.array(v.id("users"))),
+    // Indica que una publicación con colaboradores debe poder reanudarse sin
+    // duplicar proyecto o task. Se conserva el nombre por compatibilidad.
     corExternalCollaboratorsPending: v.optional(v.boolean()),
     // === Sincronización con Trello (solo Convex; no se expone como custom fields) ===
     trelloCardId: v.optional(v.string()),

@@ -10,6 +10,7 @@ import {
   internalMutation,
   internalQuery,
   internalAction,
+  action,
 } from "../_generated/server";
 import { listMessages } from "@convex-dev/agent";
 import { internal, components } from "../_generated/api";
@@ -139,7 +140,79 @@ async function resolveCreationTaxonomy(
   };
 }
 
-async function resolveExternalTaskCollaboratorConfig(
+function normalizeCollaboratorEmail(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function formatCollaboratorName(
+  user: Record<string, unknown> | null,
+  corUser?: { corFirstName: string; corLastName: string; corEmail: string },
+) {
+  const localName =
+    user && typeof user.name === "string" ? user.name.trim() : "";
+  const corName = corUser
+    ? `${corUser.corFirstName} ${corUser.corLastName}`.trim()
+    : "";
+  return localName || corName || normalizeCollaboratorEmail(user?.email) ||
+    corUser?.corEmail || "Usuario sin nombre";
+}
+
+async function resolveCollaboratorUsersInCOR(
+  ctx: any,
+  userIds: Id<"users">[],
+) {
+  const normalizedUserIds = Array.from(
+    new Set(userIds.map((userId) => String(userId))),
+  ).map((userId) => {
+    const normalized = ctx.db.normalizeId("users", userId);
+    if (!normalized) throw new Error(`Usuario colaborador inválido: ${userId}.`);
+    return normalized;
+  });
+
+  if (normalizedUserIds.length > COR_MAX_TASK_COLLABORATORS) {
+    throw new Error(
+      `La selección supera el máximo de ${COR_MAX_TASK_COLLABORATORS} colaboradores permitido por COR.`,
+    );
+  }
+
+  const corUserIds = new Set<number>();
+  for (const userId of normalizedUserIds) {
+    const [user, approvedExternalUser, corUser] = await Promise.all([
+      ctx.db.get(userId),
+      ctx.db
+        .query("approvedExternalUsers")
+        .withIndex("by_user", (q: any) => q.eq("userId", userId))
+        .unique(),
+      ctx.db
+        .query("corUsers")
+        .withIndex("by_userId", (q: any) => q.eq("userId", userId))
+        .unique(),
+    ]);
+    if (!user || approvedExternalUser || !corUser) {
+      throw new Error(
+        `La selección contiene un usuario externo, inexistente o no resuelto en COR: ${userId}.`,
+      );
+    }
+
+    const localEmail = normalizeCollaboratorEmail(
+      (user as Record<string, unknown>).email,
+    );
+    const corEmail = normalizeCollaboratorEmail(corUser.corEmail);
+    if (!localEmail || localEmail !== corEmail) {
+      throw new Error(
+        `El email local de ${formatCollaboratorName(user as Record<string, unknown>, corUser)} no coincide con COR.`,
+      );
+    }
+    corUserIds.add(corUser.corUserId);
+  }
+
+  return {
+    collaboratorUserIds: normalizedUserIds,
+    requiredCorUserIds: Array.from(corUserIds),
+  };
+}
+
+async function getClientPublishingCollaboratorUserIds(
   ctx: any,
   args: {
     clientId?: Id<"corClients">;
@@ -157,71 +230,96 @@ async function resolveExternalTaskCollaboratorConfig(
     clientId = client?._id;
   }
   if (!clientId) {
-    throw new Error(
-      "No se puede publicar la tarea externa: no se pudo resolver su cliente local.",
-    );
+    return {
+      clientId: undefined,
+      collaboratorUserIds: [] as Id<"users">[],
+    };
   }
 
   const settings = await ctx.db
     .query("clientCorPublishingSettings")
     .withIndex("by_client", (q: any) => q.eq("clientId", clientId))
     .unique();
-  if (!settings) {
-    // La configuración es opt-in por cliente. Si todavía no existe, conservar
-    // el comportamiento histórico de publicación sin colaboradores automáticos.
-    return {
-      clientId,
-      requiredCorUserIds: [],
-    };
-  }
-
-  const corUserIds = new Set<number>();
-  for (const userId of settings.externalTaskCollaboratorUserIds) {
-    const [user, approvedExternalUser, corUser] = await Promise.all([
-      ctx.db.get(userId),
-      ctx.db
-        .query("approvedExternalUsers")
-        .withIndex("by_user", (q: any) => q.eq("userId", userId))
-        .unique(),
-      ctx.db
-        .query("corUsers")
-        .withIndex("by_userId", (q: any) => q.eq("userId", userId))
-        .unique(),
-    ]);
-    if (!user || approvedExternalUser || !corUser) {
-      throw new Error(
-        `La configuración de colaboradores COR del cliente contiene un usuario inválido o no resuelto: ${userId}.`,
-      );
-    }
-
-    const localEmail =
-      typeof (user as Record<string, unknown>).email === "string"
-        ? ((user as Record<string, unknown>).email as string)
-            .trim()
-            .toLowerCase()
-        : "";
-    const corEmail = corUser.corEmail.trim().toLowerCase();
-    if (!localEmail || localEmail !== corEmail) {
-      throw new Error(
-        `La configuración de colaboradores COR contiene un usuario cuyo email local no coincide con COR: ${localEmail || userId}.`,
-      );
-    }
-    corUserIds.add(corUser.corUserId);
-  }
-
-  if (corUserIds.size > COR_MAX_TASK_COLLABORATORS) {
-    throw new Error(
-      `La configuración supera el máximo de ${COR_MAX_TASK_COLLABORATORS} colaboradores permitido por COR.`,
-    );
-  }
-
   return {
     clientId,
-    requiredCorUserIds: Array.from(corUserIds),
+    collaboratorUserIds:
+      settings?.externalTaskCollaboratorUserIds ?? ([] as Id<"users">[]),
   };
 }
 
-async function ensureExternalProjectCollaborators(
+async function resolveExternalTaskCollaboratorConfig(
+  ctx: any,
+  args: {
+    clientId?: Id<"corClients">;
+    corClientId?: number;
+  },
+) {
+  const configured = await getClientPublishingCollaboratorUserIds(ctx, args);
+  if (!configured.clientId) {
+    throw new Error(
+      "No se puede publicar la tarea externa: no se pudo resolver su cliente local.",
+    );
+  }
+
+  // La configuración es opt-in por cliente. Una lista ausente o vacía conserva
+  // el comportamiento histórico de publicación sin colaboradores automáticos.
+  if (configured.collaboratorUserIds.length === 0) {
+    return {
+      clientId: configured.clientId,
+      collaboratorUserIds: [] as Id<"users">[],
+      requiredCorUserIds: [] as number[],
+    };
+  }
+
+  const resolved = await resolveCollaboratorUsersInCOR(
+    ctx,
+    configured.collaboratorUserIds,
+  );
+
+  return {
+    clientId: configured.clientId,
+    ...resolved,
+  };
+}
+
+async function getTaskCollaboratorUserIdsForDisplay(ctx: any, task: any) {
+  if (task.corCollaboratorUserIds !== undefined) {
+    return task.corCollaboratorUserIds as Id<"users">[];
+  }
+  if (task.source !== "external") return [] as Id<"users">[];
+  const configured = await getClientPublishingCollaboratorUserIds(ctx, {
+    clientId: task.clientId,
+    corClientId: task.corClientId,
+  });
+  return configured.collaboratorUserIds;
+}
+
+async function resolveTaskCollaboratorSelection(ctx: any, task: any) {
+  if (task.corCollaboratorUserIds !== undefined) {
+    return await resolveCollaboratorUsersInCOR(
+      ctx,
+      task.corCollaboratorUserIds,
+    );
+  }
+
+  if (task.source === "external") {
+    const config = await resolveExternalTaskCollaboratorConfig(ctx, {
+      clientId: task.clientId,
+      corClientId: task.corClientId,
+    });
+    return {
+      collaboratorUserIds: config.collaboratorUserIds,
+      requiredCorUserIds: config.requiredCorUserIds,
+    };
+  }
+
+  return {
+    collaboratorUserIds: [] as Id<"users">[],
+    requiredCorUserIds: [] as number[],
+  };
+}
+
+async function ensureProjectCollaborators(
   provider: ProjectManagementProvider,
   projectId: number,
   requiredCorUserIds: number[],
@@ -241,7 +339,7 @@ async function ensureExternalProjectCollaborators(
   }
 }
 
-async function ensureExternalTaskCollaborators(
+async function ensureTaskCollaborators(
   provider: ProjectManagementProvider,
   taskId: number,
   requiredCorUserIds: number[],
@@ -632,13 +730,16 @@ export const getTaskByIdInternal = internalQuery({
   },
 });
 
-export const getExternalTaskCollaboratorConfigInternal = internalQuery({
+export const getTaskCollaboratorSelectionInternal = internalQuery({
   args: {
-    clientId: v.optional(v.id("corClients")),
-    corClientId: v.optional(v.number()),
+    taskId: v.id("tasks"),
   },
   handler: async (ctx, args) => {
-    return await resolveExternalTaskCollaboratorConfig(ctx, args);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted") {
+      throw new Error("Task no encontrada al resolver colaboradores COR.");
+    }
+    return await resolveTaskCollaboratorSelection(ctx, task);
   },
 });
 
@@ -2405,6 +2506,272 @@ export const getTask = query({
   },
 });
 
+/**
+ * Devuelve la selección efectiva que se mostrará en el panel.
+ * Una selección propia de la task siempre prevalece sobre los defaults del cliente.
+ */
+export const getTaskCorCollaborators = query({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("No autenticado");
+    if (await isExternalUser(ctx, userId)) return null;
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted") return null;
+    if (!(await hasTaskAccess(ctx, task, userId))) return null;
+
+    const selectedUserIds = await getTaskCollaboratorUserIdsForDisplay(
+      ctx,
+      task,
+    );
+    const defaultIds =
+      task.source === "external"
+        ? (
+            await getClientPublishingCollaboratorUserIds(ctx, {
+              clientId: task.clientId,
+              corClientId: task.corClientId,
+            })
+          ).collaboratorUserIds
+        : [];
+    const defaultIdSet = new Set(defaultIds.map(String));
+
+    const collaborators = [];
+    for (const collaboratorUserId of selectedUserIds) {
+      const [user, corUser] = await Promise.all([
+        ctx.db.get(collaboratorUserId),
+        ctx.db
+          .query("corUsers")
+          .withIndex("by_userId", (q: any) =>
+            q.eq("userId", collaboratorUserId),
+          )
+          .unique(),
+      ]);
+      const localEmail = normalizeCollaboratorEmail(
+        user ? (user as Record<string, unknown>).email : undefined,
+      );
+      const corEmail = normalizeCollaboratorEmail(corUser?.corEmail);
+
+      collaborators.push({
+        userId: collaboratorUserId,
+        corUserId: corUser?.corUserId,
+        name: formatCollaboratorName(
+          user ? (user as Record<string, unknown>) : null,
+          corUser ?? undefined,
+        ),
+        email: localEmail || corEmail,
+        availableInCOR: Boolean(
+          user && corUser && localEmail && localEmail === corEmail,
+        ),
+        source: defaultIdSet.has(String(collaboratorUserId))
+          ? ("client_default" as const)
+          : ("task" as const),
+      });
+    }
+
+    const published =
+      Boolean(task.corTaskId) || task.corSyncStatus === "synced";
+    return {
+      collaborators,
+      customized: task.corCollaboratorUserIds !== undefined,
+      published,
+      editable:
+        !published &&
+        task.corSyncStatus !== "syncing" &&
+        task.corSyncStatus !== "retrying",
+      maxCollaborators: COR_MAX_TASK_COLLABORATORS,
+    };
+  },
+});
+
+/** Busca únicamente usuarios internos que ya tienen una correspondencia válida en COR. */
+export const searchTaskCorCollaboratorCandidates = query({
+  args: {
+    taskId: v.id("tasks"),
+    search: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const viewerId = await getAuthUserId(ctx);
+    if (!viewerId) throw new Error("No autenticado");
+    if (await isExternalUser(ctx, viewerId)) return [];
+
+    const term = args.search.trim().toLowerCase();
+    if (term.length < 2) return [];
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted") return [];
+    if (!(await hasTaskAccess(ctx, task, viewerId))) return [];
+    if (
+      task.corTaskId ||
+      task.corSyncStatus === "synced" ||
+      task.corSyncStatus === "syncing" ||
+      task.corSyncStatus === "retrying"
+    ) {
+      return [];
+    }
+
+    const selectedUserIds = await getTaskCollaboratorUserIdsForDisplay(
+      ctx,
+      task,
+    );
+    const selectedIds = new Set(selectedUserIds.map(String));
+    const corUsers = await ctx.db.query("corUsers").collect();
+    const candidates = [];
+
+    for (const corUser of corUsers) {
+      if (selectedIds.has(String(corUser.userId))) continue;
+      const [user, approvedExternalUser] = await Promise.all([
+        ctx.db.get(corUser.userId),
+        ctx.db
+          .query("approvedExternalUsers")
+          .withIndex("by_user", (q: any) => q.eq("userId", corUser.userId))
+          .unique(),
+      ]);
+      if (!user || approvedExternalUser) continue;
+
+      const localEmail = normalizeCollaboratorEmail(
+        (user as Record<string, unknown>).email,
+      );
+      const corEmail = normalizeCollaboratorEmail(corUser.corEmail);
+      if (!localEmail || localEmail !== corEmail) continue;
+
+      const name = formatCollaboratorName(
+        user as Record<string, unknown>,
+        corUser,
+      );
+      const searchable = [
+        name,
+        localEmail,
+        corUser.corFirstName,
+        corUser.corLastName,
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!searchable.includes(term)) continue;
+
+      candidates.push({
+        userId: corUser.userId,
+        corUserId: corUser.corUserId,
+        name,
+        email: localEmail,
+      });
+    }
+
+    return candidates
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, "es", { sensitivity: "base" }),
+      )
+      .slice(0, 10);
+  },
+});
+
+/** Guarda una selección propia de la task; nunca modifica la configuración del cliente. */
+export const setTaskCorCollaborators = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    userIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const viewerId = await getAuthUserId(ctx);
+    if (!viewerId) throw new Error("No autenticado");
+    if (await isExternalUser(ctx, viewerId)) {
+      throw new Error("Los usuarios externos no pueden editar colaboradores.");
+    }
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted") {
+      throw new Error("Task no encontrada.");
+    }
+    if (!(await hasTaskAccess(ctx, task, viewerId))) {
+      throw new Error("No tienes permisos para editar esta task.");
+    }
+    if (task.corTaskId || task.corSyncStatus === "synced") {
+      throw new Error(
+        "Los colaboradores no se pueden editar después de publicar la task en COR.",
+      );
+    }
+    if (
+      task.corSyncStatus === "syncing" ||
+      task.corSyncStatus === "retrying"
+    ) {
+      throw new Error(
+        "La task se está publicando. Espera a que termine antes de editar colaboradores.",
+      );
+    }
+
+    const selection = await resolveCollaboratorUsersInCOR(ctx, args.userIds);
+    const update: Record<string, unknown> = {
+      corCollaboratorUserIds: selection.collaboratorUserIds,
+    };
+    if (task.corSyncStatus === "error" && !task.corTaskId) {
+      // Si ya existe un proyecto parcial, conservar el flujo de reanudación aun
+      // cuando el usuario deje la lista vacía para no crear un segundo proyecto.
+      update.corExternalCollaboratorsPending =
+        Boolean(task.corProjectId) || selection.requiredCorUserIds.length > 0;
+    }
+    await ctx.db.patch(args.taskId, update);
+
+    return {
+      success: true,
+      collaboratorCount: selection.collaboratorUserIds.length,
+    };
+  },
+});
+
+export const getPublishedTaskCollaboratorContextInternal = internalQuery({
+  args: {
+    taskId: v.id("tasks"),
+    viewerId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    if (await isExternalUser(ctx, args.viewerId)) return null;
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted" || !task.corTaskId) {
+      return null;
+    }
+    if (!(await hasTaskAccess(ctx, task, args.viewerId))) return null;
+    return { corTaskId: task.corTaskId };
+  },
+});
+
+/** Lee desde COR los colaboradores actuales de una task ya publicada. */
+export const getPublishedTaskCorCollaborators = action({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const viewerId = await getAuthUserId(ctx);
+    if (!viewerId) throw new Error("No autenticado");
+
+    const context = await ctx.runQuery(
+      internal.data.tasks.getPublishedTaskCollaboratorContextInternal,
+      { taskId: args.taskId, viewerId },
+    );
+    if (!context) {
+      throw new Error("No tienes acceso a una task COR publicada.");
+    }
+
+    const corTaskId = Number(context.corTaskId);
+    if (!Number.isInteger(corTaskId) || corTaskId <= 0) {
+      throw new Error("La task tiene un identificador COR inválido.");
+    }
+
+    const collaborators = await getProjectManagementProvider().getTaskCollaborators(
+      corTaskId,
+    );
+    return collaborators.map((collaborator) => ({
+      corUserId: collaborator.id,
+      name:
+        `${collaborator.firstName || ""} ${collaborator.lastName || ""}`.trim() ||
+        collaborator.email ||
+        `Usuario COR ${collaborator.id}`,
+      email: collaborator.email,
+    }));
+  },
+});
+
 // Listar todas las tasks
 export const listTasks = query({
   args: {
@@ -3366,18 +3733,13 @@ export const retryTaskSync = mutation({
       throw new Error("La task no está en estado de error para reintentar.");
     }
 
-    // Una publicación externa parcialmente completada siempre vuelve al flujo
-    // de publicación, aun si COR ya alcanzó a crear la task. Ese flujo reutiliza
-    // los IDs persistidos y termina la asignación obligatoria de colaboradores.
-    const shouldResumeExternalPublication =
-      task.source === "external" &&
+    // Una publicación con colaboradores parcialmente completada siempre vuelve
+    // al flujo de publicación, incluso para una task interna cuya selección fue manual.
+    const shouldResumeCollaboratorPublication =
       task.corExternalCollaboratorsPending === true;
 
-    if (shouldResumeExternalPublication) {
-      await resolveExternalTaskCollaboratorConfig(ctx, {
-        clientId: task.clientId,
-        corClientId: task.corClientId,
-      });
+    if (shouldResumeCollaboratorPublication) {
+      await resolveTaskCollaboratorSelection(ctx, task);
       await ctx.db.patch(args.taskId, {
         corSyncStatus: "syncing",
         corSyncAttempt: 0,
@@ -3391,7 +3753,7 @@ export const retryTaskSync = mutation({
           attempt: 0,
         },
       );
-      return { success: true, message: "Publicación externa reintentada" };
+      return { success: true, message: "Publicación con colaboradores reintentada" };
     }
 
     // Si la task nunca fue publicada (no tiene corTaskId), reintentar publicación
@@ -3676,14 +4038,15 @@ export const startPublishTaskToExternal = mutation({
       );
     }
 
-    // La configuración de colaboradores se valida solo para tasks creadas por
-    // usuarios externos. Las tasks internas no consultan esta configuración.
-    if (task.source === "external") {
-      await resolveExternalTaskCollaboratorConfig(ctx, {
-        clientId: task.clientId ?? localClient._id,
-        corClientId: task.corClientId,
-      });
-    }
+    // Congelar la selección final antes de iniciar la publicación. Para una task
+    // externa sin personalización se toman los defaults actuales del cliente;
+    // una task interna sin selección conserva una lista vacía.
+    const collaboratorSelection = await resolveTaskCollaboratorSelection(ctx, {
+      ...task,
+      clientId: task.clientId ?? localClient._id,
+    });
+    const shouldManageCollaborators =
+      collaboratorSelection.requiredCorUserIds.length > 0;
 
     // Obtener el usuario directamente por su ID (ya autenticado por getAuthUserId)
     const user = await ctx.db.get(userId);
@@ -3707,9 +4070,8 @@ export const startPublishTaskToExternal = mutation({
       corSyncStatus: "syncing",
       corSyncError: undefined,
       corSyncAttempt: 0,
-      ...(task.source === "external"
-        ? { corExternalCollaboratorsPending: true }
-        : {}),
+      corCollaboratorUserIds: collaboratorSelection.collaboratorUserIds,
+      corExternalCollaboratorsPending: shouldManageCollaborators,
     });
 
     // Schedular la action que hace el trabajo pesado
@@ -3809,18 +4171,13 @@ export const publishTaskToExternalAction = internalAction({
         return;
       }
 
-      const isExternalPublication = task.source === "external";
-      const requiredCorUserIds = isExternalPublication
-        ? (
-            await ctx.runQuery(
-              internal.data.tasks.getExternalTaskCollaboratorConfigInternal,
-              {
-                clientId: task.clientId,
-                corClientId: task.corClientId,
-              },
-            )
-          ).requiredCorUserIds
-        : [];
+      const collaboratorSelection = await ctx.runQuery(
+        internal.data.tasks.getTaskCollaboratorSelectionInternal,
+        { taskId: args.taskId },
+      );
+      const requiredCorUserIds = collaboratorSelection.requiredCorUserIds;
+      const collaboratorPublicationPending =
+        task.corExternalCollaboratorsPending === true;
 
       // Verificar si existe un proyecto local en la tabla projects
       let corProjectId: number | undefined;
@@ -3833,8 +4190,7 @@ export const publishTaskToExternalAction = internalAction({
       const projectId = (task as any).projectId as string | undefined;
 
       if (
-        isExternalPublication &&
-        task.corExternalCollaboratorsPending === true &&
+        collaboratorPublicationPending &&
         task.corProjectId
       ) {
         const resumedProject = await provider.getProject(task.corProjectId);
@@ -3848,7 +4204,7 @@ export const publishTaskToExternalAction = internalAction({
         // No se vuelven a sumar deliverables/horas en un reintento.
         shouldUpdateProjectFields = false;
         console.log(
-          `[PublishTask] Reanudando publicación externa con proyecto COR ${corProjectId}`,
+          `[PublishTask] Reanudando publicación con proyecto COR ${corProjectId}`,
         );
       } else if (args.existingCorProjectId !== undefined) {
         console.log(
@@ -4044,7 +4400,7 @@ export const publishTaskToExternalAction = internalAction({
         throw new Error("No se pudo resolver el proyecto COR de la task.");
       }
 
-      if (isExternalPublication) {
+      if (collaboratorPublicationPending) {
         // Persistir el proyecto antes de cualquier llamada adicional permite
         // reanudar el flujo sin crear un segundo proyecto si COR falla después.
         await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
@@ -4052,7 +4408,7 @@ export const publishTaskToExternalAction = internalAction({
           corSyncStatus: "syncing",
           corProjectId,
         });
-        await ensureExternalProjectCollaborators(
+        await ensureProjectCollaborators(
           provider,
           corProjectId,
           requiredCorUserIds,
@@ -4068,8 +4424,7 @@ export const publishTaskToExternalAction = internalAction({
       // description → description, deadline → deadline, priority → priority
       let externalTask;
       if (
-        isExternalPublication &&
-        task.corExternalCollaboratorsPending === true &&
+        collaboratorPublicationPending &&
         task.corTaskId
       ) {
         externalTask = await provider.getTask(parseInt(task.corTaskId, 10));
@@ -4079,7 +4434,7 @@ export const publishTaskToExternalAction = internalAction({
           );
         }
         console.log(
-          `[PublishTask] Reanudando publicación externa con task COR ${externalTask.id}`,
+          `[PublishTask] Reanudando publicación con task COR ${externalTask.id}`,
         );
       } else {
         console.log(
@@ -4096,7 +4451,7 @@ export const publishTaskToExternalAction = internalAction({
         console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);
       }
 
-      if (isExternalPublication) {
+      if (collaboratorPublicationPending) {
         // Guardar el ID antes de asignar colaboradores evita duplicar la task
         // cuando la asignación falla y la publicación se reintenta.
         await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
@@ -4105,7 +4460,7 @@ export const publishTaskToExternalAction = internalAction({
           corTaskId: String(externalTask.id),
           corProjectId,
         });
-        await ensureExternalTaskCollaborators(
+        await ensureTaskCollaborators(
           provider,
           externalTask.id,
           requiredCorUserIds,
@@ -4136,7 +4491,7 @@ export const publishTaskToExternalAction = internalAction({
         corProjectId: corProjectId,
         corSyncedAt: Date.now(),
         corDescriptionHash: descriptionHash,
-        ...(isExternalPublication
+        ...(collaboratorPublicationPending
           ? { corExternalCollaboratorsPending: false }
           : {}),
       });

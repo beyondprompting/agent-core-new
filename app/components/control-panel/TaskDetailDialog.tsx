@@ -9,6 +9,7 @@ import { ProjectBriefContent } from "../task/ProjectBriefContent";
 import { EvaluationMessageList } from "../task/EvaluationMessages";
 import { EvaluationInput } from "../task/EvaluationInput";
 import { ConfirmDialog } from "@/app/components/ui/ConfirmDialog";
+import { TaskCollaboratorsSection } from "./TaskCollaboratorsSection";
 import { getStatusColor, getStatusDisplay } from "../task/types";
 import type { Task, SelectedFile, EvaluationMessage } from "../task/types";
 import { clientConfig } from "@/config/tenant.config";
@@ -1221,6 +1222,12 @@ export function TaskDetailDialog({
                     highlightMissingDeadline={
                       !isPublishedInCOR && !liveCorTaskId && isDeadlineMissing
                     }
+                  />
+                  <TaskCollaboratorsSection
+                    taskId={task._id}
+                    published={isPublishedInCOR}
+                    editable={canEditFromDialog}
+                    syncStatus={syncStatus}
                   />
                 </>
               )}

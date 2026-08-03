@@ -634,9 +634,10 @@ export function createCORProvider(): ProjectManagementProvider {
     async getProjectCollaborators(
       projectId: number,
     ): Promise<ExternalCollaborator[]> {
-      const response = await corApiFetch(
-        `/projects/${projectId}/collaborators`,
-      );
+      // COR's dedicated collaborators endpoint can return an empty array even
+      // when the project has collaborators. The project detail response is the
+      // reliable source and exposes them in its `collaborators` property.
+      const response = await corApiFetch(`/projects/${projectId}`);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
@@ -645,7 +646,16 @@ export function createCORProvider(): ProjectManagementProvider {
       }
 
       const raw = await response.text();
-      return raw.trim() ? mapCollaboratorsFromCOR(JSON.parse(raw)) : [];
+      if (!raw.trim()) return [];
+
+      const payload = JSON.parse(raw) as Record<string, unknown>;
+      const project =
+        payload.data &&
+        typeof payload.data === "object" &&
+        !Array.isArray(payload.data)
+          ? (payload.data as Record<string, unknown>)
+          : payload;
+      return mapCollaboratorsFromCOR(project.collaborators);
     },
 
     async addProjectCollaborators(
@@ -659,7 +669,9 @@ export function createCORProvider(): ProjectManagementProvider {
 
       const form = new URLSearchParams();
       for (const userId of uniqueUserIds) {
-        form.append("usersIds", String(userId));
+        // Although COR documents `usersIds` as an array, its form parser only
+        // accepts the bracket notation; the unbracketed key returns EH001/500.
+        form.append("usersIds[]", String(userId));
       }
 
       const response = await corApiFetch(
