@@ -129,6 +129,9 @@ export default defineSchema({
     // === Campos para tracking de sincronización bidireccional ===
     corDescriptionHash: v.optional(v.string()),
     lastLocalEditAt: v.optional(v.number()),
+    // Solo se usa mientras una task creada por un usuario externo se publica.
+    // Permite reanudar el alta de colaboradores sin duplicar la task en COR.
+    corExternalCollaboratorsPending: v.optional(v.boolean()),
     // === Sincronización con Trello (solo Convex; no se expone como custom fields) ===
     trelloCardId: v.optional(v.string()),
     trelloCardUrl: v.optional(v.string()),
@@ -469,6 +472,15 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_corUserId", ["corUserId"]),
+
+  // Configuración por cliente para publicaciones de tasks creadas por externos.
+  // Es independiente de los permisos internos de clientUserAssignments.
+  clientCorPublishingSettings: defineTable({
+    clientId: v.id("corClients"),
+    externalTaskCollaboratorUserIds: v.array(v.id("users")),
+    updatedAt: v.number(),
+    updatedBy: v.optional(v.id("users")),
+  }).index("by_client", ["clientId"]),
 
   // =====================================================
   // COR Clients — Clientes sincronizados desde COR

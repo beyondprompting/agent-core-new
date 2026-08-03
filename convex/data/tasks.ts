@@ -47,6 +47,7 @@ const MARKDOWN_LINK_PATTERN = /\[[^\]]+\]\(https?:\/\/[^\s)]+(?:\s+"[^"]*")?\)/;
 const MIN_PUBLISHABLE_DESCRIPTION_LENGTH = 40;
 const DESCRIPTION_MIN_REMAINING_RATIO = 0.35;
 const TRELLO_ATTACHMENT_SYNC_STALE_MS = 10 * 60 * 1000;
+const COR_MAX_TASK_COLLABORATORS = 20;
 
 async function isExternalUser(ctx: any, userId: any) {
   const approvedExternalUser = await ctx.db
@@ -136,6 +137,135 @@ async function resolveCreationTaxonomy(
     productId: subBrand?.corProductId,
     subBrandName: subBrand?.name,
   };
+}
+
+async function resolveExternalTaskCollaboratorConfig(
+  ctx: any,
+  args: {
+    clientId?: Id<"corClients">;
+    corClientId?: number;
+  },
+) {
+  let clientId = args.clientId;
+  if (!clientId && args.corClientId !== undefined) {
+    const client = await ctx.db
+      .query("corClients")
+      .withIndex("by_corClientId", (q: any) =>
+        q.eq("corClientId", args.corClientId),
+      )
+      .unique();
+    clientId = client?._id;
+  }
+  if (!clientId) {
+    throw new Error(
+      "No se puede publicar la tarea externa: no se pudo resolver su cliente local.",
+    );
+  }
+
+  const settings = await ctx.db
+    .query("clientCorPublishingSettings")
+    .withIndex("by_client", (q: any) => q.eq("clientId", clientId))
+    .unique();
+  if (!settings) {
+    // La configuración es opt-in por cliente. Si todavía no existe, conservar
+    // el comportamiento histórico de publicación sin colaboradores automáticos.
+    return {
+      clientId,
+      requiredCorUserIds: [],
+    };
+  }
+
+  const corUserIds = new Set<number>();
+  for (const userId of settings.externalTaskCollaboratorUserIds) {
+    const [user, approvedExternalUser, corUser] = await Promise.all([
+      ctx.db.get(userId),
+      ctx.db
+        .query("approvedExternalUsers")
+        .withIndex("by_user", (q: any) => q.eq("userId", userId))
+        .unique(),
+      ctx.db
+        .query("corUsers")
+        .withIndex("by_userId", (q: any) => q.eq("userId", userId))
+        .unique(),
+    ]);
+    if (!user || approvedExternalUser || !corUser) {
+      throw new Error(
+        `La configuración de colaboradores COR del cliente contiene un usuario inválido o no resuelto: ${userId}.`,
+      );
+    }
+
+    const localEmail =
+      typeof (user as Record<string, unknown>).email === "string"
+        ? ((user as Record<string, unknown>).email as string)
+            .trim()
+            .toLowerCase()
+        : "";
+    const corEmail = corUser.corEmail.trim().toLowerCase();
+    if (!localEmail || localEmail !== corEmail) {
+      throw new Error(
+        `La configuración de colaboradores COR contiene un usuario cuyo email local no coincide con COR: ${localEmail || userId}.`,
+      );
+    }
+    corUserIds.add(corUser.corUserId);
+  }
+
+  if (corUserIds.size > COR_MAX_TASK_COLLABORATORS) {
+    throw new Error(
+      `La configuración supera el máximo de ${COR_MAX_TASK_COLLABORATORS} colaboradores permitido por COR.`,
+    );
+  }
+
+  return {
+    clientId,
+    requiredCorUserIds: Array.from(corUserIds),
+  };
+}
+
+async function ensureExternalProjectCollaborators(
+  provider: ProjectManagementProvider,
+  projectId: number,
+  requiredCorUserIds: number[],
+) {
+  if (requiredCorUserIds.length === 0) return;
+  const current = await provider.getProjectCollaborators(projectId);
+  const currentIds = new Set(current.map((collaborator) => collaborator.id));
+  const missingIds = requiredCorUserIds.filter((id) => !currentIds.has(id));
+  if (missingIds.length === 0) return;
+
+  const result = await provider.addProjectCollaborators(projectId, missingIds);
+  if (!result.success) {
+    throw new Error(
+      result.error ||
+        `No se pudieron agregar colaboradores al proyecto COR ${projectId}.`,
+    );
+  }
+}
+
+async function ensureExternalTaskCollaborators(
+  provider: ProjectManagementProvider,
+  taskId: number,
+  requiredCorUserIds: number[],
+) {
+  if (requiredCorUserIds.length === 0) return;
+  const current = await provider.getTaskCollaborators(taskId);
+  const currentIds = new Set(current.map((collaborator) => collaborator.id));
+  const missingIds = requiredCorUserIds.filter((id) => !currentIds.has(id));
+  if (missingIds.length === 0) return;
+
+  const finalIds = Array.from(new Set([...currentIds, ...requiredCorUserIds]));
+  if (finalIds.length > COR_MAX_TASK_COLLABORATORS) {
+    throw new Error(
+      `No se pueden agregar los colaboradores obligatorios: la task COR ${taskId} superaría el máximo de ${COR_MAX_TASK_COLLABORATORS}.`,
+    );
+  }
+
+  const result = await provider.setTaskCollaborators(taskId, finalIds);
+  if (!result.success) {
+    throw new Error(
+      result.error ||
+        `No se pudieron sincronizar colaboradores de la task COR ${taskId}.`,
+    );
+  }
 }
 
 function normalizeDescriptionText(value: unknown): string {
@@ -499,6 +629,16 @@ export const getTaskByIdInternal = internalQuery({
     const task = await ctx.db.get(taskId);
     if (task?.convexStatus === "deleted") return null;
     return task;
+  },
+});
+
+export const getExternalTaskCollaboratorConfigInternal = internalQuery({
+  args: {
+    clientId: v.optional(v.id("corClients")),
+    corClientId: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await resolveExternalTaskCollaboratorConfig(ctx, args);
   },
 });
 
@@ -3226,6 +3366,34 @@ export const retryTaskSync = mutation({
       throw new Error("La task no está en estado de error para reintentar.");
     }
 
+    // Una publicación externa parcialmente completada siempre vuelve al flujo
+    // de publicación, aun si COR ya alcanzó a crear la task. Ese flujo reutiliza
+    // los IDs persistidos y termina la asignación obligatoria de colaboradores.
+    const shouldResumeExternalPublication =
+      task.source === "external" &&
+      task.corExternalCollaboratorsPending === true;
+
+    if (shouldResumeExternalPublication) {
+      await resolveExternalTaskCollaboratorConfig(ctx, {
+        clientId: task.clientId,
+        corClientId: task.corClientId,
+      });
+      await ctx.db.patch(args.taskId, {
+        corSyncStatus: "syncing",
+        corSyncAttempt: 0,
+        corSyncError: undefined,
+      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.data.tasks.publishTaskToExternalAction,
+        {
+          taskId: args.taskId,
+          attempt: 0,
+        },
+      );
+      return { success: true, message: "Publicación externa reintentada" };
+    }
+
     // Si la task nunca fue publicada (no tiene corTaskId), reintentar publicación
     if (!task.corTaskId) {
       console.log(
@@ -3508,6 +3676,15 @@ export const startPublishTaskToExternal = mutation({
       );
     }
 
+    // La configuración de colaboradores se valida solo para tasks creadas por
+    // usuarios externos. Las tasks internas no consultan esta configuración.
+    if (task.source === "external") {
+      await resolveExternalTaskCollaboratorConfig(ctx, {
+        clientId: task.clientId ?? localClient._id,
+        corClientId: task.corClientId,
+      });
+    }
+
     // Obtener el usuario directamente por su ID (ya autenticado por getAuthUserId)
     const user = await ctx.db.get(userId);
 
@@ -3530,6 +3707,9 @@ export const startPublishTaskToExternal = mutation({
       corSyncStatus: "syncing",
       corSyncError: undefined,
       corSyncAttempt: 0,
+      ...(task.source === "external"
+        ? { corExternalCollaboratorsPending: true }
+        : {}),
     });
 
     // Schedular la action que hace el trabajo pesado
@@ -3629,6 +3809,19 @@ export const publishTaskToExternalAction = internalAction({
         return;
       }
 
+      const isExternalPublication = task.source === "external";
+      const requiredCorUserIds = isExternalPublication
+        ? (
+            await ctx.runQuery(
+              internal.data.tasks.getExternalTaskCollaboratorConfigInternal,
+              {
+                clientId: task.clientId,
+                corClientId: task.corClientId,
+              },
+            )
+          ).requiredCorUserIds
+        : [];
+
       // Verificar si existe un proyecto local en la tabla projects
       let corProjectId: number | undefined;
       let localProjectDeliverables: number | undefined;
@@ -3639,7 +3832,25 @@ export const publishTaskToExternalAction = internalAction({
       let shouldUpdateProjectFields = true;
       const projectId = (task as any).projectId as string | undefined;
 
-      if (args.existingCorProjectId !== undefined) {
+      if (
+        isExternalPublication &&
+        task.corExternalCollaboratorsPending === true &&
+        task.corProjectId
+      ) {
+        const resumedProject = await provider.getProject(task.corProjectId);
+        if (!resumedProject || resumedProject.clientId !== clientId) {
+          throw new Error(
+            `No se pudo reanudar la publicación: el proyecto COR ${task.corProjectId} no existe o pertenece a otro cliente.`,
+          );
+        }
+        corProjectId = resumedProject.id;
+        // Los campos de proyecto ya fueron aplicados antes de persistir este ID.
+        // No se vuelven a sumar deliverables/horas en un reintento.
+        shouldUpdateProjectFields = false;
+        console.log(
+          `[PublishTask] Reanudando publicación externa con proyecto COR ${corProjectId}`,
+        );
+      } else if (args.existingCorProjectId !== undefined) {
         console.log(
           `[PublishTask] 📁 Usando proyecto COR existente: ${args.existingCorProjectId}`,
         );
@@ -3829,6 +4040,25 @@ export const publishTaskToExternalAction = internalAction({
         );
       }
 
+      if (!corProjectId) {
+        throw new Error("No se pudo resolver el proyecto COR de la task.");
+      }
+
+      if (isExternalPublication) {
+        // Persistir el proyecto antes de cualquier llamada adicional permite
+        // reanudar el flujo sin crear un segundo proyecto si COR falla después.
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "syncing",
+          corProjectId,
+        });
+        await ensureExternalProjectCollaborators(
+          provider,
+          corProjectId,
+          requiredCorUserIds,
+        );
+      }
+
       console.log(
         `[PublishTask] ✅ Proyecto listo: corProjectId=${corProjectId}`,
       );
@@ -3836,20 +4066,51 @@ export const publishTaskToExternalAction = internalAction({
       // 4. Crear TASK dentro del proyecto
       // Mapeo 1:1: cada campo de Convex va a su campo equivalente en COR
       // description → description, deadline → deadline, priority → priority
-      console.log(
-        `[PublishTask] 📋 Creando task en proyecto ${corProjectId}...`,
-      );
+      let externalTask;
+      if (
+        isExternalPublication &&
+        task.corExternalCollaboratorsPending === true &&
+        task.corTaskId
+      ) {
+        externalTask = await provider.getTask(parseInt(task.corTaskId, 10));
+        if (!externalTask || externalTask.projectId !== corProjectId) {
+          throw new Error(
+            `No se pudo reanudar la publicación: la task COR ${task.corTaskId} no existe o pertenece a otro proyecto.`,
+          );
+        }
+        console.log(
+          `[PublishTask] Reanudando publicación externa con task COR ${externalTask.id}`,
+        );
+      } else {
+        console.log(
+          `[PublishTask] 📋 Creando task en proyecto ${corProjectId}...`,
+        );
+        externalTask = await provider.createTask({
+          projectId: corProjectId,
+          title: task.title,
+          description: task.description || "",
+          deadline: task.deadline,
+          priority: task.priority,
+          status: task.status,
+        });
+        console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);
+      }
 
-      const externalTask = await provider.createTask({
-        projectId: corProjectId!,
-        title: task.title,
-        description: task.description || "",
-        deadline: task.deadline,
-        priority: task.priority,
-        status: task.status,
-      });
-
-      console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);
+      if (isExternalPublication) {
+        // Guardar el ID antes de asignar colaboradores evita duplicar la task
+        // cuando la asignación falla y la publicación se reintenta.
+        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+          taskId: args.taskId,
+          corSyncStatus: "syncing",
+          corTaskId: String(externalTask.id),
+          corProjectId,
+        });
+        await ensureExternalTaskCollaborators(
+          provider,
+          externalTask.id,
+          requiredCorUserIds,
+        );
+      }
 
       const strategicPriority = (task as any).strategicPriority;
       if (strategicPriority && isStrategicPriority(strategicPriority)) {
@@ -3875,6 +4136,9 @@ export const publishTaskToExternalAction = internalAction({
         corProjectId: corProjectId,
         corSyncedAt: Date.now(),
         corDescriptionHash: descriptionHash,
+        ...(isExternalPublication
+          ? { corExternalCollaboratorsPending: false }
+          : {}),
       });
 
       console.log(
@@ -3986,6 +4250,7 @@ export const updatePublishStatus = internalMutation({
     corProjectId: v.optional(v.number()),
     corSyncedAt: v.optional(v.number()),
     corDescriptionHash: v.optional(v.string()),
+    corExternalCollaboratorsPending: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const updateData: Record<string, unknown> = {
@@ -4001,6 +4266,10 @@ export const updatePublishStatus = internalMutation({
       updateData.corSyncedAt = args.corSyncedAt;
     if (args.corDescriptionHash !== undefined)
       updateData.corDescriptionHash = args.corDescriptionHash;
+    if (args.corExternalCollaboratorsPending !== undefined) {
+      updateData.corExternalCollaboratorsPending =
+        args.corExternalCollaboratorsPending;
+    }
 
     // Auto-cleanup: cuando se marca "synced", limpiar error y resetear attempt
     if (args.corSyncStatus === "synced") {
