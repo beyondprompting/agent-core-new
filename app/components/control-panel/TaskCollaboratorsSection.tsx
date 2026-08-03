@@ -27,6 +27,7 @@ type TaskCollaboratorsSectionProps = {
   published: boolean;
   editable: boolean;
   syncStatus: string;
+  collaboratorSyncStatus?: string;
 };
 
 export function TaskCollaboratorsSection({
@@ -34,6 +35,7 @@ export function TaskCollaboratorsSection({
   published,
   editable,
   syncStatus,
+  collaboratorSyncStatus,
 }: TaskCollaboratorsSectionProps) {
   const selection = useQuery(api.data.tasks.getTaskCorCollaborators, {
     taskId,
@@ -102,7 +104,13 @@ export function TaskCollaboratorsSection({
     return () => {
       cancelled = true;
     };
-  }, [getPublishedCollaborators, published, syncStatus, taskId]);
+  }, [
+    collaboratorSyncStatus,
+    getPublishedCollaborators,
+    published,
+    syncStatus,
+    taskId,
+  ]);
 
   const localCollaborators = (selection?.collaborators ||
     []) as TaskCollaborator[];

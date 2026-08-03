@@ -366,6 +366,33 @@ async function ensureTaskCollaborators(
   }
 }
 
+async function ensurePublishedCollaborators(
+  provider: ProjectManagementProvider,
+  projectId: number,
+  taskId: number,
+  requiredCorUserIds: number[],
+) {
+  const errors: string[] = [];
+
+  try {
+    await ensureProjectCollaborators(provider, projectId, requiredCorUserIds);
+  } catch (error) {
+    errors.push(`Proyecto: ${formatRetryError(error)}`);
+  }
+
+  // Intentar también la task aunque COR rechace los colaboradores del proyecto.
+  // Así cada reintento manual completa todo lo que COR permita en esa llamada.
+  try {
+    await ensureTaskCollaborators(provider, taskId, requiredCorUserIds);
+  } catch (error) {
+    errors.push(`Task: ${formatRetryError(error)}`);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join(" | "));
+  }
+}
+
 function normalizeDescriptionText(value: unknown): string {
   if (typeof value !== "string") return "";
   return value
@@ -3733,27 +3760,32 @@ export const retryTaskSync = mutation({
       throw new Error("La task no está en estado de error para reintentar.");
     }
 
-    // Una publicación con colaboradores parcialmente completada siempre vuelve
-    // al flujo de publicación, incluso para una task interna cuya selección fue manual.
-    const shouldResumeCollaboratorPublication =
-      task.corExternalCollaboratorsPending === true;
-
-    if (shouldResumeCollaboratorPublication) {
+    // Compatibilidad con publicaciones iniciadas antes de separar ambos estados:
+    // si proyecto y task ya existen, reintentar únicamente colaboradores.
+    if (
+      task.corExternalCollaboratorsPending === true &&
+      task.corProjectId &&
+      task.corTaskId
+    ) {
       await resolveTaskCollaboratorSelection(ctx, task);
       await ctx.db.patch(args.taskId, {
-        corSyncStatus: "syncing",
+        corSyncStatus: "synced",
         corSyncAttempt: 0,
         corSyncError: undefined,
+        corCollaboratorSyncStatus: "syncing",
+        corCollaboratorSyncError: undefined,
       });
       await ctx.scheduler.runAfter(
         0,
-        internal.data.tasks.publishTaskToExternalAction,
+        internal.data.tasks.retryTaskCollaboratorsAction,
         {
           taskId: args.taskId,
-          attempt: 0,
         },
       );
-      return { success: true, message: "Publicación con colaboradores reintentada" };
+      return {
+        success: true,
+        message: "Sincronización de colaboradores reintentada",
+      };
     }
 
     // Si la task nunca fue publicada (no tiene corTaskId), reintentar publicación
@@ -3801,6 +3833,120 @@ export const retryTaskSync = mutation({
     });
 
     return { success: true, message: "Sincronización reintentada" };
+  },
+});
+
+/**
+ * Reintenta exclusivamente colaboradores de una task ya publicada.
+ * Nunca crea ni modifica el proyecto o la task principal en COR.
+ */
+export const retryTaskCollaborators = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("No autenticado");
+    if (await isExternalUser(ctx, userId)) {
+      throw new Error(
+        "Los usuarios externos no pueden sincronizar colaboradores con COR.",
+      );
+    }
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted") {
+      throw new Error("Task no encontrada");
+    }
+    if (!(await hasTaskAccess(ctx, task, userId))) {
+      throw new Error(
+        "No tienes permisos para reintentar los colaboradores de esta task.",
+      );
+    }
+    if (!task.corProjectId || !task.corTaskId) {
+      throw new Error(
+        "No se pueden reintentar colaboradores porque la publicación en COR está incompleta.",
+      );
+    }
+    if (task.corCollaboratorSyncStatus !== "error") {
+      throw new Error(
+        "Los colaboradores no están en estado de error para reintentar.",
+      );
+    }
+
+    await resolveTaskCollaboratorSelection(ctx, task);
+    await ctx.db.patch(args.taskId, {
+      corCollaboratorSyncStatus: "syncing",
+      corCollaboratorSyncError: undefined,
+      corExternalCollaboratorsPending: true,
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.data.tasks.retryTaskCollaboratorsAction,
+      { taskId: args.taskId },
+    );
+
+    return {
+      success: true,
+      message: "Sincronización de colaboradores iniciada",
+    };
+  },
+});
+
+/** Ejecuta un único intento manual de colaboradores; no agenda reintentos. */
+export const retryTaskCollaboratorsAction = internalAction({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    try {
+      const task = await ctx.runQuery(
+        internal.data.tasks.getTaskByIdInternal,
+        { taskId: args.taskId as string },
+      );
+      if (!task) throw new Error("Task no encontrada");
+
+      const projectId = task.corProjectId;
+      const taskId = Number(task.corTaskId);
+      if (!projectId || !Number.isInteger(taskId) || taskId <= 0) {
+        throw new Error(
+          "La task no tiene identificadores COR válidos para sincronizar colaboradores.",
+        );
+      }
+
+      const selection = await ctx.runQuery(
+        internal.data.tasks.getTaskCollaboratorSelectionInternal,
+        { taskId: args.taskId },
+      );
+      await ensurePublishedCollaborators(
+        getProjectManagementProvider(),
+        projectId,
+        taskId,
+        selection.requiredCorUserIds,
+      );
+      await ctx.runMutation(
+        internal.data.tasks.updateCollaboratorSyncStatus,
+        {
+          taskId: args.taskId,
+          status: "synced",
+          pending: false,
+        },
+      );
+    } catch (error) {
+      const errorMsg = formatRetryError(error);
+      await ctx.runMutation(
+        internal.data.tasks.updateCollaboratorSyncStatus,
+        {
+          taskId: args.taskId,
+          status: "error",
+          error: errorMsg,
+          pending: true,
+        },
+      );
+      console.error(
+        "[RetryTaskCollaborators] No se pudieron sincronizar colaboradores:",
+        errorMsg,
+      );
+    }
   },
 });
 
@@ -4072,6 +4218,10 @@ export const startPublishTaskToExternal = mutation({
       corSyncAttempt: 0,
       corCollaboratorUserIds: collaboratorSelection.collaboratorUserIds,
       corExternalCollaboratorsPending: shouldManageCollaborators,
+      corCollaboratorSyncStatus: shouldManageCollaborators
+        ? "pending"
+        : undefined,
+      corCollaboratorSyncError: undefined,
     });
 
     // Schedular la action que hace el trabajo pesado
@@ -4095,10 +4245,11 @@ export const startPublishTaskToExternal = mutation({
  *
  * Flujo:
  * 1. Lee la task de Convex
- * 2. Crea un PROYECTO en COR (POST /projects) asociado al client_id
- * 3. Crea una TASK en COR (POST /tasks) dentro del proyecto
- * 4. Actualiza la task local con los IDs externos y estado "synced"
- * 5. Asocia los archivos del thread a la task en COR
+ * 2. Crea o reutiliza un PROYECTO en COR asociado al client_id
+ * 3. Crea una TASK en COR dentro del proyecto
+ * 4. Guarda ambos IDs y marca la publicación principal como "synced"
+ * 5. Sincroniza colaboradores con estado independiente y sin reintentos
+ * 6. Asocia comentarios y archivos pendientes a la task en COR
  */
 export const publishTaskToExternalAction = internalAction({
   args: {
@@ -4189,10 +4340,7 @@ export const publishTaskToExternalAction = internalAction({
       let shouldUpdateProjectFields = true;
       const projectId = (task as any).projectId as string | undefined;
 
-      if (
-        collaboratorPublicationPending &&
-        task.corProjectId
-      ) {
+      if (task.corProjectId) {
         const resumedProject = await provider.getProject(task.corProjectId);
         if (!resumedProject || resumedProject.clientId !== clientId) {
           throw new Error(
@@ -4400,20 +4548,13 @@ export const publishTaskToExternalAction = internalAction({
         throw new Error("No se pudo resolver el proyecto COR de la task.");
       }
 
-      if (collaboratorPublicationPending) {
-        // Persistir el proyecto antes de cualquier llamada adicional permite
-        // reanudar el flujo sin crear un segundo proyecto si COR falla después.
-        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
-          taskId: args.taskId,
-          corSyncStatus: "syncing",
-          corProjectId,
-        });
-        await ensureProjectCollaborators(
-          provider,
-          corProjectId,
-          requiredCorUserIds,
-        );
-      }
+      // Persistir el proyecto antes de crear la task permite reanudar un error
+      // de publicación sin crear un segundo proyecto.
+      await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+        taskId: args.taskId,
+        corSyncStatus: "syncing",
+        corProjectId,
+      });
 
       console.log(
         `[PublishTask] ✅ Proyecto listo: corProjectId=${corProjectId}`,
@@ -4423,10 +4564,7 @@ export const publishTaskToExternalAction = internalAction({
       // Mapeo 1:1: cada campo de Convex va a su campo equivalente en COR
       // description → description, deadline → deadline, priority → priority
       let externalTask;
-      if (
-        collaboratorPublicationPending &&
-        task.corTaskId
-      ) {
+      if (task.corTaskId) {
         externalTask = await provider.getTask(parseInt(task.corTaskId, 10));
         if (!externalTask || externalTask.projectId !== corProjectId) {
           throw new Error(
@@ -4451,21 +4589,14 @@ export const publishTaskToExternalAction = internalAction({
         console.log(`[PublishTask] ✅ Task creada: ID ${externalTask.id}`);
       }
 
-      if (collaboratorPublicationPending) {
-        // Guardar el ID antes de asignar colaboradores evita duplicar la task
-        // cuando la asignación falla y la publicación se reintenta.
-        await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
-          taskId: args.taskId,
-          corSyncStatus: "syncing",
-          corTaskId: String(externalTask.id),
-          corProjectId,
-        });
-        await ensureTaskCollaborators(
-          provider,
-          externalTask.id,
-          requiredCorUserIds,
-        );
-      }
+      // Guardar ambos IDs antes de cualquier operación posterior garantiza que
+      // un error de etiqueta u otra sincronización no pueda duplicar recursos.
+      await ctx.runMutation(internal.data.tasks.updatePublishStatus, {
+        taskId: args.taskId,
+        corSyncStatus: "syncing",
+        corTaskId: String(externalTask.id),
+        corProjectId,
+      });
 
       const strategicPriority = (task as any).strategicPriority;
       if (strategicPriority && isStrategicPriority(strategicPriority)) {
@@ -4491,14 +4622,81 @@ export const publishTaskToExternalAction = internalAction({
         corProjectId: corProjectId,
         corSyncedAt: Date.now(),
         corDescriptionHash: descriptionHash,
-        ...(collaboratorPublicationPending
-          ? { corExternalCollaboratorsPending: false }
-          : {}),
       });
 
       console.log(
         `[PublishTask] ✅ IDs guardados — corTaskId: ${externalTask.id}, corProjectId: ${corProjectId}, clientId: ${clientId}, hash: ${descriptionHash}`,
       );
+
+      // La publicación principal ya terminó. Los colaboradores tienen un
+      // estado independiente: un error aquí no revierte ni reintenta proyecto/task.
+      if (collaboratorPublicationPending && requiredCorUserIds.length > 0) {
+        try {
+          await ctx.runMutation(
+            internal.data.tasks.updateCollaboratorSyncStatus,
+            {
+              taskId: args.taskId,
+              status: "syncing",
+              pending: true,
+            },
+          );
+          await ensurePublishedCollaborators(
+            provider,
+            corProjectId,
+            externalTask.id,
+            requiredCorUserIds,
+          );
+          await ctx.runMutation(
+            internal.data.tasks.updateCollaboratorSyncStatus,
+            {
+              taskId: args.taskId,
+              status: "synced",
+              pending: false,
+            },
+          );
+          console.log(
+            `[PublishTask] ✅ Colaboradores sincronizados en proyecto ${corProjectId} y task ${externalTask.id}`,
+          );
+        } catch (collaboratorError) {
+          const collaboratorErrorMsg = formatRetryError(collaboratorError);
+          try {
+            await ctx.runMutation(
+              internal.data.tasks.updateCollaboratorSyncStatus,
+              {
+                taskId: args.taskId,
+                status: "error",
+                error: collaboratorErrorMsg,
+                pending: true,
+              },
+            );
+          } catch (statusError) {
+            console.error(
+              "[PublishTask] ⚠️ No se pudo guardar el error independiente de colaboradores:",
+              statusError,
+            );
+          }
+          console.error(
+            "[PublishTask] ⚠️ Proyecto y task publicados; falló únicamente la sincronización de colaboradores:",
+            collaboratorErrorMsg,
+          );
+        }
+      } else if (collaboratorPublicationPending) {
+        try {
+          await ctx.runMutation(
+            internal.data.tasks.updateCollaboratorSyncStatus,
+            {
+              taskId: args.taskId,
+              status: "synced",
+              pending: false,
+            },
+          );
+        } catch (statusError) {
+          console.error(
+            "[PublishTask] ⚠️ No se pudo cerrar el estado independiente de colaboradores:",
+            statusError,
+          );
+        }
+      }
 
       // 6. Publicar comentarios externos pendientes en COR (no-fatal: la task ya está publicada)
       try {
@@ -4635,6 +4833,30 @@ export const updatePublishStatus = internalMutation({
     await ctx.db.patch(args.taskId, updateData as any);
     console.log(
       `[UpdatePublishStatus] Task ${args.taskId} → ${args.corSyncStatus}`,
+    );
+  },
+});
+
+export const updateCollaboratorSyncStatus = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("syncing"),
+      v.literal("synced"),
+      v.literal("error"),
+    ),
+    error: v.optional(v.string()),
+    pending: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.taskId, {
+      corCollaboratorSyncStatus: args.status,
+      corCollaboratorSyncError: args.error,
+      corExternalCollaboratorsPending: args.pending,
+    });
+    console.log(
+      `[UpdateCollaboratorSyncStatus] Task ${args.taskId} → ${args.status}`,
     );
   },
 });
