@@ -548,7 +548,7 @@ export default function ChatInterface({
       )}
 
       {/* Área de mensajes */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 space-y-4 overflow-y-auto p-3 md:p-4">
         <ChatMessageList
           messages={messageList}
           isAgentThinking={isAgentThinking}
