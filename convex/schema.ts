@@ -286,6 +286,7 @@ export default defineSchema({
   // Estructura espejada con COR para sincronización directa.
   // Reemplaza el campo fileIds[] de tasks con una tabla dedicada.
   taskAttachments: defineTable({
+    panelEntryId: v.optional(v.id("taskPanelEntries")),
     taskId: v.id("tasks"),
     taskDraftId: v.optional(v.id("taskDrafts")),
     threadUploadedFileId: v.optional(v.id("threadUploadedFiles")),
@@ -315,11 +316,32 @@ export default defineSchema({
     .index("by_task_and_trello", ["taskId", "trelloAttachmentId"])
     .index("by_trelloSyncStatus", ["trelloSyncStatus"]),
 
+  // Manual panel uploads are owned by an authenticated user and a specific task.
+  taskPanelUploads: defineTable({
+    userId: v.id("users"), taskId: v.id("tasks"), key: v.string(),
+    filename: v.string(), mimeType: v.string(), size: v.number(),
+    state: v.union(v.literal("pending"), v.literal("uploading"), v.literal("ready"), v.literal("failed")),
+    fileId: v.optional(v.string()), storageId: v.optional(v.string()),
+    entryId: v.optional(v.id("taskPanelEntries")), createdAt: v.number(),
+  }).index("by_user_key", ["userId", "key"]),
+
+  taskPanelEntries: defineTable({
+    userId: v.id("users"), taskId: v.id("tasks"), key: v.string(),
+    text: v.string(), uploadIds: v.array(v.id("taskPanelUploads")),
+    messageId: v.optional(v.id("taskMessages")), createdAt: v.number(),
+    trelloState: v.string(), corState: v.string(),
+    trelloError: v.optional(v.string()), corError: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()), nextCheckAt: v.number(),
+  }).index("by_user_key", ["userId", "key"])
+    .index("by_task", ["taskId"]).index("by_next_check", ["nextCheckAt"]),
+
   taskMessages: defineTable({
+    panelEntryId: v.optional(v.id("taskPanelEntries")),
     taskId: v.id("tasks"),
     userId: v.optional(v.id("users")),
     source: v.union(
       v.literal("external_agent"),
+      v.literal("external_panel"),
       v.literal("trello"),
       v.literal("cor"),
       v.literal("internal"),

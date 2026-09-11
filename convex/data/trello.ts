@@ -1990,7 +1990,7 @@ export const syncClientAttachmentsFromCORToTrello: any = internalAction({
       { taskId: args.taskId },
     );
     const clientAttachments = attachments.filter((attachment: any) =>
-      isClientFacingAttachmentFilename(attachment.filename),
+      !attachment.panelEntryId && isClientFacingAttachmentFilename(attachment.filename),
     );
     const pendingAttachments = clientAttachments.filter(
       (attachment: any) => !attachment.trelloAttachmentId,

@@ -132,10 +132,11 @@ async function getOrCreateTaskDraft(
   return (await ctx.db.get(draftId))!;
 }
 
-async function insertExclusiveTaskAttachment(
+export async function insertExclusiveTaskAttachment(
   ctx: MutationCtx,
   args: {
     taskId: Id<"tasks">;
+    panelEntryId?: Id<"taskPanelEntries">;
     fileId: string;
     storageId: string;
     filename: string;
@@ -222,7 +223,7 @@ async function insertExclusiveTaskAttachment(
       .query("taskAttachments")
       .withIndex("by_file", (q) => q.eq("fileId", args.fileId))
       .collect()
-  ).filter((attachment) => attachment.taskId === args.taskId);
+  ).filter((attachment) => attachment.taskId === args.taskId && attachment.panelEntryId === args.panelEntryId);
 
   // Compatibilidad: un attachment antiguo puede existir sin referencia a la
   // subida. Solo se adopta si hay exactamente uno y todavía no tiene origen.
@@ -262,6 +263,7 @@ async function insertExclusiveTaskAttachment(
   }
 
   const attachmentId = await ctx.db.insert("taskAttachments", {
+    panelEntryId: args.panelEntryId,
     taskId: args.taskId,
     taskDraftId: ownership?.draftId ?? args.taskDraftId,
     threadUploadedFileId: ownership?._id,
@@ -1911,7 +1913,7 @@ export const getPendingAttachments = internalQuery({
       .query("taskAttachments")
       .withIndex("by_task", (q) => q.eq("taskId", args.taskId))
       .collect();
-    return attachments.filter((a) => !a.corAttachmentId);
+    return attachments.filter((a) => !a.corAttachmentId && !a.panelEntryId);
   },
 });
 
@@ -1948,10 +1950,11 @@ export const getTaskAttachmentsForTrello = internalQuery({
     taskId: v.id("tasks"),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const attachments = await ctx.db
       .query("taskAttachments")
       .withIndex("by_task", (q) => q.eq("taskId", args.taskId))
       .collect();
+    return attachments.filter((attachment) => !attachment.panelEntryId);
   },
 });
 

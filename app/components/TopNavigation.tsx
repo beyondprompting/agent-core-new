@@ -42,7 +42,7 @@ export function TopNavigation() {
       isActive: pathname === "/workspace/control-panel",
     },
     {
-      label: "Mis solicitudes",
+      label: "Mis tareas",
       href: "/workspace/requests",
       icon: LayoutDashboard,
       isActive: pathname.startsWith("/workspace/requests"),

@@ -19,4 +19,6 @@ crons.cron(
   {}
 );
 
+crons.interval("sync manual task panel entries", { minutes: 1 }, internal.data.taskPanelSync.sweep, {});
+
 export default crons;

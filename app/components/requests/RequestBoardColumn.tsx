@@ -13,7 +13,7 @@ export function RequestBoardColumn({ stage, requests }: { stage: BoardStage; req
       </header>
       <div className="flex flex-col gap-2.5 p-2.5">
         {requests.length ? requests.map((request) => <RequestBoardCard key={request._id} request={request} stage={stage} />) :
-          <p className="px-3 py-8 text-center text-xs text-muted-foreground">Sin solicitudes en esta etapa</p>}
+          <p className="px-3 py-8 text-center text-xs text-muted-foreground">Sin tareas en esta etapa</p>}
       </div>
     </section>
   );

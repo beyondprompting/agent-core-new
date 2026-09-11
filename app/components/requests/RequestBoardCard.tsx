@@ -25,7 +25,7 @@ export function RequestBoardCard({ request, stage }: { request: ExternalRequest;
         {request.threadId ? <Link href={`/workspace/requests/chat/${encodeURIComponent(request.threadId)}`} className="relative z-10 inline-flex items-center gap-1 rounded font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring">Ir al chat <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></Link> :
           <span>Chat no disponible</span>}
       </footer>
-      {!request.threadId && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">La conversación ya no está disponible. Abrí el título para consultar tu solicitud.</p>}
+      {!request.threadId && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">La conversación ya no está disponible. Abrí el título para consultar tu tarea.</p>}
       {detailOpen && <RequestDetailDialog request={request} stage={stage} onClose={() => setDetailOpen(false)} />}
     </article>
   );

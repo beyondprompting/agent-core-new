@@ -21,15 +21,15 @@ export function useNewRequest() {
     setError(null);
     try {
       // Reuse a created conversation if sending failed; do not create another on retry.
-      const threadId = pendingThread.current ?? await createThread({ title: "Nueva solicitud" });
+      const threadId = pendingThread.current ?? await createThread({ title: "Nueva tarea" });
       pendingThread.current = threadId;
       await sendMessage({
         threadId,
-        prompt: "Quiero realizar una solicitud. Presentate brevemente y guiame para contarte qué necesito.",
+        prompt: "Quiero crear una tarea. Presentate brevemente y guiame para contarte qué necesito.",
       });
       router.push(`/workspace?threadId=${encodeURIComponent(threadId)}`);
     } catch {
-      setError("No pudimos iniciar la solicitud. Volvé a intentarlo.");
+      setError("No pudimos iniciar la tarea. Volvé a intentarlo.");
       locked.current = false;
       setBusy(false);
     }
