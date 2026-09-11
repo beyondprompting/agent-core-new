@@ -9,13 +9,14 @@ import { RequestsToolbar } from "./RequestsToolbar";
 import { RequestsBoard } from "./RequestsBoard";
 import { useRequestFilters } from "./useRequestFilters";
 import { useNewRequest } from "./useNewRequest";
+import styles from "./requestsInteractions.module.css";
 
 export function RequestsPanel() {
   const requests = useQuery(api.data.tasks.listMyExternalRequests);
   const filters = useRequestFilters(requests ?? []);
   const newRequest = useNewRequest();
   return (
-    <div className="min-h-full bg-muted/40">
+    <div className={`${styles.interactiveControls} min-h-full bg-muted/40`}>
       <Suspense fallback={null}><RequestDialogRoute requests={requests} /></Suspense>
       <RequestsHeader clientName={filters.clients.length === 1 ? filters.clients[0].label : undefined} />
       <RequestsToolbar filters={filters} onNewRequest={newRequest.start} busy={newRequest.busy} />

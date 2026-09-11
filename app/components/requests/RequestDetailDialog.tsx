@@ -10,6 +10,7 @@ import { RequestAttachmentsSection } from "./RequestAttachmentsSection";
 import { TaskMediaProvider } from "./TaskMediaContext";
 import { RequestCommentsSection } from "./RequestCommentsSection";
 import { RequestDeadline } from "./RequestDeadline";
+import styles from "./requestsInteractions.module.css";
 
 export function RequestDetailDialog({ request, stage, onClose }: {
   request: ExternalRequest; stage: BoardStage; onClose: () => void;
@@ -34,7 +35,7 @@ export function RequestDetailDialog({ request, stage, onClose }: {
   return createPortal(
     <TaskMediaProvider taskId={request._id}><dialog ref={dialogRef} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => { if (event.target === event.currentTarget) { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose(); } }}
-      className="fixed inset-0 m-auto max-h-[92dvh] w-[calc(100vw_-_2rem)] max-w-6xl overflow-hidden rounded-2xl border border-border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/60">
+      className={`${styles.interactiveControls} fixed inset-0 m-auto max-h-[92dvh] w-[calc(100vw_-_2rem)] max-w-6xl overflow-hidden rounded-2xl border border-border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/60`}>
       <div className="flex h-[92dvh] max-h-[92dvh] flex-col">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-5 py-3">
           <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-semibold">{stage.label}</span>
