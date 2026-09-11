@@ -16,7 +16,7 @@ test("merges old and remote attachments without duplicates; recognizes Trello UR
 test("remote downloads require authentication and a matching attachment on the task's card", async t => {
   let downloads = 0;
   t.mock.method(trelloProvider, "listCardAttachments", async () => [{ id: "a1", name: "image.png", url: remote.sourceUrl, isUpload: true }]);
-  t.mock.method(trelloProvider, "downloadAttachment", async args => { downloads++; assert.equal(args.cardId, "c1"); assert.equal(args.url, undefined); return { blob: new Blob(["image"], { type: "image/png" }), filename: "image.png", mimeType: "image/png", url: remote.sourceUrl }; });
+  t.mock.method(trelloProvider, "downloadAttachment", async (args: any) => { downloads++; assert.equal(args.cardId, "c1"); assert.equal(args.url, undefined); return { blob: new Blob(["image"], { type: "image/png" }), filename: "image.png", mimeType: "image/png", url: remote.sourceUrl }; });
   const ctx: any = { auth: { getUserIdentity: async () => null }, runQuery: async () => ({ cardId: "c1" }) };
   const handler = (media as any)._handler;
   assert.equal((await handler(ctx, new Request("https://app.convex.site/task-panel/media?taskId=t1&attachmentId=a1"))).status, 401);

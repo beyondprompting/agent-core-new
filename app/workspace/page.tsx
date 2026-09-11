@@ -152,7 +152,9 @@ function WorkspaceChat() {
       currentThreadId={currentThreadId}
       onSelectThread={handleSelectThread}
       onNewThread={handleNewThread}
-      threads={threads}
+      threads={requestedThread && !threads.some(thread => thread.threadId === requestedThread.threadId)
+        ? [requestedThread, ...threads]
+        : threads}
       threadsStatus={threadsStatus}
       loadMoreThreads={loadMore}
     >

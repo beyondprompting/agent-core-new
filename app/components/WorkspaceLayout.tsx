@@ -70,6 +70,23 @@ export function WorkspaceLayout({
   const [editingTitle, setEditingTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
   const threadsContainerRef = useRef<HTMLDivElement>(null);
+  const activeThreadRef = useRef<HTMLDivElement>(null);
+  const activeThreadLoaded = threads.some(thread => thread.threadId === currentThreadId);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const container = threadsContainerRef.current;
+      const active = activeThreadRef.current;
+      if (!container || !active || !container.clientHeight) return;
+      const bounds = container.getBoundingClientRect();
+      const row = active.getBoundingClientRect();
+      if (row.top < bounds.top || row.bottom > bounds.top + container.clientHeight) {
+        // Move only the sidebar, leaving the conversation's scroll untouched.
+        container.scrollTop += row.top - bounds.top - (container.clientHeight - row.height) / 2;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentThreadId, activeThreadLoaded, isSidebarOpen, isMobileSidebarOpen]);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -258,6 +275,7 @@ export function WorkspaceLayout({
                   {threads.map((thread) => (
                     <div
                       key={thread._id}
+                      ref={currentThreadId === thread.threadId ? activeThreadRef : undefined}
                       onClick={() => {
                         if (editingThreadId !== thread.threadId) {
                           handleSelectThreadClick(thread.threadId);

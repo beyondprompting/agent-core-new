@@ -34,13 +34,13 @@ export function RequestDetailDialog({ request, stage, onClose }: {
     <TaskMediaProvider taskId={request._id}><dialog ref={dialogRef} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => { if (event.target === event.currentTarget) { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose(); } }}
       className="fixed inset-0 m-auto max-h-[92dvh] w-[calc(100vw_-_2rem)] max-w-6xl overflow-hidden rounded-2xl border border-border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/60">
-      <div className="flex max-h-[92dvh] flex-col">
+      <div className="flex h-[92dvh] max-h-[92dvh] flex-col">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-5 py-3">
           <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-semibold">{stage.label}</span>
           <button type="button" autoFocus onClick={onClose} aria-label="Cerrar detalle de tarea" className="rounded-lg p-2 text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><X className="h-5 w-5" aria-hidden="true" /></button>
         </header>
-        <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
-          <div className="min-w-0 p-5 sm:p-8">
+        <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-rows-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
+          <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain p-5 sm:p-8">
             <p className="mb-3 text-xs text-muted-foreground">{[request.clientName, request.brandName, request.subBrandName].filter(Boolean).join(" · ")}</p>
             <h2 id={titleId} className="break-words text-2xl font-bold leading-tight">{request.title}</h2>
             <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">

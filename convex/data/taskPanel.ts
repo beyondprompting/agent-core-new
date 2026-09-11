@@ -1,3 +1,4 @@
+import { resolvePanelComment } from "../lib/taskPanelComment";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "../_generated/server";
@@ -74,17 +75,17 @@ export const submit = mutation({
     const uploads = await Promise.all(args.uploadIds.map(id => ctx.db.get(id)));
     for (const upload of uploads) if (!upload || upload.userId !== userId || upload.taskId !== task._id || upload.state !== "ready" || !upload.fileId || !upload.storageId || upload.entryId) throw new Error("Uno de los archivos no pertenece a esta tarea o ya fue utilizado.");
     const entryId = await ctx.db.insert("taskPanelEntries", { ...args, text, userId: userId!, createdAt: Date.now(), trelloState: isTrelloEnabledForCorClientId(task.corClientId) ? "waiting" : "not_applicable", corState: "waiting", nextCheckAt: Date.now() });
-    const links: string[] = [];
+    const commentFiles: { filename: string; mimeType: string; url: string }[] = [];
     for (const upload of uploads) {
       if (!upload) continue;
       await insertExclusiveTaskAttachment(ctx, { taskId: task._id, panelEntryId: entryId, fileId: upload.fileId!, storageId: upload.storageId!, filename: upload.filename, mimeType: upload.mimeType, size: upload.size });
       await ctx.db.patch(upload._id, { entryId });
       const url = await ctx.storage.getUrl(upload.storageId as Id<"_storage">);
       if (!url) throw new Error("El archivo ya no está disponible.");
-      links.push(`- [${upload.filename.replace(/[\[\]\r\n]/g, " ")}](${url})`);
+      commentFiles.push({ filename: upload.filename, mimeType: upload.mimeType, url });
     }
     if (text) {
-      const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, panelEntryId: entryId, userId: userId!, source: "external_panel", message: [text, links.length ? `Archivos adjuntos:\n${links.join("\n")}` : ""].filter(Boolean).join("\n\n"), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
+      const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, panelEntryId: entryId, userId: userId!, source: "external_panel", message: resolvePanelComment(text, commentFiles), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
       await ctx.db.patch(entryId, { messageId });
     }
     await ctx.scheduler.runAfter(0, internal.data.taskPanelSync.sync, { entryId });

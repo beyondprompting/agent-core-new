@@ -3,7 +3,7 @@ import { internalAction, internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { trelloProvider } from "../integrations/trelloProvider";
 import { getProjectManagementProvider } from "../integrations/registry";
-import { formatTrelloCommentForCOR } from "../lib/trelloCommentFormat";
+import { formatPanelCommentForCOR } from "../lib/taskPanelComment";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
 import type { ActionCtx } from "../_generated/server";
 import type { ProjectManagementProvider } from "../integrations/types";
@@ -90,7 +90,7 @@ export async function syncEntry(ctx: ActionCtx, entryId: Id<"taskPanelEntries">,
               const result = await providers.trello.addCommentToCard({ cardId: task.trelloCardId!, text: message.message });
               await ctx.runMutation(internal.data.tasks.updateTaskMessageSyncStatusInternal, { taskMessageId: message._id, trelloCommentId: result.id, trelloSyncStatus: "synced" });
             } else {
-              const result = await provider.postTaskMessage({ taskId: Number(task.corTaskId), message: formatTrelloCommentForCOR(message.message) });
+              const result = await provider.postTaskMessage({ taskId: Number(task.corTaskId), message: formatPanelCommentForCOR(message.message) });
               if (!result.success) throw new Error(result.error || "No se pudo confirmar el comentario en COR.");
               await ctx.runMutation(internal.data.tasks.updateTaskMessageSyncStatusInternal, { taskMessageId: message._id, corTaskId: Number(task.corTaskId), corMessageSyncStatus: "synced" });
             }

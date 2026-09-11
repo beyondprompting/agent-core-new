@@ -22,7 +22,7 @@ export function RequestBoardCard({ request, stage }: { request: ExternalRequest;
       </div>
       <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-[10px] text-muted-foreground">
         <time dateTime={new Date(request.createdAt).toISOString()}>Creada {new Date(request.createdAt).toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" })}</time>
-        {request.threadId ? <Link href={`/workspace/requests/chat/${encodeURIComponent(request.threadId)}`} className="relative z-10 inline-flex items-center gap-1 rounded font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring">Ir al chat <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></Link> :
+        {request.threadId ? <Link href={`/workspace?threadId=${encodeURIComponent(request.threadId)}`} className="relative z-10 inline-flex items-center gap-1 rounded font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring">Ir al chat <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></Link> :
           <span>Chat no disponible</span>}
       </footer>
       {!request.threadId && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">La conversación ya no está disponible. Abrí el título para consultar tu tarea.</p>}

@@ -178,3 +178,16 @@ test("detail includes legacy task attachments and uses neutral comment author me
   assert.equal(result.attachments[0].url, "https://files.example/old-storage");
   assert.equal("source" in result.comments[0], false);
 });
+
+test("inline comment files resolve atomically and invalid references cannot attach files", async () => {
+  const f = fixture(); f.upload("image", { filename: "foto.png", mimeType: "image/png" });
+  const args = { taskId: "task1", key: "inline", text: "Antes\n\n{{task-panel-file:0}}\n\nDespués", uploadIds: ["image"] };
+  await assert.rejects(f.call(panel.submit, { ...args, text: "{{task-panel-file:2}}" }));
+  assert.equal(Array.from(f.rows.values()).filter(r => r._table === "taskAttachments").length, 0);
+  assert.equal(f.rows.get("image").entryId, undefined);
+  const id = await f.call(panel.submit, args);
+  const message = f.rows.get(f.rows.get(id).messageId).message;
+  assert.equal(message, "Antes\n\n![foto.png](https://files.example/storage-image)\n\nDespués");
+  assert.equal(await f.call(panel.submit, args), id);
+  assert.equal(Array.from(f.rows.values()).filter(r => r._table === "taskMessages").length, 1);
+});
