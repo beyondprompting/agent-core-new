@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+import { RequestDialogRoute } from "./RequestDialogRoute";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { RequestsHeader } from "./RequestsHeader";
@@ -14,6 +16,7 @@ export function RequestsPanel() {
   const newRequest = useNewRequest();
   return (
     <div className="min-h-full bg-muted/40">
+      <Suspense fallback={null}><RequestDialogRoute requests={requests} /></Suspense>
       <RequestsHeader clientName={filters.clients.length === 1 ? filters.clients[0].label : undefined} />
       <RequestsToolbar filters={filters} onNewRequest={newRequest.start} busy={newRequest.busy} />
       {newRequest.error && <p role="alert" className="mx-4 mb-4 rounded-lg border border-destructive/30 bg-card p-3 text-sm text-destructive sm:mx-8">{newRequest.error}</p>}

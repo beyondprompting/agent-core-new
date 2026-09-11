@@ -9,6 +9,7 @@ import { useRequestBrief } from "./useRequestBrief";
 import { RequestAttachmentsSection } from "./RequestAttachmentsSection";
 import { TaskMediaProvider } from "./TaskMediaContext";
 import { RequestCommentsSection } from "./RequestCommentsSection";
+import { RequestDeadline } from "./RequestDeadline";
 
 export function RequestDetailDialog({ request, stage, onClose }: {
   request: ExternalRequest; stage: BoardStage; onClose: () => void;
@@ -45,6 +46,7 @@ export function RequestDetailDialog({ request, stage, onClose }: {
             <h2 id={titleId} className="break-words text-2xl font-bold leading-tight">{request.title}</h2>
             <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
               <time dateTime={new Date(request.createdAt).toISOString()}>Creada el {new Date(request.createdAt).toLocaleDateString("es", { day: "numeric", month: "long", year: "numeric" })}</time>
+              <RequestDeadline deadline={request.deadline} />
               {request.threadId ? <Link href={`/workspace?threadId=${encodeURIComponent(request.threadId)}`} className="inline-flex items-center gap-1 font-medium text-primary hover:underline">Ir al chat <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></Link> : <span>Chat no disponible</span>}
             </div>
             <section className="mt-8" aria-label="Descripción de la tarea">

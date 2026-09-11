@@ -3547,6 +3547,7 @@ export const listMyExternalRequests = query({
             title: task.title,
             description: task.description,
             status: task.status,
+            deadline: task.deadline,
             clientKey: String(task.clientId ?? task.corClientId ?? task.corClientName ?? "unknown"),
             clientName: task.corClientName ?? "Cliente sin nombre",
             brandKey: String(task.clientBrandId ?? task.brandId ?? task.brandName ?? "unknown"),

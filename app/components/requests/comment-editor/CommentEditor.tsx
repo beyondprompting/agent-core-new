@@ -24,7 +24,7 @@ export function CommentEditor({ disabled, onChange }: { disabled: boolean; onCha
     immediatelyRender: false,
     extensions: [StarterKit.configure({ heading: false, blockquote: false, codeBlock: false, code: false, strike: false, link: false, underline: false, horizontalRule: false }), DraftFile],
     editorProps: {
-      attributes: { role: "textbox", "aria-label": "Escribir un comentario", "aria-multiline": "true", class: "min-h-28 max-h-80 overflow-y-auto p-3 text-sm outline-none [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_.ProseMirror-selectednode]:ring-2 [&_.ProseMirror-selectednode]:ring-primary" },
+      attributes: { role: "textbox", "aria-label": "Escribir un comentario", "aria-multiline": "true", class: "min-h-16 p-3 text-sm outline-none [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_.ProseMirror-selectednode]:ring-2 [&_.ProseMirror-selectednode]:ring-primary" },
       handlePaste: (_view, event) => { const files = Array.from(event.clipboardData?.files ?? []); if (!files.length) return false; event.preventDefault(); addFilesRef.current(files); return true; },
       handleDrop: (_view, event) => { const files = Array.from(event.dataTransfer?.files ?? []); if (!files.length) return false; event.preventDefault(); addFilesRef.current(files); return true; },
     },
@@ -62,8 +62,11 @@ export function CommentEditor({ disabled, onChange }: { disabled: boolean; onCha
       <button type="button" title="Adjuntar archivo" aria-label="Adjuntar archivo" disabled={disabled || !editor} onClick={() => input.current?.click()} className="rounded p-2 hover:bg-muted"><Paperclip className="h-4 w-4" /></button>
       <input ref={input} type="file" multiple disabled={disabled} accept={Array.from(allowed).join(",")} className="hidden" onChange={event => { addFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
     </div>
-    <EditorContent editor={editor} />
-    <p className="px-3 pb-2 text-[11px] text-muted-foreground">Escribí o pegá imágenes aquí. Los archivos se suben al publicar. Para quitar un adjunto, seleccionalo y presioná borrar.</p>
+    <div className="relative">
+      {editor?.isEmpty && <span aria-hidden="true" className="pointer-events-none absolute left-3 top-3 text-sm text-muted-foreground">Escribí un comentario…</span>}
+      <EditorContent editor={editor} />
+    </div>
+    <p className="px-3 pb-2 text-[11px] text-muted-foreground">Los archivos se suben al publicar.</p>
     {error && <p role="alert" className="px-3 pb-2 text-xs text-destructive">{error}</p>}
   </div>;
 }
