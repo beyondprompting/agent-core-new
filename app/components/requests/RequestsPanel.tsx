@@ -1,0 +1,27 @@
+"use client";
+
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { RequestsHeader } from "./RequestsHeader";
+import { RequestsToolbar } from "./RequestsToolbar";
+import { RequestsBoard } from "./RequestsBoard";
+import { useRequestFilters } from "./useRequestFilters";
+import { useNewRequest } from "./useNewRequest";
+
+export function RequestsPanel() {
+  const requests = useQuery(api.data.tasks.listMyExternalRequests);
+  const filters = useRequestFilters(requests ?? []);
+  const newRequest = useNewRequest();
+  return (
+    <div className="min-h-full bg-muted/40">
+      <RequestsHeader clientName={filters.clients.length === 1 ? filters.clients[0].label : undefined} />
+      <RequestsToolbar filters={filters} onNewRequest={newRequest.start} busy={newRequest.busy} />
+      {newRequest.error && <p role="alert" className="mx-4 mb-4 rounded-lg border border-destructive/30 bg-card p-3 text-sm text-destructive sm:mx-8">{newRequest.error}</p>}
+      {requests === undefined ? <p role="status" className="px-8 py-12 text-muted-foreground">Cargando solicitudes…</p> : <>
+        {requests.length === 0 && <p role="status" className="px-4 pb-5 text-sm text-muted-foreground sm:px-8">Todavía no creaste solicitudes. Usá «Nueva solicitud» para empezar desde el chat.</p>}
+        {requests.length > 0 && filters.filtered.length === 0 && <p role="status" className="px-4 pb-5 text-sm text-muted-foreground sm:px-8">No hay solicitudes que coincidan con estos filtros.</p>}
+        <RequestsBoard requests={filters.filtered} />
+      </>}
+    </div>
+  );
+}

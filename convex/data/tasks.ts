@@ -3516,6 +3516,47 @@ export const listByThread = query({
   },
 });
 
+// Read-only external panel. Keep internal visibility and creation paths untouched.
+export const listMyExternalRequests = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId || !(await isExternalUser(ctx, userId))) return [];
+
+    const tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_createdBy", (q) => q.eq("createdBy", String(userId)))
+      .order("desc")
+      .collect();
+
+    return await Promise.all(
+      tasks
+        .filter((task) => task.source === "external" && task.convexStatus !== "deleted")
+        .map(async (task) => {
+          const thread = await ctx.db
+            .query("chatThreads")
+            .withIndex("by_thread", (q) => q.eq("threadId", task.threadId))
+            .first();
+          // Explicit projection: never expose evaluations or internal sync metadata.
+          return {
+            _id: task._id,
+            createdAt: task._creationTime,
+            title: task.title,
+            description: task.description,
+            status: task.status,
+            clientKey: String(task.clientId ?? task.corClientId ?? task.corClientName ?? "unknown"),
+            clientName: task.corClientName ?? "Cliente sin nombre",
+            brandKey: String(task.clientBrandId ?? task.brandId ?? task.brandName ?? "unknown"),
+            brandName: task.brandName,
+            subBrandKey: String(task.subBrandId ?? task.productId ?? task.subBrandName ?? "unknown"),
+            subBrandName: task.subBrandName,
+            threadId: thread?.userId === userId ? task.threadId : null,
+          };
+        }),
+    );
+  },
+});
+
 // ==================== QUERY: LISTAR TASKS DEL USUARIO AUTENTICADO ====================
 
 /**
