@@ -19,8 +19,8 @@ export function RequestsToolbar({ filters, onNewRequest, busy }: {
   filters: ReturnType<typeof useRequestFilters>; onNewRequest: () => void; busy: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-5 sm:px-8">
-      <label className="flex h-9 w-full items-center gap-2 rounded-lg border border-border bg-card px-3 focus-within:ring-2 focus-within:ring-ring sm:max-w-[420px] sm:flex-1">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <label className="flex h-9 w-full items-center gap-2 rounded-lg border border-border bg-card px-3 focus-within:ring-2 focus-within:ring-ring sm:min-w-48 sm:max-w-[320px] sm:flex-1">
         <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <input aria-label="Buscar tareas" placeholder="Buscar tareas…" value={filters.search} onChange={(e) => filters.setSearch(e.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
       </label>
