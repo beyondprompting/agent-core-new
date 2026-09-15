@@ -4,6 +4,8 @@ import { useMemo, useState, useEffect } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
+import { InternalTasksBoard } from "../../components/control-panel/InternalTasksBoard";
+import { isTaskInCOR } from "../../components/control-panel/internalBoard";
 import { ControlPanelHeader } from "../../components/control-panel/ControlPanelHeader";
 import { ControlPanelSidebar } from "../../components/control-panel/ControlPanelSidebar";
 import { ControlPanelTaskSections } from "../../components/control-panel/ControlPanelTaskSections";
@@ -140,7 +142,7 @@ export default function ControlPanelPage() {
     () =>
       filteredProjects
         .flatMap(({ tasks }) => tasks)
-        .filter((task) => task.corSyncStatus !== "synced")
+        .filter((task) => !isTaskInCOR(task))
         .sort((a, b) => getTaskUpdatedAt(b) - getTaskUpdatedAt(a)),
     [filteredProjects],
   );
@@ -150,7 +152,7 @@ export default function ControlPanelPage() {
       filteredProjects
         .map(({ project, tasks }) => ({
           project,
-          tasks: tasks.filter((task) => task.corSyncStatus === "synced"),
+          tasks: tasks.filter((task) => isTaskInCOR(task)),
         }))
         .filter(({ tasks }) => tasks.length > 0),
     [filteredProjects],
@@ -282,7 +284,7 @@ export default function ControlPanelPage() {
       onSelectThread={handleSelectThread}
     >
       <div className="h-full flex flex-col bg-background">
-        <div className="flex-1 min-h-0 grid grid-cols-[280px_1fr] bg-background">
+        <div className="flex-1 min-h-0 grid grid-cols-[220px_minmax(0,1fr)] bg-background">
           <ControlPanelSidebar
             panelClients={panelClients}
             visibleClients={visibleClients}
@@ -292,7 +294,7 @@ export default function ControlPanelPage() {
             onSelectClient={setSelectedClientId}
           />
 
-          <section className="min-h-0 overflow-y-auto">
+          <section className="min-h-0 min-w-0 overflow-hidden">
             {!panelClients ? (
               <div className="flex items-center justify-center h-full">
                 <div className="animate-pulse text-muted-foreground">
@@ -310,7 +312,7 @@ export default function ControlPanelPage() {
                 </p>
               </div>
             ) : (
-              <div className="p-6 max-w-7xl">
+              <div className="flex h-full min-h-0 flex-col p-4">
                 <ControlPanelHeader
                   selectedClient={selectedClient}
                   selectedBrandId={selectedBrandId}
@@ -326,7 +328,7 @@ export default function ControlPanelPage() {
                   onPublicationTabChange={setPublicationTab}
                 />
 
-                <ControlPanelTaskSections
+                {viewMode === "cards" ? <InternalTasksBoard projects={filteredProjects} publicationTab={publicationTab} onSelectTask={setSelectedTask} /> : <div className="min-h-0 overflow-y-auto"><ControlPanelTaskSections
                   filteredProjectsLength={filteredProjects.length}
                   hasVisibleTasksForTab={hasVisibleTasksForTab}
                   showUnpublishedSection={showUnpublishedSection}
@@ -361,7 +363,7 @@ export default function ControlPanelPage() {
                   }
                   onToggleProjectExpanded={toggleProjectExpanded}
                   onSelectTask={setSelectedTask}
-                />
+                /></div>}
               </div>
             )}
           </section>

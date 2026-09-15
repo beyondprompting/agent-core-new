@@ -342,6 +342,7 @@ export default defineSchema({
     source: v.union(
       v.literal("external_agent"),
       v.literal("external_panel"),
+      v.literal("internal_panel"),
       v.literal("trello"),
       v.literal("cor"),
       v.literal("internal"),

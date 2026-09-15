@@ -40,7 +40,7 @@ export function ControlPanelHeader({
   onPublicationTabChange,
 }: ControlPanelHeaderProps) {
   return (
-    <div className="mb-6">
+    <div className="mb-3 shrink-0">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-foreground">
@@ -64,10 +64,10 @@ export function ControlPanelHeader({
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
-              title="Ver como cards"
+              title="Ver como board"
             >
               <LayoutGrid className="h-3.5 w-3.5" />
-              Cards
+              Board
             </button>
             <button
               type="button"
@@ -119,7 +119,7 @@ export function ControlPanelHeader({
         </div>
       </div>
 
-      <div className="mt-5 border-b border-border">
+      <div className="mt-2 border-b border-border">
         <div className="flex flex-wrap items-center gap-6">
           <button
             type="button"

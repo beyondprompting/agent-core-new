@@ -5,7 +5,7 @@ import { mutation, query, internalMutation, internalQuery } from "../_generated/
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
-import { insertExclusiveTaskAttachment } from "./tasks";
+import { insertExclusiveTaskAttachment, hasTaskAccess } from "./tasks";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
 
 export const MAX_PANEL_FILE_SIZE = 20 * 1024 * 1024;
@@ -15,7 +15,11 @@ export async function requirePanelTask(ctx: QueryCtx | MutationCtx, taskId: Id<"
   if (!userId) throw new Error("No autenticado");
   const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId)).unique();
   const task = await ctx.db.get(taskId);
-  if (!external || !task || task.createdBy !== String(userId) || task.source !== "external" || task.convexStatus === "deleted") throw new Error("No tenés acceso a esta tarea.");
+  if (!task || task.convexStatus === "deleted") throw new Error("No tenés acceso a esta tarea.");
+  const allowed = external
+    ? task.createdBy === String(userId) && task.source === "external"
+    : await hasTaskAccess(ctx, task, userId);
+  if (!allowed) throw new Error("No tenés acceso a esta tarea.");
   return task;
 }
 
@@ -65,6 +69,7 @@ export const submit = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     const task = await requirePanelTask(ctx, args.taskId, userId);
+    const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId!)).unique();
     const text = args.text.trim();
     if ((!text && !args.uploadIds.length) || text.length > 10000 || args.uploadIds.length > 10 || args.key.length > 100 || new Set(args.uploadIds).size !== args.uploadIds.length) throw new Error("Revisá el comentario y sus archivos (máximo 10).");
     const existing = await ctx.db.query("taskPanelEntries").withIndex("by_user_key", q => q.eq("userId", userId!).eq("key", args.key)).unique();
@@ -74,7 +79,7 @@ export const submit = mutation({
     }
     const uploads = await Promise.all(args.uploadIds.map(id => ctx.db.get(id)));
     for (const upload of uploads) if (!upload || upload.userId !== userId || upload.taskId !== task._id || upload.state !== "ready" || !upload.fileId || !upload.storageId || upload.entryId) throw new Error("Uno de los archivos no pertenece a esta tarea o ya fue utilizado.");
-    const entryId = await ctx.db.insert("taskPanelEntries", { ...args, text, userId: userId!, createdAt: Date.now(), trelloState: isTrelloEnabledForCorClientId(task.corClientId) ? "waiting" : "not_applicable", corState: "waiting", nextCheckAt: Date.now() });
+    const entryId = await ctx.db.insert("taskPanelEntries", { ...args, text, userId: userId!, createdAt: Date.now(), trelloState: task.trelloCardId || isTrelloEnabledForCorClientId(task.corClientId) ? "waiting" : "not_applicable", corState: "waiting", nextCheckAt: Date.now() });
     const commentFiles: { filename: string; mimeType: string; url: string }[] = [];
     for (const upload of uploads) {
       if (!upload) continue;
@@ -85,7 +90,7 @@ export const submit = mutation({
       commentFiles.push({ filename: upload.filename, mimeType: upload.mimeType, url });
     }
     if (text) {
-      const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, panelEntryId: entryId, userId: userId!, source: "external_panel", message: resolvePanelComment(text, commentFiles), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
+      const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, panelEntryId: entryId, userId: userId!, source: external ? "external_panel" : "internal_panel", message: resolvePanelComment(text, commentFiles), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
       await ctx.db.patch(entryId, { messageId });
     }
     await ctx.scheduler.runAfter(0, internal.data.taskPanelSync.sync, { entryId });
@@ -98,12 +103,13 @@ export const detail = query({
   handler: async (ctx, { taskId }) => {
     const userId = await getAuthUserId(ctx);
     await requirePanelTask(ctx, taskId, userId);
+    const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId!)).unique();
     const attachments = await ctx.db.query("taskAttachments").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     const messages = await ctx.db.query("taskMessages").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     const entries = await ctx.db.query("taskPanelEntries").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     return {
       attachments: await Promise.all(attachments.map(async a => ({ id: a._id, filename: a.filename, size: a.size, mimeType: a.mimeType, createdAt: a.createdAt, trelloAttachmentId: a.trelloAttachmentId, trelloUrl: a.trelloAttachmentUrl, corUrl: a.corUrl, url: await ctx.storage.getUrl(a.storageId as Id<"_storage">), entryId: a.panelEntryId }))),
-      comments: await Promise.all(messages.filter(m => ["external_panel", "external_agent", "trello"].includes(m.source)).sort((a,b) => b.createdAt-a.createdAt).map(async m => ({ id: m._id, text: m.message, createdAt: m.createdAt, own: m.userId === userId, authorName: m.userId ? (await ctx.db.get(m.userId))?.name : undefined }))),
+      comments: await Promise.all(messages.filter(m => !external || ["external_panel", "internal_panel", "external_agent", "trello"].includes(m.source)).sort((a,b) => b.createdAt-a.createdAt).map(async m => ({ id: m._id, text: m.message, createdAt: m.createdAt, own: m.userId === userId, authorName: m.userId ? (await ctx.db.get(m.userId))?.name : undefined }))),
       entries: entries.map(e => ({ id: e._id, createdAt: e.createdAt, trelloState: e.trelloState, corState: e.corState })),
     };
   },

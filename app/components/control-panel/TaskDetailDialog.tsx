@@ -1,9 +1,12 @@
 "use client";
 
+import { TaskFieldEditor } from "../task/TaskFieldEditor";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useAction, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { TaskFieldButton, useTaskFieldButtons } from "../task/TaskFieldButton";
+import { InternalTaskComments } from "./InternalTaskComments";
 import { TaskBriefContent } from "../task/TaskBriefContent";
 import { ProjectBriefContent } from "../task/ProjectBriefContent";
 import { EvaluationMessageList } from "../task/EvaluationMessages";
@@ -172,6 +175,7 @@ function EditableTaxonomyItem({
   editable,
   onApply,
 }: EditableTaxonomyItemProps) {
+  const fieldButtons = useTaskFieldButtons();
   const [isEditing, setIsEditing] = useState(false);
   const [editBrandId, setEditBrandId] = useState(brandId);
   const [editSubBrandId, setEditSubBrandId] = useState(subBrandId);
@@ -245,6 +249,7 @@ function EditableTaxonomyItem({
             Categoría
           </p>
           {isEditing ? (
+            <TaskFieldEditor floating={fieldButtons} label="Categoría y marca" value={[selectedBrand?.name || "Sin categoría", selectedSubBrand?.name].filter(Boolean).join(" · ")} onClose={handleCancel} busy={isApplying}>
             <div className="mt-1">
               <select
                 ref={selectRef}
@@ -322,6 +327,11 @@ function EditableTaxonomyItem({
                 </button>
               </div>
             </div>
+            </TaskFieldEditor>
+          ) : fieldButtons ? (
+            <TaskFieldButton label="categoría y marca" editable={editable} onEdit={handleStartEdit}>
+              {[selectedBrand?.name || "Sin categoría", selectedSubBrand?.name].filter(Boolean).join(" · ")}
+            </TaskFieldButton>
           ) : (
             <>
               <p className="text-sm text-foreground mt-0.5 truncate">
@@ -340,7 +350,7 @@ function EditableTaxonomyItem({
             </>
           )}
         </div>
-        {editable && !isEditing && (
+        {editable && !isEditing && !fieldButtons && (
           <button
             type="button"
             onClick={handleStartEdit}
@@ -368,6 +378,7 @@ export function TaskDetailDialog({
   onPublishResult,
 }: TaskDetailDialogProps) {
   const convex = useConvex();
+  const viewer = useQuery(api.data.userAccess.viewerAccessProfile);
   const startPublish = useMutation(api.data.tasks.startPublishTaskToExternal);
   const retryTask = useMutation(api.data.tasks.retryTaskSync);
   const retryTaskCollaborators = useMutation(
@@ -430,9 +441,7 @@ export function TaskDetailDialog({
   const [draftBrandId, setDraftBrandId] = useState<string>("");
   const [draftSubBrandId, setDraftSubBrandId] = useState<string>("");
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"task" | "project" | "evaluation">(
-    "task",
-  );
+
 
   // === Evaluation state ===
   const [evaluationThreadId, setEvaluationThreadId] = useState<string | null>(
@@ -528,10 +537,6 @@ export function TaskDetailDialog({
   const liveTaskDeadline = (liveTask as any)?.deadline ?? task.deadline;
   const isDeadlineMissing = !liveTaskDeadline?.trim();
   const publishDeadlineError = getPublishDeadlineError(liveTaskDeadline);
-  const pendingExternalMessages = useQuery(
-    api.data.tasks.listPendingExternalTaskMessages,
-    !isPublishedInCOR ? { taskId: task._id } : "skip",
-  );
   const liveCorTaskId = (liveTask as any)?.corTaskId ?? task.corTaskId;
   const archiveSyncStatus =
     (liveTask as any)?.archiveSyncStatus ?? task.archiveSyncStatus;
@@ -541,6 +546,9 @@ export function TaskDetailDialog({
     (liveTask as any)?.convexStatus ?? task.convexStatus ?? "active";
   const canEditFromDialog =
     !isPublishedInCOR && syncStatus !== "syncing" && syncStatus !== "retrying";
+  const canEditTaskContent = canEditFromDialog && viewer?.kind === "internal" &&
+    (liveTask ?? task).source === "internal" &&
+    String((liveTask ?? task).createdBy) === String(viewer.userId);
   const canArchiveUnpublishedTask =
     !isPublishedInCOR &&
     liveConvexStatus !== "archived" &&
@@ -597,9 +605,7 @@ export function TaskDetailDialog({
     (liveTask as any)?.corProjectMissingInCOR ??
     task.corProjectMissingInCOR,
   );
-  const pendingExternalMessageList = pendingExternalMessages || [];
-  const showPendingExternalMessages =
-    !isPublishedInCOR && pendingExternalMessageList.length > 0;
+
 
   // Detectar cuando la publicación finaliza (synced o error)
   useEffect(() => {
@@ -966,7 +972,6 @@ export function TaskDetailDialog({
         taskId: task._id,
       });
       setEvaluationThreadId(result.evaluationThreadId);
-      setActiveTab("evaluation");
     } catch (error) {
       console.error("Error creando thread de evaluación:", error);
     }
@@ -1153,18 +1158,18 @@ export function TaskDetailDialog({
       />
 
       {/* Dialog */}
-      <div className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">
-              Detalle de Tarea
+              Tarea
             </h2>
             {/* Status badge */}
             <span
               className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)}`}
             >
-              {getStatusDisplay(task.status)}
+              {isPublishedInCOR ? getStatusDisplay(liveTask?.status ?? task.status) : "Sin ingresar a COR"}
             </span>
           </div>
           <button
@@ -1175,66 +1180,12 @@ export function TaskDetailDialog({
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-border flex-shrink-0 px-6">
-          <button
-            onClick={() => setActiveTab("task")}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
-              activeTab === "task"
-                ? "text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            📋 Tarea
-            {activeTab === "task" && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
-            )}
-          </button>
-          {project && (
-            <button
-              onClick={() => setActiveTab("project")}
-              className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
-                activeTab === "project"
-                  ? "text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              📁 Proyecto
-              {activeTab === "project" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
-              )}
-            </button>
-          )}
-          <button
-            onClick={() => {
-              if (!evaluationThreadId) {
-                handleStartEvaluation();
-              } else {
-                setActiveTab("evaluation");
-              }
-            }}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
-              activeTab === "evaluation"
-                ? "text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            ✨ Evaluar
-            {activeTab === "evaluation" && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
-            )}
-          </button>
-        </div>
-
+        <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-rows-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
         {/* Body — Tab content */}
         <div
-          className={`flex-1 min-h-0 ${
-            activeTab === "evaluation"
-              ? "flex flex-col overflow-hidden"
-              : "overflow-y-auto"
-          }`}
+          className="min-h-0 min-w-0 overflow-y-auto overscroll-contain"
         >
-          {activeTab === "task" && (
+          {(
             <div>
               {taskMissingInCOR && (
                 <div className="mx-6 mt-4 mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1271,6 +1222,17 @@ export function TaskDetailDialog({
                 </div>
               ) : (
                 <>
+                  <TaskBriefContent
+                    task={liveTask ?? task}
+                    layout="board"
+                    contentEditable={canEditTaskContent}
+                    editable={canEditFromDialog}
+                    syncStatus={syncStatus}
+                    afterTitleItems={taxonomyItems}
+                    highlightMissingDeadline={
+                      !isPublishedInCOR && !liveCorTaskId && isDeadlineMissing
+                    }
+                  />
                   {/* ID de la task para edición via agente */}
                   <div className="mx-6 mt-4 mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
                     <span className="font-medium">ID para edición:</span>
@@ -1289,49 +1251,6 @@ export function TaskDetailDialog({
                       )}
                     </button>
                   </div>
-                  {showPendingExternalMessages && (
-                    <section className="mx-6 mb-3 rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/20">
-                      <div className="mb-2 flex items-center gap-2 text-amber-800 dark:text-amber-300">
-                        <MessageCircle className="h-4 w-4 flex-shrink-0" />
-                        <span className="font-medium">
-                          {pendingExternalMessageList.length === 1
-                            ? "1 comentario pendiente para COR"
-                            : `${pendingExternalMessageList.length} comentarios pendientes para COR`}
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        {pendingExternalMessageList.map((message) => (
-                          <article
-                            key={message._id}
-                            className="rounded-md border border-amber-200/80 bg-background/70 px-3 py-2 dark:border-amber-900/50"
-                          >
-                            <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                              <span>
-                                {message.source === "trello"
-                                  ? "Comentario desde Trello"
-                                  : "Comentario desde agente externo"}
-                              </span>
-                              <time dateTime={new Date(message.createdAt).toISOString()}>
-                                {formatMessageTimestamp(message.createdAt)}
-                              </time>
-                            </div>
-                            <p className="whitespace-pre-wrap break-words text-foreground">
-                              {message.message}
-                            </p>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                  <TaskBriefContent
-                    task={liveTask ?? task}
-                    editable={canEditFromDialog}
-                    syncStatus={syncStatus}
-                    afterTitleItems={taxonomyItems}
-                    highlightMissingDeadline={
-                      !isPublishedInCOR && !liveCorTaskId && isDeadlineMissing
-                    }
-                  />
                   <TaskCollaboratorsSection
                     taskId={task._id}
                     published={isPublishedInCOR}
@@ -1344,8 +1263,9 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          {activeTab === "project" && project && (
-            <div className="p-4">
+          {project && (
+            <details className="mx-6 my-4 rounded-lg border border-border p-4">
+              <summary className="mb-3 cursor-pointer text-sm font-semibold">Proyecto</summary>
               {projectMissingInCOR && (
                 <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   <span>
@@ -1429,11 +1349,13 @@ export function TaskDetailDialog({
                 editable={canEditFromDialog}
                 syncStatus={project.corSyncStatus || "pending"}
               />
-            </div>
+            </details>
           )}
 
-          {activeTab === "evaluation" && (
-            <>
+          {(
+            <details className="mx-6 my-4 rounded-lg border border-border p-4" onToggle={event => { if (event.currentTarget.open && !evaluationThreadId) handleStartEvaluation(); }}>
+              <summary className="cursor-pointer text-sm font-semibold">Evaluación</summary>
+              <div className="mt-3 flex h-[420px] flex-col">
               <EvaluationMessageList
                 messages={evalMessageList}
                 isThinking={isEvaluatorThinking}
@@ -1447,13 +1369,18 @@ export function TaskDetailDialog({
                 onSubmit={handleSubmitEvaluation}
                 isSubmitting={isSubmittingEval}
               />
-            </>
+              </div>
+            </details>
           )}
         </div>
-
-        {/* Footer — Publish action (hidden on evaluation tab) */}
-        {showPublishButton && activeTab !== "evaluation" && (
-          <div className="px-6 py-4 border-t border-border flex-shrink-0 bg-muted/30">
+        <InternalTaskComments taskId={task._id} />
+        </div>
+        {/* Fixed publication footer; controls reuse their existing handlers. */}
+        {showPublishButton && (
+          <footer className="shrink-0 border-t border-border bg-card px-6 py-3">
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold">{isPublishedInCOR ? "Publicada en COR" : syncStatus === "syncing" || syncStatus === "retrying" ? "Sincronizando con COR…" : syncStatus === "error" ? "Error de publicación · Ver detalles" : "Sin publicar en COR · Configurar publicación"}</summary>
+            <div className="mt-3 max-h-[25dvh] overflow-y-auto">
             {/* Sync status info */}
             {syncStatus === "synced" && (
               <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 mb-3">
@@ -1821,8 +1748,11 @@ export function TaskDetailDialog({
               </div>
             )}
 
+            </div>
+          </details>
+            {publishError && <p role="alert" className="mt-2 text-xs text-destructive">{publishError}</p>}
             {/* Action buttons */}
-            <div className="flex items-center gap-3">
+            <div className="mt-3 flex flex-wrap items-center gap-3">
               {/* Show publish button only when task has never been published, or publish failed (no corTaskId yet) */}
               {syncStatus !== "synced" &&
                 syncStatus !== "retrying" &&
@@ -1928,8 +1858,9 @@ export function TaskDetailDialog({
                 </button>
               )}
             </div>
-          </div>
+          </footer>
         )}
+
       </div>
 
       <ConfirmDialog

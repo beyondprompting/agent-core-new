@@ -57,7 +57,7 @@ export async function syncEntry(ctx: ActionCtx, entryId: Id<"taskPanelEntries">,
         if (entry[destination === "trello" ? "trelloState" : "corState"] !== "waiting") continue;
         const setState = (state: string, error?: string) => ctx.runMutation(internal.data.taskPanelSync.setDestination, { entryId, destination, state, error });
         if (!task || task.convexStatus === "deleted") { await setState("needs_review", "La tarea ya no está disponible."); continue; }
-        if (destination === "trello" && !isTrelloEnabledForCorClientId(task.corClientId)) { await setState("not_applicable"); continue; }
+        if (destination === "trello" && !task.trelloCardId && !isTrelloEnabledForCorClientId(task.corClientId)) { await setState("not_applicable"); continue; }
         if (destination === "trello" ? !task.trelloCardId : !task.corTaskId) continue;
         // Wait for COR publishing to finish; never mutate its status/description/hash.
         if (destination === "cor" && ["syncing", "retrying"].includes(task.corSyncStatus ?? "")) continue;

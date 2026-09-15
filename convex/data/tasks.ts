@@ -1302,6 +1302,23 @@ export const listPendingTaskMessagesForCORInternal = internalQuery({
   },
 });
 
+// Read-only comments for the internal task dialog, using existing task access.
+export const listInternalTaskComments = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("No autenticado");
+    if (await isExternalUser(ctx, userId)) return [];
+    const task = await ctx.db.get(taskId);
+    if (!task || task.convexStatus === "deleted" || !(await hasTaskAccess(ctx, task, userId))) return [];
+    const messages = await ctx.db.query("taskMessages").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
+    return await Promise.all(messages.sort((a, b) => b.createdAt - a.createdAt).map(async message => ({
+      id: message._id, text: message.message, createdAt: message.createdAt,
+      author: message.userId === userId ? "Vos" : message.userId ? (await ctx.db.get(message.userId))?.name ?? "Comentario" : "Comentario",
+    })));
+  },
+});
+
 export const listPendingExternalTaskMessages = query({
   args: {
     taskId: v.id("tasks"),
@@ -3999,7 +4016,7 @@ async function hasFullClientAccess(ctx: any, clientId: any, userId: any) {
   );
 }
 
-async function hasTaskAccess(ctx: any, task: any, userId: any) {
+export async function hasTaskAccess(ctx: any, task: any, userId: any) {
   if (task.clientBrandId) {
     const brand = await ctx.db.get(task.clientBrandId);
     if (!brand?.clientId) return false;

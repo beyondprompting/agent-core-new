@@ -1,5 +1,11 @@
 "use client";
 
+import { TaskFieldEditor } from "./TaskFieldEditor";
+import { TaskFieldOptions } from "./TaskFieldOptions";
+import { TaskDateCalendar } from "./TaskDateCalendar";
+import { TaskFieldButton, useTaskFieldButtons } from "./TaskFieldButton";
+import boardStyles from "./TaskBriefBoard.module.css";
+import { TaskMetadataSection } from "./TaskMetadataSection";
 import { useState, useRef, useEffect } from "react";
 import type { ReactNode } from "react";
 import type { Task } from "./types";
@@ -57,6 +63,7 @@ function EditableInfoItem({
   highlightMissing = false,
   onSave,
 }: EditableInfoItemProps) {
+  const fieldButtons = useTaskFieldButtons();
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [isSaving, setIsSaving] = useState(false);
@@ -147,8 +154,11 @@ function EditableInfoItem({
             {label}
           </p>
           {isEditing ? (
+            <TaskFieldEditor floating={fieldButtons} label={label} value={value} onClose={handleCancel} busy={isSaving}>
             <div className="mt-1">
-              {multiline ? (
+              {fieldButtons && inputType === "date" ? (
+                <TaskDateCalendar value={editValue} min={getTodayDateInputValue()} disabled={isSaving} onChange={setEditValue} />
+              ) : multiline ? (
                 <textarea
                   ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                   value={editValue}
@@ -161,6 +171,7 @@ function EditableInfoItem({
                 <input
                   ref={inputRef as React.RefObject<HTMLInputElement>}
                   type={inputType}
+                  aria-label={label}
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -170,7 +181,7 @@ function EditableInfoItem({
                   className={`w-full text-sm text-foreground bg-background border ${inputBorderClass} rounded-md px-2 py-1.5 focus:outline-none focus:ring-2`}
                 />
               )}
-              {inputType === "date" && (
+              {inputType === "date" && !fieldButtons && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Selecciona una fecha desde el calendario.
                 </p>
@@ -194,6 +205,9 @@ function EditableInfoItem({
                 </button>
               </div>
             </div>
+            </TaskFieldEditor>
+          ) : fieldButtons ? (
+            <TaskFieldButton label={label} editable={editable} onEdit={handleStartEdit}>{value}</TaskFieldButton>
           ) : (
             <p
               className={`text-sm text-foreground mt-0.5 ${
@@ -204,7 +218,7 @@ function EditableInfoItem({
             </p>
           )}
         </div>
-        {editable && !isEditing && (
+        {editable && !isEditing && !fieldButtons && (
           <button
             onClick={handleStartEdit}
             className="opacity-0 group-hover/item:opacity-100 p-1.5 rounded-md hover:bg-muted transition-all text-muted-foreground hover:text-foreground cursor-pointer flex-shrink-0"
@@ -252,6 +266,7 @@ function EditableSelectItem({
   colorFn,
   onSave,
 }: EditableSelectItemProps) {
+  const fieldButtons = useTaskFieldButtons();
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [isSaving, setIsSaving] = useState(false);
@@ -306,7 +321,9 @@ function EditableSelectItem({
             {label}
           </p>
           {isEditing ? (
+            <TaskFieldEditor floating={fieldButtons} label={label} value={displayValue} onClose={handleCancel} busy={isSaving}>
             <div className="mt-1">
+              {fieldButtons ? <TaskFieldOptions label={label} options={options} value={editValue} disabled={isSaving} onChange={setEditValue} colorFn={colorFn} /> : (
               <select
                 ref={selectRef}
                 value={editValue}
@@ -322,6 +339,7 @@ function EditableSelectItem({
                   </option>
                 ))}
               </select>
+              )}
               <div className="flex items-center gap-1.5 mt-1.5">
                 <button
                   onClick={handleSave}
@@ -341,6 +359,9 @@ function EditableSelectItem({
                 </button>
               </div>
             </div>
+            </TaskFieldEditor>
+          ) : fieldButtons ? (
+            <TaskFieldButton label={label} editable={editable} onEdit={handleStartEdit}><span className={colorClass ? `rounded px-1.5 py-0.5 text-xs ${colorClass}` : ""}>{displayValue}</span></TaskFieldButton>
           ) : (
             <div className="flex items-center gap-2 mt-0.5">
               {colorClass ? (
@@ -355,7 +376,7 @@ function EditableSelectItem({
             </div>
           )}
         </div>
-        {editable && !isEditing && (
+        {editable && !isEditing && !fieldButtons && (
           <button
             onClick={handleStartEdit}
             className="opacity-0 group-hover/item:opacity-100 p-1.5 rounded-md hover:bg-muted transition-all text-muted-foreground hover:text-foreground cursor-pointer flex-shrink-0"
@@ -411,7 +432,10 @@ export function InfoItem({
 // ==================== TaskBriefContent ====================
 
 interface TaskBriefContentProps {
+  layout?: "default" | "board";
   task: Task;
+  /** Optional presentation restriction for the authored title and description. */
+  contentEditable?: boolean;
   /** Si true, muestra íconos de edición en cada campo */
   editable?: boolean;
   /** Estado de sincronización con COR */
@@ -636,6 +660,8 @@ function DescriptionRichTextEditor({
 export function TaskBriefContent({
   task,
   editable = false,
+  contentEditable = editable,
+  layout = "default",
   syncStatus,
   afterTitleItems,
   highlightMissingDeadline = false,
@@ -765,7 +791,7 @@ export function TaskBriefContent({
     : "<p>No especificado</p>";
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-background">
+    <div className={`${layout === "board" ? boardStyles.board : ""} flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-background`}>
       {/* Fecha de creación */}
       <div>
         <p className="text-xs text-muted-foreground">
@@ -781,10 +807,11 @@ export function TaskBriefContent({
           label="Nombre"
           value={task.title || "Sin título"}
           fieldKey="title"
-          editable={editable}
+          editable={editable && contentEditable}
           onSave={handleSaveField}
         />
 
+        <TaskMetadataSection collapsible={layout === "board"}>
         {afterTitleItems}
 
         {(task.deadline || editable) && (
@@ -859,6 +886,8 @@ export function TaskBriefContent({
           />
         )}
 
+        </TaskMetadataSection>
+
         {/* Sync indicator — aparece tras guardar en una task publicada en COR */}
         {showingSyncFeedback && (
           <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -869,18 +898,18 @@ export function TaskBriefContent({
 
         {/* Descripción completa — con edición inline */}
         {(task.description || editable) && (
-          <div className="mt-4 pt-4 border-t border-border group/desc">
+          <div className={`mt-4 pt-4 border-t border-border group/desc ${layout === "board" ? "order-1" : ""}`}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">
                 Descripción completa
               </p>
-              {editable && !isEditingDesc && (
+              {editable && contentEditable && !isEditingDesc && (
                 <button
                   onClick={() => setIsEditingDesc(true)}
                   className="opacity-0 group-hover/desc:opacity-100 p-1.5 rounded-md hover:bg-muted transition-all text-muted-foreground hover:text-foreground cursor-pointer"
                   title="Editar descripción"
                 >
-                  <Pencil className="h-3.5 w-3.5" />
+                  {layout === "board" ? <span className="rounded-md border border-border px-2.5 py-1 text-xs">Editar</span> : <Pencil className="h-3.5 w-3.5" />}
                 </button>
               )}
             </div>
@@ -927,7 +956,7 @@ export function TaskBriefContent({
 
         {/* Archivos adjuntos */}
         {attachments && attachments.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border">
+          <div className={`mt-4 pt-4 border-t border-border ${layout === "board" ? "order-3" : ""}`}>
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
               📎 Archivos adjuntos ({attachments.length})
             </p>

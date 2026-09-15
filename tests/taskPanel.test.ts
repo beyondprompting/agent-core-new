@@ -191,3 +191,47 @@ test("inline comment files resolve atomically and invalid references cannot atta
   assert.equal(await f.call(panel.submit, args), id);
   assert.equal(Array.from(f.rows.values()).filter(r => r._table === "taskMessages").length, 1);
 });
+
+test("internal comment reader preserves task access and includes published comments", async () => {
+  const f = fixture();
+  f.put("taskMessages", { _id: "comment1", taskId: "task1", userId: "user1", source: "external_panel", message: "Hola", createdAt: 1, corMessageSyncStatus: "synced" });
+  assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
+  f.rows.delete("external1");
+  f.rows.get("task1").corTaskId = "123";
+  assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
+  f.put("corClients", { _id: "client1", corClientId: f.rows.get("task1").corClientId });
+  f.put("clientUserAssignments", { _id: "assignment1", clientId: "client1", userId: "user1" });
+  const comments = await f.call(tasks.listInternalTaskComments, { taskId: "task1" });
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].text, "Hola");
+  f.rows.get("task1").convexStatus = "deleted";
+  assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
+});
+
+test("authorized internal comments reuse deferred sync and are visible to the external creator", async () => {
+  const f = fixture();
+  f.ctx.auth.getUserIdentity = async () => ({ subject: "internal1|session" });
+  const args = { taskId: "task1", key: "internal-comment", text: "Nueva propuesta {{task-panel-file:0}}", uploadIds: ["internal-upload"] };
+  f.upload("internal-upload", { userId: "internal1" });
+  await assert.rejects(f.call(panel.submit, args));
+  f.put("corClients", { _id: "client1", corClientId: f.rows.get("task1").corClientId });
+  f.put("clientUserAssignments", { _id: "internal-access", userId: "internal1", clientId: "client1" });
+  f.rows.get("task1").trelloCardId = "card1";
+  const id = await f.call(panel.submit, args);
+  assert.equal(await f.call(panel.submit, args), id);
+  const message = f.rows.get(f.rows.get(id).messageId);
+  assert.equal(message.source, "internal_panel");
+  const { p, calls } = providers();
+  await sender.syncEntry(f.ctx, id, p);
+  assert.deepEqual(calls, ["trello-file", "trello-comment"]);
+  assert.equal(f.rows.get(id).corState, "waiting");
+  f.ctx.auth.getUserIdentity = async () => ({ subject: "user1|session" });
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  assert.ok(detail.comments.some((comment: any) => comment.id === message._id));
+  Object.assign(f.rows.get("task1"), { corTaskId: "2", corProjectId: 10, corSyncStatus: "synced" });
+  await sender.syncEntry(f.ctx, id, p);
+  await sender.syncEntry(f.ctx, id, p);
+  assert.deepEqual(calls, ["trello-file", "trello-comment", "cor-file", "cor-comment"]);
+  f.rows.delete("internal-access");
+  await assert.rejects(panel.requirePanelTask(f.ctx, "task1" as any, "internal1" as any));
+});
