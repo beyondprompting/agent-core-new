@@ -38,3 +38,30 @@
   border-width: 1px;
   border-radius: .375rem;
 }
+
+/* Published task summary; editable field buttons keep their existing layout. */
+.fields.readOnly {
+  align-items: stretch;
+  grid-auto-rows: 1fr;
+  gap: .625rem;
+  padding: 0;
+}
+.fields.readOnly > div {
+  min-height: 4.25rem;
+  padding: .625rem .75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: .75rem;
+  background: hsl(var(--card));
+}
+.fields.readOnly p:global(.uppercase) {
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+  margin-bottom: .375rem;
+}
+.readOnly [data-field-value] {
+  height: auto;
+  min-height: 1.5rem;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}

@@ -811,14 +811,14 @@ export function TaskBriefContent({
           onSave={handleSaveField}
         />
 
-        <TaskMetadataSection collapsible={layout === "board"}>
+        <TaskMetadataSection collapsible={layout === "board"} readOnly={!editable}>
         {afterTitleItems}
 
         {(task.deadline || editable) && (
           <EditableInfoItem
             icon="📅"
             label="Fecha de Fin"
-            value={task.deadline || "No especificado"}
+            value={layout === "board" && !editable && task.deadline ? task.deadline.replace(/^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$/, "$3/$2/$1") : task.deadline || "No especificado"}
             fieldKey="deadline"
             inputType="date"
             editable={editable}

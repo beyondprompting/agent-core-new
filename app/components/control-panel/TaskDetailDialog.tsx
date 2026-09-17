@@ -29,6 +29,7 @@ import {
   Check,
   Search,
   FolderOpen,
+  Sparkles,
   CalendarDays,
   Pencil,
   ChevronDown,
@@ -466,6 +467,17 @@ export function TaskDetailDialog({
   const liveTask = useQuery(api.data.tasks.getTask, { taskId: task._id });
 
   // Tracking: saber si el usuario inició la publicación desde ESTE dialog
+  const projectSectionRef = useRef<HTMLDetailsElement>(null);
+  const evaluationSectionRef = useRef<HTMLDetailsElement>(null);
+  const openSection = (section: HTMLDetailsElement | null) => {
+    if (!section) return;
+    for (const other of [projectSectionRef.current, evaluationSectionRef.current]) {
+      if (other && other !== section) other.open = false;
+    }
+    section.open = true;
+    section.scrollIntoView({ block: "start", behavior: "instant" });
+    section.querySelector("summary")?.focus({ preventScroll: true });
+  };
   const publishInitiatedRef = useRef(false);
   const archiveInitiatedRef = useRef(false);
 
@@ -1185,6 +1197,10 @@ export function TaskDetailDialog({
         <div
           className="min-h-0 min-w-0 overflow-y-auto overscroll-contain"
         >
+          <nav aria-label="Secciones de la tarea" className="sticky top-0 z-10 flex flex-wrap gap-2 border-b border-border bg-card px-6 py-3">
+            {project && <button type="button" aria-controls="task-project-section" onClick={() => openSection(projectSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><FolderOpen className="h-4 w-4 text-primary" />Proyecto<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>}
+            <button type="button" aria-controls="task-evaluation-section" onClick={() => openSection(evaluationSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><Sparkles className="h-4 w-4 text-primary" />Evaluación<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>
+          </nav>
           {(
             <div>
               {taskMissingInCOR && (
@@ -1246,8 +1262,8 @@ export function TaskDetailDialog({
           )}
 
           {project && (
-            <details className="mx-6 my-4 rounded-lg border border-border p-4">
-              <summary className="mb-3 cursor-pointer text-sm font-semibold">Proyecto</summary>
+            <details ref={projectSectionRef} id="task-project-section" className="group mx-6 my-4 scroll-mt-20 rounded-xl border border-border bg-muted/20 p-4">
+              <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden group-open:mb-4"><span className="rounded-lg bg-primary/10 p-2 text-primary"><FolderOpen className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">Proyecto</span><span className="block truncate text-xs text-muted-foreground">{project.name}</span></span><ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" /></summary>
               {projectMissingInCOR && (
                 <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   <span>
@@ -1335,8 +1351,8 @@ export function TaskDetailDialog({
           )}
 
           {(
-            <details className="mx-6 my-4 rounded-lg border border-border p-4" onToggle={event => { if (event.currentTarget.open && !evaluationThreadId) handleStartEvaluation(); }}>
-              <summary className="cursor-pointer text-sm font-semibold">Evaluación</summary>
+            <details ref={evaluationSectionRef} id="task-evaluation-section" className="group mx-6 my-4 scroll-mt-20 rounded-xl border border-border bg-muted/20 p-4" onToggle={event => { if (event.currentTarget.open && !evaluationThreadId) handleStartEvaluation(); }}>
+              <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden"><span className="rounded-lg bg-primary/10 p-2 text-primary"><Sparkles className="h-5 w-5" /></span><span className="flex-1"><span className="block text-sm font-semibold">Evaluación</span><span className="block text-xs text-muted-foreground">Revisá el brief con el agente evaluador</span></span><ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" /></summary>
               <div className="mt-3 flex h-[420px] flex-col">
               <EvaluationMessageList
                 messages={evalMessageList}
