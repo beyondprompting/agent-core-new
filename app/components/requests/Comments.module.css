@@ -38,7 +38,7 @@
 .reply { position:relative; margin-top:16px; }
 .reply::before { content:''; position:absolute; left:-21px; top:6px; width:15px; height:20px; border-left:1px solid var(--comment-border); border-bottom:1px solid var(--comment-border); border-radius:0 0 0 10px; }
 .reply .avatar { width:26px; height:26px; border-radius:8px; font-size:10px; }
-.day { display:flex; align-items:center; gap:12px; margin:28px 0 16px; color:var(--comment-muted); font:10px ui-monospace,monospace; letter-spacing:1px; text-transform:uppercase; }
+.day { display:flex; align-items:center; gap:12px; margin:16px 0; color:var(--comment-muted); font:10px ui-monospace,monospace; letter-spacing:1px; text-transform:uppercase; }
 .day::after { content:''; height:1px; background:var(--comment-border); flex:1; }
 .composer { border-radius:14px; overflow:hidden; }
 .composer > div { border-color:var(--comment-border); background:var(--comment-bg); border-radius:14px; }
