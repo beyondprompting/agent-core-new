@@ -70,7 +70,7 @@ export interface ControlPanelProjectGroup {
   tasks: FullTask[];
 }
 
-export type ControlPanelView = "cards" | "list";
+export type ControlPanelView = "cards" | "board" | "list";
 export type ControlPanelPublicationTab = "all" | "cor" | "unpublished";
 
 export type ControlPanelToastState = {

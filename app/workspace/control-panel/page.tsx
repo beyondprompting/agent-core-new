@@ -94,7 +94,8 @@ function ControlPanelContent() {
 
   useEffect(() => {
     if (preferences === undefined) return;
-    setViewMode(preferences?.controlPanelView ?? "cards");
+    // Keep legacy list preferences stored, but show cards while that option is hidden.
+    setViewMode(preferences?.controlPanelView === "board" ? "board" : "cards");
   }, [preferences?.controlPanelView, preferences]);
 
   const handlePublishResult = (result: {
@@ -351,7 +352,7 @@ function ControlPanelContent() {
                   onPublicationTabChange={setPublicationTab}
                 />
 
-                {viewMode === "cards" ? <InternalTasksBoard projects={filteredProjects} publicationTab={publicationTab} onSelectTask={openTask} /> : <div className="min-h-0 overflow-y-auto"><ControlPanelTaskSections
+                {viewMode === "board" ? <InternalTasksBoard projects={filteredProjects} publicationTab={publicationTab} onSelectTask={openTask} /> : <div className="min-h-0 overflow-y-auto"><ControlPanelTaskSections
                   filteredProjectsLength={filteredProjects.length}
                   hasVisibleTasksForTab={hasVisibleTasksForTab}
                   showUnpublishedSection={showUnpublishedSection}

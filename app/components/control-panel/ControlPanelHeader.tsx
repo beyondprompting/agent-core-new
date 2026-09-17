@@ -1,7 +1,7 @@
 import {
   Filter,
   LayoutGrid,
-  List as ListIcon,
+  Columns3,
 } from "lucide-react";
 import type {
   ControlPanelClient,
@@ -64,23 +64,25 @@ export function ControlPanelHeader({
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
-              title="Ver como board"
+              title="Ver como tarjetas"
+              aria-pressed={viewMode === "cards"}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
-              Board
+              Cards
             </button>
             <button
               type="button"
-              onClick={() => onViewModeChange("list")}
+              onClick={() => onViewModeChange("board")}
               className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors ${
-                viewMode === "list"
+                viewMode === "board"
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
-              title="Ver como lista"
+              title="Ver como board"
+              aria-pressed={viewMode === "board"}
             >
-              <ListIcon className="h-3.5 w-3.5" />
-              Lista
+              <Columns3 className="h-3.5 w-3.5" />
+              Board
             </button>
           </div>
 

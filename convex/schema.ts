@@ -19,7 +19,7 @@ export default defineSchema({
       v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
     ),
     controlPanelView: v.optional(
-      v.union(v.literal("cards"), v.literal("list")),
+      v.union(v.literal("cards"), v.literal("board"), v.literal("list")),
     ),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
