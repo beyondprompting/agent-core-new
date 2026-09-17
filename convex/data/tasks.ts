@@ -1205,6 +1205,7 @@ export const createTaskMessageInternal = internalMutation({
       v.literal("internal"),
     ),
     message: v.string(),
+    userQuote: v.optional(v.string()),
     trelloCardId: v.optional(v.string()),
     trelloCommentId: v.optional(v.string()),
     trelloSyncStatus: v.optional(v.string()),
@@ -4954,12 +4955,13 @@ async function publishPendingTaskMessagesToCOR(
 
   for (const message of pendingMessages) {
     try {
+      const messageWithQuote = [message.message, message.userQuote ? `> ${message.userQuote}` : ""].filter(Boolean).join("\n\n");
       const corMessage =
         message.source === "trello" ||
         (message.source === "external_agent" &&
-          MARKDOWN_LINK_PATTERN.test(message.message))
-          ? formatTrelloCommentForCOR(message.message)
-          : message.message;
+          MARKDOWN_LINK_PATTERN.test(messageWithQuote))
+          ? formatTrelloCommentForCOR(messageWithQuote)
+          : messageWithQuote;
 
       const result = await provider.postTaskMessage({
         taskId: corTaskId,

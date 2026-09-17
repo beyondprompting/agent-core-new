@@ -65,16 +65,20 @@ export const failUpload = internalMutation({
 });
 
 export const submit = mutation({
-  args: { taskId: v.id("tasks"), key: v.string(), text: v.string(), uploadIds: v.array(v.id("taskPanelUploads")) },
+  args: { taskId: v.id("tasks"), key: v.string(), text: v.string(), uploadIds: v.array(v.id("taskPanelUploads")), replyTo: v.optional(v.id("taskMessages")) },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     const task = await requirePanelTask(ctx, args.taskId, userId);
     const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId!)).unique();
+    const parent = args.replyTo ? await ctx.db.get(args.replyTo) : null;
+    if (args.replyTo && (!parent || parent.replyTo || parent.taskId !== task._id || (external && !["external_panel", "internal_panel", "external_agent", "trello"].includes(parent.source)))) {
+      throw new Error("No podés responder a este comentario.");
+    }
     const text = args.text.trim();
     if ((!text && !args.uploadIds.length) || text.length > 10000 || args.uploadIds.length > 10 || args.key.length > 100 || new Set(args.uploadIds).size !== args.uploadIds.length) throw new Error("Revisá el comentario y sus archivos (máximo 10).");
     const existing = await ctx.db.query("taskPanelEntries").withIndex("by_user_key", q => q.eq("userId", userId!).eq("key", args.key)).unique();
     if (existing) {
-      if (existing.taskId !== args.taskId || existing.text !== text || JSON.stringify(existing.uploadIds) !== JSON.stringify(args.uploadIds)) throw new Error("La operación ya fue guardada con otro contenido.");
+      if (existing.taskId !== args.taskId || existing.text !== text || existing.replyTo !== args.replyTo || JSON.stringify(existing.uploadIds) !== JSON.stringify(args.uploadIds)) throw new Error("La operación ya fue guardada con otro contenido.");
       return existing._id;
     }
     const uploads = await Promise.all(args.uploadIds.map(id => ctx.db.get(id)));
@@ -90,7 +94,7 @@ export const submit = mutation({
       commentFiles.push({ filename: upload.filename, mimeType: upload.mimeType, url });
     }
     if (text) {
-      const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, panelEntryId: entryId, userId: userId!, source: external ? "external_panel" : "internal_panel", message: resolvePanelComment(text, commentFiles), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
+      const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, replyTo: args.replyTo, panelEntryId: entryId, userId: userId!, source: external ? "external_panel" : "internal_panel", message: resolvePanelComment(text, commentFiles), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
       await ctx.db.patch(entryId, { messageId });
     }
     await ctx.scheduler.runAfter(0, internal.data.taskPanelSync.sync, { entryId });
@@ -108,8 +112,9 @@ export const detail = query({
     const messages = await ctx.db.query("taskMessages").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     const entries = await ctx.db.query("taskPanelEntries").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     return {
+      viewerIsExternal: Boolean(external),
       attachments: await Promise.all(attachments.map(async a => ({ id: a._id, filename: a.filename, size: a.size, mimeType: a.mimeType, createdAt: a.createdAt, trelloAttachmentId: a.trelloAttachmentId, trelloUrl: a.trelloAttachmentUrl, corUrl: a.corUrl, url: await ctx.storage.getUrl(a.storageId as Id<"_storage">), entryId: a.panelEntryId }))),
-      comments: await Promise.all(messages.filter(m => !external || ["external_panel", "internal_panel", "external_agent", "trello"].includes(m.source)).sort((a,b) => b.createdAt-a.createdAt).map(async m => ({ id: m._id, text: m.message, createdAt: m.createdAt, own: m.userId === userId, authorName: m.userId ? (await ctx.db.get(m.userId))?.name : undefined }))),
+      comments: await Promise.all(messages.filter(m => !external || ["external_panel", "internal_panel", "external_agent", "trello"].includes(m.source)).sort((a,b) => b.createdAt-a.createdAt).map(async m => ({ id: m._id, replyTo: m.replyTo, quote: m.userQuote, text: m.message, createdAt: m.createdAt, own: m.userId === userId, isClient: !external && (m.source === "external_agent" || Boolean(m.userId && await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", m.userId!)).unique())), authorName: m.userId ? (await ctx.db.get(m.userId))?.name : undefined }))),
       entries: entries.map(e => ({ id: e._id, createdAt: e.createdAt, trelloState: e.trelloState, corState: e.corState })),
     };
   },
@@ -122,6 +127,11 @@ export const syncContext = internalQuery({
     if (!entry) return null;
     const task = await ctx.db.get(entry.taskId);
     const attachments = (await ctx.db.query("taskAttachments").withIndex("by_task", q => q.eq("taskId", entry.taskId)).collect()).filter(a => a.panelEntryId === entryId);
-    return { entry, task, attachments, message: entry.messageId ? await ctx.db.get(entry.messageId) : null };
+    const message = entry.messageId ? await ctx.db.get(entry.messageId) : null;
+    const parent = message?.replyTo ? await ctx.db.get(message.replyTo) : null;
+    const author = parent?.userId ? await ctx.db.get(parent.userId) : null;
+    // Providers receive a regular comment with context; local replies keep their structure.
+    const context = parent ? `En respuesta a ${author?.name || "un comentario"}: ${parent.message.replace(/\s+/g, " ").slice(0, 240)}\n\n` : "";
+    return { entry, task, attachments, message: message ? { ...message, message: context + message.message } : null };
   },
 });

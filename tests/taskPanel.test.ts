@@ -235,3 +235,63 @@ test("authorized internal comments reuse deferred sync and are visible to the ex
   f.rows.delete("internal-access");
   await assert.rejects(panel.requirePanelTask(f.ctx, "task1" as any, "internal1" as any));
 });
+
+test("replies retain their parent, retry safely and include context for providers", async () => {
+  const f = fixture();
+  f.put("users", { _id: "user1", name: "Julia" });
+  const originalId = await f.call(panel.submit, { taskId: "task1", key: "parent", text: "Revisar la imagen", uploadIds: [] });
+  const parent = f.rows.get(originalId).messageId;
+  const args = { taskId: "task1", key: "reply", text: "Está aprobada", uploadIds: [], replyTo: parent };
+  const entryId = await f.call(panel.submit, args);
+  assert.equal(await f.call(panel.submit, args), entryId);
+  const message = f.rows.get(f.rows.get(entryId).messageId);
+  assert.equal(message.replyTo, parent);
+  assert.equal(message.message, "Está aprobada");
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  assert.equal(detail.comments.find((c: any) => c.id === message._id).replyTo, parent);
+  const sync = await f.call(panel.syncContext, { entryId });
+  assert.match(sync.message.message, /En respuesta a Julia: Revisar la imagen/);
+  assert.match(sync.message.message, /Está aprobada/);
+  assert.equal(sync.entry.corState, "waiting");
+  await assert.rejects(f.call(panel.submit, { ...args, replyTo: undefined }));
+});
+
+test("replies reject missing, other-task and externally hidden parents", async () => {
+  const f = fixture();
+  f.put("taskMessages", { _id: "foreign", taskId: "task2", source: "external_panel", message: "Private" });
+  f.put("taskMessages", { _id: "hidden", taskId: "task1", source: "internal", message: "Private" });
+  for (const replyTo of ["missing", "foreign", "hidden"]) {
+    await assert.rejects(f.call(panel.submit, { taskId: "task1", key: replyTo, text: "Reply", uploadIds: [], replyTo }));
+  }
+  assert.equal(Array.from(f.rows.values()).filter(row => row._table === "taskPanelEntries").length, 0);
+});
+
+test("rejects a reply to a reply and hides client labels from external viewers", async () => {
+  const f = fixture();
+  const first = await f.call(panel.submit, { taskId: "task1", key: "root", text: "First", uploadIds: [] });
+  const rootId = f.rows.get(first).messageId;
+  const second = await f.call(panel.submit, { taskId: "task1", key: "child", text: "Reply", uploadIds: [], replyTo: rootId });
+  await assert.rejects(f.call(panel.submit, { taskId: "task1", key: "nested", text: "Nested", uploadIds: [], replyTo: f.rows.get(second).messageId }));
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  assert.equal(detail.viewerIsExternal, true);
+  assert.ok(detail.comments.every((comment: any) => !comment.isClient));
+});
+
+test("structured agent quotes are returned separately from comment text", async () => {
+  const f = fixture();
+  f.put("taskMessages", { _id: "quoted", taskId: "task1", source: "external_agent", message: "Se solicita cambiar la imagen.", userQuote: "Usá esta imagen", createdAt: 1 });
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  assert.equal(detail.comments[0].quote, "Usá esta imagen");
+  assert.equal(detail.comments[0].text, "Se solicita cambiar la imagen.");
+});
+
+test("only internal viewers see client labels on external comments", async () => {
+  const f = fixture();
+  f.ctx.auth.getUserIdentity = async () => ({ subject: "internal1|session" });
+  f.put("corClients", { _id: "client1", corClientId: f.rows.get("task1").corClientId });
+  f.put("clientUserAssignments", { _id: "access", userId: "internal1", clientId: "client1" });
+  f.put("taskMessages", { _id: "client-comment", taskId: "task1", userId: "user1", source: "external_panel", message: "Hola", createdAt: 1 });
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  assert.equal(detail.viewerIsExternal, false);
+  assert.equal(detail.comments[0].isClient, true);
+});

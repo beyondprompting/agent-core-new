@@ -38,6 +38,7 @@ interface Thread {
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode;
+  sidebarDefaultOpen?: boolean;
   currentThreadId?: string | null;
   onSelectThread?: (threadId: string) => void;
   onNewThread?: () => void;
@@ -52,6 +53,7 @@ interface WorkspaceLayoutProps {
 
 export function WorkspaceLayout({
   children,
+  sidebarDefaultOpen = false,
   currentThreadId,
   onSelectThread,
   onNewThread,
@@ -67,11 +69,11 @@ export function WorkspaceLayout({
   );
   const [sidebar, setSidebar] = useState(() => ({
     pathname,
-    open: pathname === "/workspace",
+    open: sidebarDefaultOpen,
   }));
   // A new page gets its own default; changing conversations keeps the user's choice.
   if (sidebar.pathname !== pathname) {
-    setSidebar({ pathname, open: pathname === "/workspace" });
+    setSidebar({ pathname, open: sidebarDefaultOpen });
   }
   const isSidebarOpen = sidebar.open;
   const toggleSidebar = () => setSidebar({ pathname, open: !isSidebarOpen });

@@ -328,6 +328,7 @@ export default defineSchema({
   }).index("by_user_key", ["userId", "key"]),
 
   taskPanelEntries: defineTable({
+    replyTo: v.optional(v.id("taskMessages")),
     userId: v.id("users"), taskId: v.id("tasks"), key: v.string(),
     text: v.string(), uploadIds: v.array(v.id("taskPanelUploads")),
     messageId: v.optional(v.id("taskMessages")), createdAt: v.number(),
@@ -338,6 +339,8 @@ export default defineSchema({
     .index("by_task", ["taskId"]).index("by_next_check", ["nextCheckAt"]),
 
   taskMessages: defineTable({
+    userQuote: v.optional(v.string()),
+    replyTo: v.optional(v.id("taskMessages")),
     panelEntryId: v.optional(v.id("taskPanelEntries")),
     taskId: v.id("tasks"),
     userId: v.optional(v.id("users")),

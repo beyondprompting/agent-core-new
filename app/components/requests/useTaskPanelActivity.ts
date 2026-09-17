@@ -20,7 +20,7 @@ export function useTaskPanelSubmit(taskId: Id<"tasks">) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function save(text: string, files: File[]) {
+  async function save(text: string, files: File[], replyTo?: Id<"taskMessages">) {
     if (locked.current) return false;
     locked.current = true;
     setBusy(true); setError(null);
@@ -42,9 +42,9 @@ export function useTaskPanelSubmit(taskId: Id<"tasks">) {
         }
         ids.push(cached.id);
       }
-      const payload = JSON.stringify({ text: text.trim(), ids });
+      const payload = JSON.stringify({ text: text.trim(), ids, replyTo });
       if (operation.current?.payload !== payload) operation.current = { payload, key: crypto.randomUUID() };
-      await submit({ taskId, key: operation.current.key, text, uploadIds: ids });
+      await submit({ taskId, key: operation.current.key, text, uploadIds: ids, replyTo });
       uploads.current.clear(); operation.current = null;
       return true;
     } catch (error) {

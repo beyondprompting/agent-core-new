@@ -149,6 +149,7 @@ function WorkspaceChat() {
   // ═══════════════════════════════════════════════════════════════════════════
   return (
     <WorkspaceLayout
+      sidebarDefaultOpen
       currentThreadId={currentThreadId}
       onSelectThread={handleSelectThread}
       onNewThread={handleNewThread}
