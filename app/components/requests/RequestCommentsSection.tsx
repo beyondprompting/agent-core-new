@@ -39,8 +39,8 @@ function CommentComposer({ taskId, replyTo, onDone }: {
 }
 
 function CommentContent({ comment }: { comment: Comment }) {
-  const name = comment.own ? "Vos" : comment.authorName || "Comentario";
-  const initials = comment.own ? "VS" : name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
+  const name = comment.authorName?.trim() || "Comentario";
+  const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
   const date = new Date(comment.createdAt);
   return <div className="flex min-w-0 gap-3">
     <div aria-hidden="true" className={`${styles.avatar} ${comment.own ? styles.own : ""}`}>{initials}</div>

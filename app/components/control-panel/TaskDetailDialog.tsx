@@ -1233,24 +1233,6 @@ export function TaskDetailDialog({
                       !isPublishedInCOR && !liveCorTaskId && isDeadlineMissing
                     }
                   />
-                  {/* ID de la task para edición via agente */}
-                  <div className="mx-6 mt-4 mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-                    <span className="font-medium">ID para edición:</span>
-                    <code className="font-mono text-foreground/80 select-all">
-                      {task._id}
-                    </code>
-                    <button
-                      onClick={() => handleCopyId(task._id)}
-                      className="ml-auto p-1 hover:bg-muted rounded transition-colors cursor-pointer"
-                      title="Copiar ID"
-                    >
-                      {copiedId === task._id ? (
-                        <Check className="h-3.5 w-3.5 text-green-500" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </div>
                   <TaskCollaboratorsSection
                     taskId={task._id}
                     published={isPublishedInCOR}
@@ -1371,6 +1353,25 @@ export function TaskDetailDialog({
               />
               </div>
             </details>
+          )}
+          {!taskMissingInCOR && (
+                  <div className="mx-6 mt-4 mb-6 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+                    <span className="font-medium">ID para edición:</span>
+                    <code className="font-mono text-foreground/80 select-all">
+                      {task._id}
+                    </code>
+                    <button
+                      onClick={() => handleCopyId(task._id)}
+                      className="ml-auto p-1 hover:bg-muted rounded transition-colors cursor-pointer"
+                      title="Copiar ID"
+                    >
+                      {copiedId === task._id ? (
+                        <Check className="h-3.5 w-3.5 text-green-500" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
           )}
         </div>
         <InternalTaskComments taskId={task._id} />
