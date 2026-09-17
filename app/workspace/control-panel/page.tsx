@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { Suspense, useMemo, useState, useEffect } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import { InternalTasksBoard } from "../../components/control-panel/InternalTasksBoard";
 import { isTaskInCOR } from "../../components/control-panel/internalBoard";
@@ -26,6 +26,13 @@ const PANEL_PROJECT_PAGE_SIZE = 10;
 const PANEL_TASK_PAGE_SIZE = 10;
 
 export default function ControlPanelPage() {
+  return <Suspense fallback={<LoadingScreen />}><ControlPanelContent /></Suspense>;
+}
+
+function ControlPanelContent() {
+  const params = useSearchParams();
+  const pathname = usePathname();
+  const taskId = params.get("taskId");
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<string | undefined>(
     undefined,
@@ -36,7 +43,23 @@ export default function ControlPanelPage() {
   const [viewMode, setViewMode] = useState<ControlPanelView>("cards");
   const [publicationTab, setPublicationTab] =
     useState<ControlPanelPublicationTab>("all");
-  const [selectedTask, setSelectedTask] = useState<FullTask | null>(null);
+  const linkedTaskClients = useQuery(
+    api.data.controlPanel.listMyClientProjects,
+    taskId ? {} : "skip",
+  ) as ControlPanelClient[] | undefined;
+  // Resolve the URL against all authorized tasks, independently of board filters.
+  const selectedTask = linkedTaskClients?.flatMap(entry => entry.projects)
+    .flatMap(group => group.tasks).find(task => String(task._id) === taskId);
+  const openTask = (task: FullTask) => {
+    const next = new URLSearchParams(params.toString());
+    next.set("taskId", String(task._id));
+    router.push(`${pathname}?${next}`, { scroll: false });
+  };
+  const closeTask = () => {
+    const next = new URLSearchParams(params.toString());
+    next.delete("taskId");
+    router.replace(`${pathname}${next.size ? `?${next}` : ""}`, { scroll: false });
+  };
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -328,7 +351,7 @@ export default function ControlPanelPage() {
                   onPublicationTabChange={setPublicationTab}
                 />
 
-                {viewMode === "cards" ? <InternalTasksBoard projects={filteredProjects} publicationTab={publicationTab} onSelectTask={setSelectedTask} /> : <div className="min-h-0 overflow-y-auto"><ControlPanelTaskSections
+                {viewMode === "cards" ? <InternalTasksBoard projects={filteredProjects} publicationTab={publicationTab} onSelectTask={openTask} /> : <div className="min-h-0 overflow-y-auto"><ControlPanelTaskSections
                   filteredProjectsLength={filteredProjects.length}
                   hasVisibleTasksForTab={hasVisibleTasksForTab}
                   showUnpublishedSection={showUnpublishedSection}
@@ -362,7 +385,7 @@ export default function ControlPanelPage() {
                     setIsUnpublishedSectionOpen((open) => !open)
                   }
                   onToggleProjectExpanded={toggleProjectExpanded}
-                  onSelectTask={setSelectedTask}
+                  onSelectTask={openTask}
                 /></div>}
               </div>
             )}
@@ -370,10 +393,17 @@ export default function ControlPanelPage() {
         </div>
       </div>
 
+      {taskId && !selectedTask && (
+        <div role="status" className="absolute bottom-6 right-6 z-50 max-w-sm rounded-xl border border-border bg-card p-4 text-sm shadow-lg">
+          <p>{linkedTaskClients === undefined ? "Cargando tarea…" : "Esta tarea no está disponible o no tenés permiso para verla."}</p>
+          <button type="button" onClick={closeTask} className="mt-2 text-primary hover:underline">Volver al panel</button>
+        </div>
+      )}
       {selectedTask && (
         <TaskDetailDialog
+          key={selectedTask._id}
           task={selectedTask}
-          onClose={() => setSelectedTask(null)}
+          onClose={closeTask}
           onPublishResult={handlePublishResult}
         />
       )}
