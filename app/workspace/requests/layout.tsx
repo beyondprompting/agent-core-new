@@ -29,7 +29,7 @@ export default function RequestsLayout({ children }: { children: React.ReactNode
         <div className="flex items-center gap-3"><UserMenu /><SwitchThemeButton /></div>
       </header>
       <TopNavigation />
-      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }

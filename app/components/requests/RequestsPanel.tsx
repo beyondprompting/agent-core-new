@@ -16,9 +16,9 @@ export function RequestsPanel() {
   const filters = useRequestFilters(requests ?? []);
   const newRequest = useNewRequest();
   return (
-    <div className={`${styles.interactiveControls} min-h-full bg-muted/40`}>
+    <div className={`${styles.interactiveControls} flex h-full min-h-0 flex-col overflow-hidden bg-muted/40`}>
       <Suspense fallback={null}><RequestDialogRoute requests={requests} /></Suspense>
-      <div className="flex flex-col gap-3 px-4 py-3 sm:px-6 xl:flex-row xl:items-center xl:gap-6">
+      <div className="flex shrink-0 flex-col gap-3 px-4 py-3 sm:px-6 xl:flex-row xl:items-center xl:gap-6">
         <RequestsHeader clientName={filters.clients.length === 1 ? filters.clients[0].label : undefined} />
         <RequestsToolbar filters={filters} onNewRequest={newRequest.start} busy={newRequest.busy} />
       </div>
