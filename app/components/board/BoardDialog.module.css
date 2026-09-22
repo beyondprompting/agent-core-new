@@ -1,0 +1,42 @@
+.surface { background: #fff; color: #292a2e; }
+.content { padding: 24px 32px 32px 56px; }
+.title { margin: 0 0 28px; font-size: 28px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.metadata { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 18px; margin: 0 0 12px; }
+.metadata > section { min-width: 0; max-width: 100%; }
+.label { margin-bottom: 6px; font-size: 12px; font-weight: 600; color: #505258; }
+.members { display: flex; flex-wrap: wrap; gap: 4px; }
+.avatar { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; border-radius: 50%; background: #172b4d; color: white; font-size: 13px; flex-shrink: 0; }
+.tag { display: inline-block; padding: 7px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.muted { color: #626f86; font-size: 12px; }
+.dueSection { margin-bottom: 24px; }
+.due { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 6px 10px; border: 1px solid #091e4224; border-radius: 5px; font-size: 14px; color: #505258; }
+.overdue, .complete { padding: 1px 4px; border-radius: 3px; font-size: 12px; font-weight: 600; }
+.overdue { color: #ae2e24; background: #ffeceb; }
+.complete { color: #216e4e; background: #dcfff1; }
+.description { margin-top: 24px; }
+.description h3 { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; font-size: 16px; font-weight: 600; }
+.description h3 > svg { margin-left: -32px; width: 20px; height: 20px; }
+.richText { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.richText p { margin: 0 0 20px; }
+.richText ul { list-style: disc; padding-left: 24px; }
+.richText ol { list-style: decimal; padding-left: 24px; }
+.richText a { color: #0c66e4; text-decoration: underline; }
+.richText img { max-width: 100%; height: auto; }
+.richText table { display: block; max-width: 100%; overflow-x: auto; }
+.richText blockquote { border-left: 3px solid #dcdfe4; padding-left: 16px; }
+.customFields { margin-top: 24px !important; }
+.customFields h3 { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 16px; font-weight: 600; }
+.customFields h3 > svg { margin-left: -32px; width: 20px; height: 20px; flex-shrink: 0; }
+.customFieldsGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.customFieldsGrid > div { min-width: 0; }
+.customFieldsGrid dt { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: #505258; font-size: 12px; font-weight: 600; }
+.customFieldsGrid dt > svg { width: 16px; height: 16px; flex-shrink: 0; }
+.customFieldsGrid dd { margin: 0; padding: 8px 12px; border: 1px solid #8590a2; border-radius: 6px; background: #fff; font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:global(.dark) .customFieldsGrid dt { color: #9fadbc; }
+:global(.dark) .customFieldsGrid dd { background: #22272b; border-color: #738496; }
+@media (max-width: 640px) { .customFieldsGrid { grid-template-columns: 1fr; } .customFields h3 > svg { margin-left: 0; } }
+:global(.dark) .surface { background: #22272b; color: #b6c2cf; }
+:global(.dark) .label, :global(.dark) .due { color: #b6c2cf; }
+:global(.dark) .due { border-color: #a6c5e229; }
+:global(.dark) .muted { color: #9fadbc; }
+@media (max-width: 640px) { .content { padding: 24px; } .title { font-size: 24px; } .description h3 > svg { margin-left: 0; } }

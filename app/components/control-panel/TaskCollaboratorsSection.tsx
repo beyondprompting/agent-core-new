@@ -6,6 +6,9 @@ import { AlertCircle, Loader2, Lock, Search, Users, X } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 
+import { creatorInitials } from "../board/cardPresentation";
+import dialogStyles from "../board/BoardDialog.module.css";
+
 type TaskCollaborator = {
   userId?: Id<"users">;
   corUserId?: number;
@@ -23,6 +26,7 @@ type CollaboratorCandidate = {
 };
 
 type TaskCollaboratorsSectionProps = {
+  compact?: boolean;
   taskId: Id<"tasks">;
   published: boolean;
   editable: boolean;
@@ -32,6 +36,7 @@ type TaskCollaboratorsSectionProps = {
 
 export function TaskCollaboratorsSection({
   taskId,
+  compact = false,
   published,
   editable,
   syncStatus,
@@ -155,7 +160,7 @@ export function TaskCollaboratorsSection({
     }
   };
 
-  return (
+  const editor = (
     <section className="mx-6 mb-4 rounded-lg border border-border bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -292,4 +297,14 @@ export function TaskCollaboratorsSection({
       )}
     </section>
   );
+  if (!compact) return editor;
+  return <section>
+    <h3 className={dialogStyles.label}>Miembros</h3>
+    <div className={dialogStyles.members}>
+      {visibleCollaborators.map((member, index) => <span key={member.userId ?? member.corUserId ?? index} className={dialogStyles.avatar} title={member.name} aria-label={member.name}>{creatorInitials(member.name)}</span>)}
+      {!visibleCollaborators.length && <span className={dialogStyles.muted}>{selection === undefined || isLoadingPublished ? "Cargando…" : "Sin miembros asignados"}</span>}
+    </div>
+    {canEdit && <details className="mt-2"><summary className="cursor-pointer text-xs text-primary">Editar miembros</summary>{editor}</details>}
+    {!canEdit && error && <p role="alert" className="mt-2 max-w-64 text-xs text-destructive">{error}</p>}
+  </section>;
 }

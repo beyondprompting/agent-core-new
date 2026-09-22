@@ -1,5 +1,6 @@
 .panel {
-  --comment-bg: #fff;
+  --comment-bg: #f1f2f4;
+  --comment-surface: #fff;
   --comment-border: #dfe5ee;
   --comment-muted: #768398;
   --comment-text: #46505f;
@@ -10,6 +11,7 @@
 }
 :global(.dark) .panel {
   --comment-bg: #181d23;
+  --comment-surface: #181d23;
   --comment-border: #2a313b;
   --comment-muted: #8b97a6;
   --comment-text: #c4cbd4;
@@ -22,7 +24,7 @@
 .toolbar { display:flex; justify-content:flex-end; padding:12px 20px; border-bottom:1px solid var(--comment-border); }
 .sort { background:transparent; color:var(--comment-muted); font-size:12px; }
 .body { overflow-y:auto; overscroll-behavior:contain; min-height:0; padding:18px 20px 24px; }
-.card { padding:18px 16px 16px; border:1px solid var(--comment-border); border-radius:15px; background:var(--comment-bg); }
+.card { padding:18px 16px 16px; border:1px solid var(--comment-border); border-radius:15px; background:var(--comment-surface); }
 .avatar { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:34px; height:34px; border-radius:11px; background:var(--comment-tint); color:var(--comment-accent); font-size:12px; font-weight:600; }
 .own { background:#f7ecdf; color:#9b5719; }
 :global(.dark) .own { background:#342918; color:#e9ad56; }
@@ -40,8 +42,8 @@
 .reply .avatar { width:26px; height:26px; border-radius:8px; font-size:10px; }
 .day { display:flex; align-items:center; gap:12px; margin:16px 0; color:var(--comment-muted); font:10px ui-monospace,monospace; letter-spacing:1px; text-transform:uppercase; }
 .day::after { content:''; height:1px; background:var(--comment-border); flex:1; }
-.composer { border-radius:14px; overflow:hidden; }
-.composer > div { border-color:var(--comment-border); background:var(--comment-bg); border-radius:14px; }
+.composer { border-radius:14px; overflow:hidden; background:var(--comment-surface); }
+.composer > div { border-color:var(--comment-border); background:var(--comment-surface); border-radius:14px; }
 .composer [role=toolbar] { padding:7px 10px; background:transparent; border-color:var(--comment-border); gap:4px; }
 .composer [role=textbox] { color:var(--comment-text); }
 .footer { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 12px; border-top:1px solid var(--comment-border); }

@@ -1400,6 +1400,10 @@ export const updateTaskFields = mutation({
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Task no encontrada");
 
+    if (task.corTaskId || task.corSyncStatus === "synced") {
+      throw new Error("Las tareas publicadas en COR son de solo lectura.");
+    }
+
     // ─── Bloquear edición durante sincronización ───
     if (task.corSyncStatus === "syncing" || task.corSyncStatus === "retrying") {
       throw new Error(
@@ -3206,6 +3210,24 @@ export const getTask = query({
  * Devuelve la selección efectiva que se mostrará en el panel.
  * Una selección propia de la task siempre prevalece sobre los defaults del cliente.
  */
+export const getBoardDialogDetails = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    const task = await ctx.db.get(taskId);
+    if (!task || task.convexStatus === "deleted") return null;
+    const external = await isExternalUser(ctx, userId);
+    if (external ? task.source !== "external" || task.createdBy !== String(userId) : !(await hasTaskAccess(ctx, task, userId))) return null;
+    const userIds: Id<"users">[] = await getTaskCollaboratorUserIdsForDisplay(ctx, task);
+    const members = await Promise.all(userIds.map(async id => {
+      const user = await ctx.db.get(id);
+      return { id: String(id), name: user?.name?.trim() || "Miembro" };
+    }));
+    return { label: await createBoardLabelReader(ctx)(task.subBrandId), members };
+  },
+});
+
 export const getTaskCorCollaborators = query({
   args: {
     taskId: v.id("tasks"),

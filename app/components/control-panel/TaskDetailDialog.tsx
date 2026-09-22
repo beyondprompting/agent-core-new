@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { TaskFieldButton, useTaskFieldButtons } from "../task/TaskFieldButton";
 import { InternalTaskComments } from "./InternalTaskComments";
+import dialogStyles from "../board/BoardDialog.module.css";
 import { TaskBriefContent } from "../task/TaskBriefContent";
 import { ProjectBriefContent } from "../task/ProjectBriefContent";
 import { EvaluationMessageList } from "../task/EvaluationMessages";
@@ -557,7 +558,7 @@ export function TaskDetailDialog({
   const liveConvexStatus =
     (liveTask as any)?.convexStatus ?? task.convexStatus ?? "active";
   const canEditFromDialog =
-    !isPublishedInCOR && syncStatus !== "syncing" && syncStatus !== "retrying";
+    viewer?.kind === "internal" && !isPublishedInCOR && syncStatus !== "syncing" && syncStatus !== "retrying";
   const canEditTaskContent = canEditFromDialog && viewer?.kind === "internal" &&
     (liveTask ?? task).source === "internal" &&
     String((liveTask ?? task).createdBy) === String(viewer.userId);
@@ -1170,22 +1171,21 @@ export function TaskDetailDialog({
       />
 
       {/* Dialog */}
-      <div className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div role="dialog" aria-modal="true" aria-label="Detalle de tarea" className={`${dialogStyles.surface} relative border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-foreground">
-              Tarea
-            </h2>
+
             {/* Status badge */}
             <span
-              className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)}`}
+              className={`text-sm font-semibold px-3 py-1.5 rounded-md bg-muted`}
             >
               {isPublishedInCOR ? getStatusDisplay(liveTask?.status ?? task.status) : "Sin ingresar a COR"}
             </span>
           </div>
           <button
             onClick={onClose}
+            aria-label="Cerrar detalle de tarea"
             className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
           >
             <X className="h-5 w-5" />
@@ -1241,6 +1241,13 @@ export function TaskDetailDialog({
                   <TaskBriefContent
                     task={liveTask ?? task}
                     layout="board"
+                    boardMembers={<TaskCollaboratorsSection compact
+                      taskId={task._id}
+                      published={isPublishedInCOR}
+                      editable={canEditFromDialog}
+                      syncStatus={syncStatus}
+                      collaboratorSyncStatus={collaboratorSyncStatus}
+                    />}
                     contentEditable={canEditTaskContent}
                     editable={canEditFromDialog}
                     syncStatus={syncStatus}
@@ -1249,13 +1256,7 @@ export function TaskDetailDialog({
                       !isPublishedInCOR && !liveCorTaskId && isDeadlineMissing
                     }
                   />
-                  <TaskCollaboratorsSection
-                    taskId={task._id}
-                    published={isPublishedInCOR}
-                    editable={canEditFromDialog}
-                    syncStatus={syncStatus}
-                    collaboratorSyncStatus={collaboratorSyncStatus}
-                  />
+
                 </>
               )}
             </div>

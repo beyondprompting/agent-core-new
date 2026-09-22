@@ -7,7 +7,7 @@ export function useRequestBrief(description?: string) {
   const [brief, setBrief] = useState({ html: "", requestType: "", launchDate: "", deliverablesCount: "" });
   useEffect(() => {
     const html = DOMPurify.sanitize(description ?? "", {
-      ALLOWED_TAGS: ["p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a"],
+      ALLOWED_TAGS: ["p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a", "h1", "h2", "h3", "h4", "blockquote", "pre", "code", "table", "thead", "tbody", "tr", "td", "th", "u", "s"],
       ALLOWED_ATTR: ["href", "title"],
     });
     const document = new DOMParser().parseFromString(html, "text/html");

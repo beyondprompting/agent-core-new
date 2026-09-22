@@ -295,3 +295,25 @@ test("only internal viewers see client labels on external comments", async () =>
   assert.equal(detail.viewerIsExternal, false);
   assert.equal(detail.comments[0].isClient, true);
 });
+
+test("board dialog exposes only the authorized task label and member names", async () => {
+  const f = fixture();
+  f.put("users", { _id: "member1", name: "Ximena Torres", email: "private@example.com" });
+  f.put("subBrands", { _id: "brand1", name: "Marca", trelloLabelName: "Marca Corporativa", trelloLabelColor: "orange" });
+  Object.assign(f.rows.get("task1"), { subBrandId: "brand1", corCollaboratorUserIds: ["member1"] });
+  const result = await f.call(tasks.getBoardDialogDetails, { taskId: "task1" });
+  assert.deepEqual(result, { label: { name: "Marca Corporativa", color: "orange" }, members: [{ id: "member1", name: "Ximena Torres" }] });
+  f.rows.get("task1").createdBy = "another-user";
+  assert.equal(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }), null);
+});
+
+test("external users and already published COR tasks reject dialog edits", async () => {
+  const f = fixture();
+  await assert.rejects(f.call(tasks.updateTaskFields, { taskId: "task1", updates: { title: "Changed" } }));
+  f.rows.delete("external1");
+  for (const published of [{ corTaskId: "123", corSyncStatus: "error" }, { corTaskId: undefined, corSyncStatus: "synced" }]) {
+    Object.assign(f.rows.get("task1"), published);
+    await assert.rejects(f.call(tasks.updateTaskFields, { taskId: "task1", updates: { title: "Changed" } }), /solo lectura/);
+    assert.equal(f.rows.get("task1").title, "Original");
+  }
+});
