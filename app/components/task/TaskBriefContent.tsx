@@ -1,12 +1,12 @@
 "use client";
 
 import { TaskFieldEditor } from "./TaskFieldEditor";
+import { ExpandableDescription } from "../board/ExpandableDescription";
 import { BoardCustomFields } from "../board/BoardCustomFields";
 import { TaskFieldOptions } from "./TaskFieldOptions";
 import { TaskDateCalendar } from "./TaskDateCalendar";
 import { TaskFieldButton, useTaskFieldButtons } from "./TaskFieldButton";
 import { BoardDialogMetadata, BoardDialogDeadline } from "../board/BoardDialogMetadata";
-import dialogStyles from "../board/BoardDialog.module.css";
 import { AlignLeft } from "lucide-react";
 import boardStyles from "./TaskBriefBoard.module.css";
 import { TaskMetadataSection } from "./TaskMetadataSection";
@@ -150,6 +150,7 @@ function EditableInfoItem({
 
   return (
     <div
+      data-board-title={fieldKey === "title" ? "" : undefined}
       className={`bg-card rounded-lg p-3 border ${borderClass} shadow-sm group/item transition-colors`}
     >
       <div className="flex items-start gap-2">
@@ -966,9 +967,9 @@ export function TaskBriefContent({
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : layout === "board" ? <ExpandableDescription key={task._id} html={renderedDescriptionHtml} /> : (
               <div
-                className={layout === "board" ? `${dialogStyles.richText} whitespace-pre-wrap` : "text-sm text-foreground whitespace-pre-wrap [&_p]:mb-2 [&_p:last-child]:mb-0 [&_a]:text-primary [&_a]:underline"}
+                className="text-sm text-foreground whitespace-pre-wrap [&_p]:mb-2 [&_p:last-child]:mb-0 [&_a]:text-primary [&_a]:underline"
                 dangerouslySetInnerHTML={{ __html: renderedDescriptionHtml }}
               />
             )}

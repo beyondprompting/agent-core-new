@@ -6,6 +6,8 @@ import Link from "next/link";
 import { ArrowUpRight, AlignLeft, X } from "lucide-react";
 import type { BoardStage, ExternalRequest } from "./types";
 import { useRequestBrief } from "./useRequestBrief";
+import { ExpandableDescription } from "../board/ExpandableDescription";
+import { BoardDialogScroll } from "../board/BoardDialogScroll";
 import { RequestAttachmentsSection } from "./RequestAttachmentsSection";
 import { BoardCustomFields } from "../board/BoardCustomFields";
 import { TaskMediaProvider } from "./TaskMediaContext";
@@ -44,18 +46,20 @@ export function RequestDetailDialog({ request, stage, onClose }: {
           <button type="button" autoFocus onClick={onClose} aria-label="Cerrar detalle de tarea" className="rounded-lg p-2 text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><X className="h-5 w-5" aria-hidden="true" /></button>
         </header>
         <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-rows-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
-          <div className={`${dialogStyles.content} min-h-0 min-w-0 overflow-y-auto overscroll-contain`}>
-            <h2 id={titleId} className={dialogStyles.title}>{request.title}</h2>
+          <BoardDialogScroll key={request._id} title={request.title}>
+          <div className={dialogStyles.content}>
+            <h2 data-board-title id={titleId} className={dialogStyles.title}>{request.title}</h2>
             <BoardDialogMetadata taskId={request._id} />
             <BoardDialogDeadline deadline={request.deadline} status={request.status} />
             <section className={dialogStyles.description} aria-label="Descripción de la tarea">
               <h3><AlignLeft aria-hidden="true" />Descripción</h3>
-              <div className={`${dialogStyles.richText} whitespace-pre-wrap`} dangerouslySetInnerHTML={{ __html: brief.html || "Sin descripción guardada." }} />
+              <ExpandableDescription key={request._id} html={brief.html || "Sin descripción guardada."} />
             </section>
             {request.threadId && <Link href={`/workspace?threadId=${encodeURIComponent(request.threadId)}`} className="mt-6 inline-flex items-center gap-1 text-xs text-primary hover:underline">Ir al chat <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>}
             <BoardCustomFields description={request.description} deliverablesCount={request.deliverablesCount} />
             <RequestAttachmentsSection taskId={request._id} />
           </div>
+          </BoardDialogScroll>
           <RequestCommentsSection taskId={request._id} />
         </div>
       </div>

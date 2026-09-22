@@ -6,6 +6,7 @@ import { useMutation, useQuery, useAction, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { TaskFieldButton, useTaskFieldButtons } from "../task/TaskFieldButton";
+import { BoardDialogScroll } from "../board/BoardDialogScroll";
 import { InternalTaskComments } from "./InternalTaskComments";
 import dialogStyles from "../board/BoardDialog.module.css";
 import { TaskBriefContent } from "../task/TaskBriefContent";
@@ -1194,10 +1195,8 @@ export function TaskDetailDialog({
 
         <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-rows-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
         {/* Body — Tab content */}
-        <div
-          className="min-h-0 min-w-0 overflow-y-auto overscroll-contain"
-        >
-          <nav aria-label="Secciones de la tarea" className="sticky top-0 z-10 flex flex-wrap gap-2 border-b border-border bg-card px-6 py-3">
+        <BoardDialogScroll key={task._id} title={liveTask?.title ?? task.title}>
+          <nav aria-label="Secciones de la tarea" className="flex flex-wrap gap-2 border-b border-border bg-card px-6 py-3">
             {project && <button type="button" aria-controls="task-project-section" onClick={() => openSection(projectSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><FolderOpen className="h-4 w-4 text-primary" />Proyecto<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>}
             <button type="button" aria-controls="task-evaluation-section" onClick={() => openSection(evaluationSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><Sparkles className="h-4 w-4 text-primary" />Evaluación<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>
           </nav>
@@ -1390,7 +1389,7 @@ export function TaskDetailDialog({
                     </button>
                   </div>
           )}
-        </div>
+        </BoardDialogScroll>
         <InternalTaskComments taskId={task._id} />
         </div>
         {/* Fixed publication footer; controls reuse their existing handlers. */}
