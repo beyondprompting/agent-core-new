@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 
 export function useRequestBrief(description?: string) {
-  const [brief, setBrief] = useState({ html: "", requestType: "", launchDate: "" });
+  const [brief, setBrief] = useState({ html: "", requestType: "", launchDate: "", deliverablesCount: "" });
   useEffect(() => {
     const html = DOMPurify.sanitize(description ?? "", {
       ALLOWED_TAGS: ["p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a"],
@@ -21,8 +21,7 @@ export function useRequestBrief(description?: string) {
       }
       return value.trim();
     }
-    setBrief({ html, requestType: field("tipo de requerimiento"), launchDate: field("fecha de lanzamiento") });
+    setBrief({ html, requestType: field("tipo de requerimiento"), launchDate: field("fecha de lanzamiento"), deliverablesCount: field("cantidad de entregables") });
   }, [description]);
   return brief;
 }
-

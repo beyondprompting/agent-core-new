@@ -3,7 +3,7 @@ import { internalBoardStage, internalBoardStages, isTaskInCOR } from "./internal
 import type { ControlPanelProjectGroup, ControlPanelPublicationTab, FullTask } from "./types";
 
 export function InternalTasksBoard({ projects, publicationTab, onSelectTask }: { projects: ControlPanelProjectGroup[]; publicationTab: ControlPanelPublicationTab; onSelectTask: (task: FullTask) => void }) {
-  const rows = projects.flatMap(({ project, tasks }) => tasks.map(task => ({ task, projectName: project.name })));
+  const rows = projects.flatMap(({ tasks }) => tasks.map(task => ({ task })));
   const visible = rows.filter(({ task }) => publicationTab === "all" || (publicationTab === "cor" ? isTaskInCOR(task) : !isTaskInCOR(task)));
   return <div role="region" aria-label="Board de tareas internas" tabIndex={0} className="min-h-0 flex-1 overflow-x-auto pb-3 focus-visible:outline-2 focus-visible:outline-ring">
     <div className="grid h-full auto-cols-[280px] grid-flow-col items-start gap-3">
@@ -15,7 +15,7 @@ export function InternalTasksBoard({ projects, publicationTab, onSelectTask }: {
             <p className="mt-0.5 text-xs text-muted-foreground">{stage.subtitle}</p>
           </header>
           <div className="flex min-h-0 flex-col gap-2.5 overflow-y-auto overscroll-contain p-2.5">
-            {cards.length ? cards.map(({ task, projectName }) => <InternalBoardCard key={task._id} task={task} projectName={projectName} accent={stage.cardAccent} onSelect={onSelectTask} />) : <p className="px-2 py-8 text-center text-xs text-muted-foreground">Sin tareas en esta etapa</p>}
+            {cards.length ? cards.map(({ task }) => <InternalBoardCard key={task._id} task={task} onSelect={onSelectTask} />) : <p className="px-2 py-8 text-center text-xs text-muted-foreground">Sin tareas en esta etapa</p>}
           </div>
         </section>;
       })}

@@ -1,28 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
-import type { BoardStage, ExternalRequest } from "./types";
-import { useRequestBrief } from "./useRequestBrief";
+import type { ExternalRequest } from "./types";
+import { BoardCardContent } from "../board/BoardCardContent";
+import styles from "../board/BoardCard.module.css";
 
-export function RequestBoardCard({ request, stage }: { request: ExternalRequest; stage: BoardStage }) {
-  const brief = useRequestBrief(request.description);
-  return (
-    <article className={`relative shrink-0 rounded-md border border-border border-l-[3px] bg-card p-3 shadow-sm transition-shadow hover:shadow-md ${stage.cardAccent}`}>
-      <p className="mb-2 break-words text-[11px] font-semibold text-muted-foreground">
-        {[request.clientName, request.brandName, request.subBrandName].filter(Boolean).join(" · ")}
-      </p>
-      <Link href={`/workspace/requests?taskId=${encodeURIComponent(request._id)}`} scroll={false} aria-haspopup="dialog" className="block w-full cursor-pointer break-words rounded text-left text-[13px] font-semibold leading-snug after:absolute after:inset-0 after:content-[''] hover:text-primary focus-visible:outline-2 focus-visible:outline-ring">{request.title}</Link>
-      <div className="mt-2 space-y-1 break-words text-xs leading-relaxed text-muted-foreground">
-        {brief.requestType && <p><span className="font-medium text-foreground">Tipo:</span> {brief.requestType}</p>}
-        {brief.launchDate && <p><span className="font-medium text-foreground">Fecha:</span> {brief.launchDate}</p>}
-      </div>
-      <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-[10px] text-muted-foreground">
-        <time dateTime={new Date(request.createdAt).toISOString()}>Creada {new Date(request.createdAt).toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" })}</time>
-        {request.threadId ? <Link href={`/workspace?threadId=${encodeURIComponent(request.threadId)}`} className="relative z-10 inline-flex items-center gap-1 rounded font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring">Ir al chat <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></Link> :
-          <span>Chat no disponible</span>}
-      </footer>
-      {!request.threadId && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">La conversación ya no está disponible. Abrí el título para consultar tu tarea.</p>}
-    </article>
-  );
+export function RequestBoardCard({ request }: { request: ExternalRequest }) {
+  return <Link href={`/workspace/requests?taskId=${encodeURIComponent(request._id)}`} scroll={false} aria-haspopup="dialog" aria-label={request.title} className={styles.card}>
+    <BoardCardContent title={request.title} description={request.description} deadline={request.deadline}
+      status={request.status} label={request.boardLabel} deliverablesCount={request.deliverablesCount}
+      createdByName={request.createdByName} />
+  </Link>;
 }

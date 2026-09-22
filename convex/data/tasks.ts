@@ -33,6 +33,7 @@ import { applyProjectDeliverablesDelta } from "../lib/deliverableAnalytics";
 import { formatTrelloCommentForCOR } from "../lib/trelloCommentFormat";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
 import { usesDirectExternalComments } from "../lib/directExternalComments";
+import { createBoardLabelReader } from "../lib/boardLabel";
 import type { ActionCtx, MutationCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 
@@ -3550,6 +3551,9 @@ export const listMyExternalRequests = query({
     const userId = await getAuthUserId(ctx);
     if (!userId || !(await isExternalUser(ctx, userId))) return [];
 
+    const creator = await ctx.db.get(userId);
+    const readBoardLabel = createBoardLabelReader(ctx);
+
     const tasks = await ctx.db
       .query("tasks")
       .withIndex("by_createdBy", (q) => q.eq("createdBy", String(userId)))
@@ -3568,6 +3572,9 @@ export const listMyExternalRequests = query({
           return {
             _id: task._id,
             createdAt: task._creationTime,
+            createdByName: creator?.name,
+            deliverablesCount: task.deliverablesCount,
+            boardLabel: await readBoardLabel(task.subBrandId),
             title: task.title,
             description: task.description,
             status: task.status,
