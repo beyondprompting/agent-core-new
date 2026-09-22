@@ -63,7 +63,7 @@ export function CommentEditor({ disabled, onChange, footer }: { disabled: boolea
       <button type="button" title="Insertar @" aria-label="Insertar @" disabled={disabled || !editor} onClick={() => editor?.chain().focus().insertContent("@").run()} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent"><AtSign className="h-4 w-4" /></button>
     </div>
     <div className="relative">
-      {editor?.isEmpty && <span aria-hidden="true" className="pointer-events-none absolute left-3 top-3 text-sm text-muted-foreground">Escribí un comentario…</span>}
+      {editor?.isEmpty && <span data-comment-placeholder aria-hidden="true" className="pointer-events-none absolute left-3 top-3 text-sm text-muted-foreground">Escribí un comentario…</span>}
       <EditorContent editor={editor} />
     </div>
     {footer ?? <p className="px-3 pb-2 text-[11px] text-muted-foreground">Los archivos se suben al publicar.</p>}
