@@ -1,5 +1,6 @@
 "use client";
 
+import boardStyles from "../board/BoardLayout.module.css";
 import { Suspense } from "react";
 import { RequestDialogRoute } from "./RequestDialogRoute";
 import { useQuery } from "convex/react";
@@ -16,7 +17,7 @@ export function RequestsPanel() {
   const filters = useRequestFilters(requests ?? []);
   const newRequest = useNewRequest();
   return (
-    <div className={`${styles.interactiveControls} flex h-full min-h-0 flex-col overflow-hidden bg-muted/40`}>
+    <div data-board-theme className={`${boardStyles.page} ${styles.interactiveControls} flex h-full min-h-0 flex-col overflow-hidden`}>
       <Suspense fallback={null}><RequestDialogRoute requests={requests} /></Suspense>
       <div className="flex shrink-0 flex-col gap-3 px-4 py-3 sm:px-6 xl:flex-row xl:items-center xl:gap-6">
         <RequestsHeader clientName={filters.clients.length === 1 ? filters.clients[0].label : undefined} />

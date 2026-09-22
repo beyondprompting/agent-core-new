@@ -1,5 +1,6 @@
 "use client";
 
+import boardStyles from "../../components/board/BoardLayout.module.css";
 import { Suspense, useMemo, useState, useEffect } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -318,7 +319,7 @@ function ControlPanelContent() {
             onSelectClient={setSelectedClientId}
           />
 
-          <section className="min-h-0 min-w-0 overflow-hidden">
+          <section data-board-theme={viewMode === "board" ? "" : undefined} className={`${viewMode === "board" ? boardStyles.page : ""} min-h-0 min-w-0 overflow-hidden`}>
             {!panelClients ? (
               <div className="flex items-center justify-center h-full">
                 <div className="animate-pulse text-muted-foreground">
@@ -337,7 +338,7 @@ function ControlPanelContent() {
               </div>
             ) : (
               <div className="flex h-full min-h-0 flex-col p-4">
-                <ControlPanelHeader
+                <div className={viewMode === "board" ? boardStyles.controls : undefined}><ControlPanelHeader
                   selectedClient={selectedClient}
                   selectedBrandId={selectedBrandId}
                   statusFilter={statusFilter}
@@ -350,7 +351,7 @@ function ControlPanelContent() {
                   onStatusFilterChange={setStatusFilter}
                   onViewModeChange={handleViewModeChange}
                   onPublicationTabChange={setPublicationTab}
-                />
+                /></div>
 
                 {viewMode === "board" ? <InternalTasksBoard projects={filteredProjects} publicationTab={publicationTab} onSelectTask={openTask} /> : <div className="min-h-0 overflow-y-auto"><ControlPanelTaskSections
                   filteredProjectsLength={filteredProjects.length}

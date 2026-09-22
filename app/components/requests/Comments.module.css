@@ -56,8 +56,9 @@
 .composer [role=toolbar] button:disabled { opacity:.4; }
 .composer .hint { color:var(--comment-editor-hint); }
 .footer { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 12px; border-top:1px solid var(--comment-border); }
-.footer button[type=submit] { background:#256b57; color:white; border-radius:9px; }
-:global(.dark) .footer button[type=submit] { background:#85d6ba; color:#102b22; }
+.footer button[type=submit] { background:var(--trello-blue, #0c66e4); color:white; border-radius:6px; }
+.footer button[type=submit]:hover:not(:disabled) { background:var(--trello-blue-hover, #0055cc); }
+:global(.dark) .footer button[type=submit] { color:#172b4d; }
 .hint { color:var(--comment-muted); font:10px ui-monospace,monospace; letter-spacing:.25px; }
 
 .composer [role=toolbar] button:nth-of-type(3),

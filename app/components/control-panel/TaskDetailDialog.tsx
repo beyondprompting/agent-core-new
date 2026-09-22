@@ -1172,7 +1172,7 @@ export function TaskDetailDialog({
       />
 
       {/* Dialog */}
-      <div role="dialog" aria-modal="true" aria-label="Detalle de tarea" className={`${dialogStyles.surface} relative border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200`}>
+      <div data-board-theme role="dialog" aria-modal="true" aria-label="Detalle de tarea" className={`${dialogStyles.surface} relative border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
