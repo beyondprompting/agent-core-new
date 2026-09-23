@@ -1,3 +1,4 @@
+import { canViewExternalRequest, isRequestsClientTask } from "./externalRequestsAccess";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { hasTaskAccess } from "../data/tasks";
@@ -5,8 +6,9 @@ import { hasTaskAccess } from "../data/tasks";
 export async function canReceiveComment(ctx: QueryCtx, userId: Id<"users">, task: Doc<"tasks">, message: Doc<"taskMessages">) {
   if (task.convexStatus === "deleted" || message.taskId !== task._id || message.userId === userId) return false;
   const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId)).unique();
-  if (!external) return await hasTaskAccess(ctx, task, userId);
+  if (!external) return await isRequestsClientTask(ctx, task) && await hasTaskAccess(ctx, task, userId);
   if (task.source !== "external" || task.createdBy !== String(userId) || message.source !== "internal_panel" || !message.userId) return false;
+  if (!(await canViewExternalRequest(ctx, userId, task))) return false;
   // Only authenticated internal authors can notify an external task creator.
   return !(await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", message.userId!)).unique());
 }

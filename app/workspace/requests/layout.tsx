@@ -16,12 +16,12 @@ export default function RequestsLayout({ children }: { children: React.ReactNode
   const router = useRouter();
 
   useEffect(() => {
-    if (profile && profile.kind !== "external") {
+    if (profile && (profile.kind !== "external" || !profile.canAccessExternalRequests)) {
       router.replace(profile.isAuthenticated ? "/workspace" : "/login");
     }
   }, [profile, router]);
 
-  if (profile?.kind !== "external") return <LoadingScreen />;
+  if (profile?.kind !== "external" || !profile.canAccessExternalRequests) return <LoadingScreen />;
 
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">

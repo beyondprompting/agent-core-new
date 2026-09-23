@@ -1,3 +1,4 @@
+import { canViewExternalRequest, hasExternalRequestsAccess, isRequestsClientTask } from "../lib/externalRequestsAccess";
 import { notifyExternalTaskCreated } from "../lib/taskCreationNotifications";
 import { notifyTaskComment } from "../lib/commentNotifications";
 // convex/data/tasks.ts
@@ -37,7 +38,7 @@ import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
 import { usesDirectExternalComments } from "../lib/directExternalComments";
 import { createBoardLabelReader } from "../lib/boardLabel";
 import type { ActionCtx, MutationCtx } from "../_generated/server";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 
 const STRATEGIC_PRIORITY_LABEL_IDS: Record<StrategicPriority, number> = {
   I_NU: 370185,
@@ -1317,7 +1318,7 @@ export const listInternalTaskComments = query({
     if (!userId) throw new Error("No autenticado");
     if (await isExternalUser(ctx, userId)) return [];
     const task = await ctx.db.get(taskId);
-    if (!task || task.convexStatus === "deleted" || !(await hasTaskAccess(ctx, task, userId))) return [];
+    if (!task || !(await isRequestsClientTask(ctx, task)) || task.convexStatus === "deleted" || !(await hasTaskAccess(ctx, task, userId))) return [];
     const messages = await ctx.db.query("taskMessages").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     return await Promise.all(messages.sort((a, b) => b.createdAt - a.createdAt).map(async message => ({
       id: message._id, text: message.message, createdAt: message.createdAt,
@@ -3223,7 +3224,7 @@ export const getBoardDialogDetails = query({
     const task = await ctx.db.get(taskId);
     if (!task || task.convexStatus === "deleted") return null;
     const external = await isExternalUser(ctx, userId);
-    if (external ? task.source !== "external" || task.createdBy !== String(userId) : !(await hasTaskAccess(ctx, task, userId))) return null;
+    if (external ? !(await canViewExternalRequest(ctx, userId, task)) : !(await hasTaskAccess(ctx, task, userId))) return null;
     const userIds: Id<"users">[] = await getTaskCollaboratorUserIdsForDisplay(ctx, task);
     const members = await Promise.all(userIds.map(async id => {
       const user = await ctx.db.get(id);
@@ -3576,7 +3577,7 @@ export const listMyExternalRequests = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
-    if (!userId || !(await isExternalUser(ctx, userId))) return [];
+    if (!userId || !(await hasExternalRequestsAccess(ctx, userId))) return [];
 
     const creator = await ctx.db.get(userId);
     const readBoardLabel = createBoardLabelReader(ctx);
@@ -3587,8 +3588,9 @@ export const listMyExternalRequests = query({
       .order("desc")
       .collect();
 
+    const authorized = await Promise.all(tasks.map(async task => await canViewExternalRequest(ctx, userId, task) ? task : null));
     return await Promise.all(
-      tasks
+      authorized.filter((task): task is Doc<"tasks"> => task !== null)
         .filter((task) => task.source === "external" && task.convexStatus !== "deleted")
         .map(async (task) => {
           const thread = await ctx.db

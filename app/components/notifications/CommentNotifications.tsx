@@ -13,6 +13,7 @@ export function CommentUnreadBadge({ taskId }: { taskId: Id<"tasks"> }) {
 }
 
 export function CommentNotificationBell() {
+  const profile = useQuery(api.data.userAccess.viewerAccessProfile);
   const comments = useQuery(api.data.commentNotifications.unread, {});
   const tasks = useQuery(api.data.taskCreationNotifications.unread, {});
   const [open, setOpen] = useState(false);
@@ -30,6 +31,7 @@ export function CommentNotificationBell() {
     document.addEventListener("pointerdown", click); document.addEventListener("keydown", key);
     return () => { document.removeEventListener("pointerdown", click); document.removeEventListener("keydown", key); };
   }, [open]);
+  if (!profile?.isAuthenticated || (profile.kind === "external" && !profile.canAccessExternalRequests)) return null;
   return <div ref={root} className="relative">
     <button ref={button} type="button" aria-label={`Notificaciones: ${total} notificaciones nuevas`} aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)} className="relative rounded-lg p-2 text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
       <Bell className="h-5 w-5" aria-hidden="true" />

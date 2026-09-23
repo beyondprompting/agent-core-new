@@ -66,7 +66,7 @@ export function TopNavigation() {
       isActive: pathname === "/workspace/external-users",
     },
   ].filter((tab) => {
-    if (tab.href === "/workspace/requests") return isExternalUser;
+    if (tab.href === "/workspace/requests") return isExternalUser && accessProfile?.canAccessExternalRequests === true;
     if (isExternalUser && tab.href === "/workspace/control-panel") return false;
     if (tab.href === "/workspace/analytics") {
       return analyticsAccess?.canAccess === true;

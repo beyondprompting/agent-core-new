@@ -436,9 +436,11 @@ export function TaskDetailDialog({
   const [draftBrandId, setDraftBrandId] = useState<string>("");
   const [draftSubBrandId, setDraftSubBrandId] = useState<string>("");
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"task" | "project" | "evaluation" | "comments">(
+  const commentsEnabled = useQuery(api.data.taskPanel.canAccessComments, { taskId: task._id }) === true;
+  const [selectedTab, setActiveTab] = useState<"task" | "project" | "evaluation" | "comments">(
     params.get("tab") === "comments" ? "comments" : "task",
   );
+  const activeTab = selectedTab === "comments" && !commentsEnabled ? "task" : selectedTab;
 
   useEffect(() => {
     const tab = params.get("tab");
@@ -1232,12 +1234,12 @@ export function TaskDetailDialog({
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
             )}
           </button>
-          <button type="button" onClick={() => setActiveTab("comments")}
+          {commentsEnabled && <button type="button" onClick={() => setActiveTab("comments")}
             aria-pressed={activeTab === "comments"}
             className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${activeTab === "comments" ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
             <MessageCircle className="h-4 w-4" aria-hidden="true" />Comentarios <CommentUnreadBadge taskId={task._id} />
             {activeTab === "comments" && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />}
-          </button>
+          </button>}
         </div>
 
         {/* Body — Tab content */}

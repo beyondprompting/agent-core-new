@@ -68,6 +68,7 @@ import type * as lib_corRetry from "../lib/corRetry.js";
 import type * as lib_deliverableAnalytics from "../lib/deliverableAnalytics.js";
 import type * as lib_directExternalComments from "../lib/directExternalComments.js";
 import type * as lib_excludedUsers from "../lib/excludedUsers.js";
+import type * as lib_externalRequestsAccess from "../lib/externalRequestsAccess.js";
 import type * as lib_externalUserPreapproval from "../lib/externalUserPreapproval.js";
 import type * as lib_internalUserAdminAccess from "../lib/internalUserAdminAccess.js";
 import type * as lib_llmFallback from "../lib/llmFallback.js";
@@ -179,6 +180,7 @@ declare const fullApi: ApiFromModules<{
   "lib/deliverableAnalytics": typeof lib_deliverableAnalytics;
   "lib/directExternalComments": typeof lib_directExternalComments;
   "lib/excludedUsers": typeof lib_excludedUsers;
+  "lib/externalRequestsAccess": typeof lib_externalRequestsAccess;
   "lib/externalUserPreapproval": typeof lib_externalUserPreapproval;
   "lib/internalUserAdminAccess": typeof lib_internalUserAdminAccess;
   "lib/llmFallback": typeof lib_llmFallback;

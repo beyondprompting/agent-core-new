@@ -119,6 +119,8 @@ export interface TenantConfig {
     externalToolName: string;
     /** COR client IDs autorizados para cualquier operación de Trello */
     trelloPublishCorClientIds: number[];
+    /** ID de Convex (corClients) habilitado para Mis tareas y notificaciones externas. Vacío = deshabilitado. */
+    externalRequestsClientId: string;
     sidebarWidth: string;
   };
 }
@@ -213,6 +215,7 @@ const activeTenantConfig: TenantConfig = {
     showPublishToExternalTool: true,
     externalToolName: "COR",
     trelloPublishCorClientIds: [197246, 178768],
+    externalRequestsClientId: "md7b7fapbpxvqy3e1jv5rzm50d8439d5",
     sidebarWidth: "280px",
   },
 };
