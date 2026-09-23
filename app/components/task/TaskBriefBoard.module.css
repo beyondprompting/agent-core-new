@@ -8,17 +8,3 @@
 .board > div:nth-child(2) > div:first-child p:last-child { font-size: 1.6rem; font-weight: 700; line-height: 1.25; white-space: normal; overflow: visible; }
 .board > div:nth-child(2) > div:first-child input { font-size: 1.5rem; font-weight: 700; }
 .board button[title^="Editar"] { opacity: 1; }
-.board { padding: 24px 32px 32px 56px; }
-.board > div:nth-child(2) { gap: 12px; }
-.board > div:nth-child(2) > div:first-child { margin-bottom: 16px; }
-.board > div:nth-child(2) > div:first-child p:last-child { font-size: 28px; line-height: 1.2; color: inherit; }
-.description { margin-top: 12px !important; }
-.descriptionHeading { display: flex; align-items: center; gap: 12px; font-size: 16px; font-weight: 600; margin-bottom: 12px; }
-.descriptionHeading svg { margin-left: -32px; width: 20px; height: 20px; }
-.otherFields { order: 4; margin-top: 24px !important; font-size: 12px; color: var(--muted-foreground); }
-.otherFields > summary { cursor: pointer; margin-bottom: 12px; }
-.deadline > div { background: transparent; box-shadow: none; padding: 0; border: 0; }
-.deadline > div > div > span { display: none; }
-.deadline p:first-child { text-transform: none; font-weight: 600; letter-spacing: normal; margin-bottom: 6px; }
-.deadline p:last-child { display: inline-block; border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; }
-@media (max-width: 640px) { .board { padding: 24px; } .board > div:nth-child(2) > div:first-child p:last-child { font-size: 24px; } .descriptionHeading svg { margin-left: 0; } }

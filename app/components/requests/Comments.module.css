@@ -63,3 +63,13 @@
 
 .composer [role=toolbar] button:nth-of-type(3),
 .composer [role=toolbar] button:nth-of-type(5) { margin-left:6px; border-left:1px solid var(--comment-border); border-radius:0; padding-left:12px; }
+
+/* Internal dialogs retain the presentation used before the Trello redesign. */
+.panel.classic { --comment-bg: #fff; --comment-editor-text: var(--comment-text); --comment-editor-hint: var(--comment-muted); }
+:global(.dark) .panel.classic { --comment-bg: #181d23; }
+.classic .composer [role=toolbar] button { color: hsl(var(--muted-foreground)); }
+.classic .composer [role=toolbar] button:hover { color: hsl(var(--foreground)); }
+.classic .composer [role=toolbar] button[aria-pressed=true] { color: hsl(var(--primary)); background: hsl(var(--muted)); }
+.classic .footer button[type=submit] { background: #256b57; color: white; border-radius: 9px; }
+.classic .footer button[type=submit]:hover:not(:disabled) { background: #256b57; }
+:global(.dark) .classic .footer button[type=submit] { background: #85d6ba; color: #102b22; }

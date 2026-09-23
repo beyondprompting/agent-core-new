@@ -1,13 +1,9 @@
 "use client";
 
 import { TaskFieldEditor } from "./TaskFieldEditor";
-import { ExpandableDescription } from "../board/ExpandableDescription";
-import { BoardCustomFields } from "../board/BoardCustomFields";
 import { TaskFieldOptions } from "./TaskFieldOptions";
 import { TaskDateCalendar } from "./TaskDateCalendar";
 import { TaskFieldButton, useTaskFieldButtons } from "./TaskFieldButton";
-import { BoardDialogMetadata, BoardDialogDeadline } from "../board/BoardDialogMetadata";
-import { AlignLeft } from "lucide-react";
 import boardStyles from "./TaskBriefBoard.module.css";
 import { TaskMetadataSection } from "./TaskMetadataSection";
 import { useState, useRef, useEffect } from "react";
@@ -150,7 +146,6 @@ function EditableInfoItem({
 
   return (
     <div
-      data-board-title={fieldKey === "title" ? "" : undefined}
       className={`bg-card rounded-lg p-3 border ${borderClass} shadow-sm group/item transition-colors`}
     >
       <div className="flex items-start gap-2">
@@ -451,13 +446,8 @@ interface TaskBriefContentProps {
   syncStatus?: string;
   /** Campos adicionales que deben aparecer luego del nombre. */
   afterTitleItems?: ReactNode;
-  boardMembers?: ReactNode;
   /** Resalta la fecha de fin cuando falta. */
   highlightMissingDeadline?: boolean;
-}
-
-function OtherTaskFields({ board, children }: { board: boolean; children: ReactNode }) {
-  return board ? <details className={boardStyles.otherFields}><summary>Otros datos de la tarea</summary>{children}</details> : <>{children}</>;
 }
 
 // Opciones de prioridad para COR (0=Baja, 1=Media, 2=Alta, 3=Urgente)
@@ -678,7 +668,6 @@ export function TaskBriefContent({
   layout = "default",
   syncStatus,
   afterTitleItems,
-  boardMembers,
   highlightMissingDeadline = false,
 }: TaskBriefContentProps) {
   const updateTask = useMutation(api.data.tasks.updateTaskFields);
@@ -809,7 +798,7 @@ export function TaskBriefContent({
   return (
     <div className={`${layout === "board" ? boardStyles.board : ""} flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-background`}>
       {/* Fecha de creación */}
-      <div hidden={layout === "board"}>
+      <div>
         <p className="text-xs text-muted-foreground">
           Creado: {formatDate(task._creationTime)}
         </p>
@@ -827,19 +816,14 @@ export function TaskBriefContent({
           onSave={handleSaveField}
         />
 
-        {layout === "board" && <>
-          <BoardDialogMetadata taskId={task._id} members={boardMembers} />
-          {!editable ? <BoardDialogDeadline deadline={task.deadline} status={task.status} /> : <div className={boardStyles.deadline}><EditableInfoItem icon="" label="Vencimiento" value={task.deadline || "No especificado"} fieldKey="deadline" inputType="date" editable highlightMissing={highlightMissingDeadline && !task.deadline?.trim()} onSave={handleSaveField} /></div>}
-        </>}
-        <OtherTaskFields board={layout === "board"}>
         <TaskMetadataSection collapsible={layout === "board"} readOnly={!editable}>
         {afterTitleItems}
 
-        {layout !== "board" && (task.deadline || editable) && (
+        {(task.deadline || editable) && (
           <EditableInfoItem
             icon="📅"
             label="Fecha de Fin"
-            value={task.deadline || "No especificado"}
+            value={layout === "board" && !editable && task.deadline ? task.deadline.replace(/^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$/, "$3/$2/$1") : task.deadline || "No especificado"}
             fieldKey="deadline"
             inputType="date"
             editable={editable}
@@ -908,7 +892,6 @@ export function TaskBriefContent({
         )}
 
         </TaskMetadataSection>
-        </OtherTaskFields>
 
         {/* Sync indicator — aparece tras guardar en una task publicada en COR */}
         {showingSyncFeedback && (
@@ -920,11 +903,11 @@ export function TaskBriefContent({
 
         {/* Descripción completa — con edición inline */}
         {(task.description || editable) && (
-          <div className={`group/desc ${layout === "board" ? boardStyles.description : "mt-4 pt-4 border-t border-border"}`}>
+          <div className={`mt-4 pt-4 border-t border-border group/desc ${layout === "board" ? "order-1" : ""}`}>
             <div className="flex items-center justify-between mb-2">
-              <h3 className={layout === "board" ? boardStyles.descriptionHeading : "text-xs text-muted-foreground uppercase tracking-wider"}>
-                {layout === "board" && <AlignLeft aria-hidden="true" />}Descripción
-              </h3>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider">
+                Descripción completa
+              </p>
               {editable && contentEditable && !isEditingDesc && (
                 <button
                   onClick={() => setIsEditingDesc(true)}
@@ -967,7 +950,7 @@ export function TaskBriefContent({
                   </button>
                 </div>
               </div>
-            ) : layout === "board" ? <ExpandableDescription key={task._id} html={renderedDescriptionHtml} /> : (
+            ) : (
               <div
                 className="text-sm text-foreground whitespace-pre-wrap [&_p]:mb-2 [&_p:last-child]:mb-0 [&_a]:text-primary [&_a]:underline"
                 dangerouslySetInnerHTML={{ __html: renderedDescriptionHtml }}
@@ -977,7 +960,6 @@ export function TaskBriefContent({
         )}
 
         {/* Archivos adjuntos */}
-        {layout === "board" && <BoardCustomFields description={task.description} deliverablesCount={task.deliverablesCount} />}
         {attachments && attachments.length > 0 && (
           <div className={`mt-4 pt-4 border-t border-border ${layout === "board" ? "order-3" : ""}`}>
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">

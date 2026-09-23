@@ -6,9 +6,7 @@ import { useMutation, useQuery, useAction, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { TaskFieldButton, useTaskFieldButtons } from "../task/TaskFieldButton";
-import { BoardDialogScroll } from "../board/BoardDialogScroll";
 import { InternalTaskComments } from "./InternalTaskComments";
-import dialogStyles from "../board/BoardDialog.module.css";
 import { TaskBriefContent } from "../task/TaskBriefContent";
 import { ProjectBriefContent } from "../task/ProjectBriefContent";
 import { EvaluationMessageList } from "../task/EvaluationMessages";
@@ -423,8 +421,6 @@ export function TaskDetailDialog({
     useState(false);
   const [publishProjectMode, setPublishProjectMode] =
     useState<PublishProjectMode>("new");
-  const [isPublishProjectSectionOpen, setIsPublishProjectSectionOpen] =
-    useState(true);
   const [existingProjectSearch, setExistingProjectSearch] = useState("");
   const [existingProjects, setExistingProjects] = useState<
     ExistingProjectOption[]
@@ -1172,14 +1168,16 @@ export function TaskDetailDialog({
       />
 
       {/* Dialog */}
-      <div data-board-theme role="dialog" aria-modal="true" aria-label="Detalle de tarea" className={`${dialogStyles.surface} relative border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200`}>
+      <div role="dialog" aria-modal="true" aria-label="Detalle de tarea" className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
-
+            <h2 className="text-lg font-semibold text-foreground">
+              Tarea
+            </h2>
             {/* Status badge */}
             <span
-              className={`text-sm font-semibold px-3 py-1.5 rounded-md bg-muted`}
+              className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)}`}
             >
               {isPublishedInCOR ? getStatusDisplay(liveTask?.status ?? task.status) : "Sin ingresar a COR"}
             </span>
@@ -1195,8 +1193,10 @@ export function TaskDetailDialog({
 
         <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-rows-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
         {/* Body — Tab content */}
-        <BoardDialogScroll key={task._id} title={liveTask?.title ?? task.title}>
-          <nav aria-label="Secciones de la tarea" className="flex flex-wrap gap-2 border-b border-border bg-card px-6 py-3">
+        <div
+          className="min-h-0 min-w-0 overflow-y-auto overscroll-contain"
+        >
+          <nav aria-label="Secciones de la tarea" className="sticky top-0 z-10 flex flex-wrap gap-2 border-b border-border bg-card px-6 py-3">
             {project && <button type="button" aria-controls="task-project-section" onClick={() => openSection(projectSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><FolderOpen className="h-4 w-4 text-primary" />Proyecto<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>}
             <button type="button" aria-controls="task-evaluation-section" onClick={() => openSection(evaluationSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><Sparkles className="h-4 w-4 text-primary" />Evaluación<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>
           </nav>
@@ -1240,13 +1240,6 @@ export function TaskDetailDialog({
                   <TaskBriefContent
                     task={liveTask ?? task}
                     layout="board"
-                    boardMembers={<TaskCollaboratorsSection compact
-                      taskId={task._id}
-                      published={isPublishedInCOR}
-                      editable={canEditFromDialog}
-                      syncStatus={syncStatus}
-                      collaboratorSyncStatus={collaboratorSyncStatus}
-                    />}
                     contentEditable={canEditTaskContent}
                     editable={canEditFromDialog}
                     syncStatus={syncStatus}
@@ -1255,7 +1248,13 @@ export function TaskDetailDialog({
                       !isPublishedInCOR && !liveCorTaskId && isDeadlineMissing
                     }
                   />
-
+                  <TaskCollaboratorsSection
+                    taskId={task._id}
+                    published={isPublishedInCOR}
+                    editable={canEditFromDialog}
+                    syncStatus={syncStatus}
+                    collaboratorSyncStatus={collaboratorSyncStatus}
+                  />
                 </>
               )}
             </div>
@@ -1389,15 +1388,189 @@ export function TaskDetailDialog({
                     </button>
                   </div>
           )}
-        </BoardDialogScroll>
+        </div>
         <InternalTaskComments taskId={task._id} />
         </div>
         {/* Fixed publication footer; controls reuse their existing handlers. */}
         {showPublishButton && (
           <footer className="shrink-0 border-t border-border bg-card px-6 py-3">
-          <details>
-            <summary className="cursor-pointer text-sm font-semibold">{isPublishedInCOR ? "Publicada en COR" : syncStatus === "syncing" || syncStatus === "retrying" ? "Sincronizando con COR…" : syncStatus === "error" ? "Error de publicación · Ver detalles" : "Sin publicar en COR · Configurar publicación"}</summary>
-            <div className="mt-3 max-h-[25dvh] overflow-y-auto">
+          <div className="max-h-[35dvh] overflow-y-auto">
+            {canSelectPublishProject && (
+              <div className="mb-4 rounded-lg border border-border bg-card/70 p-3">
+                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <FolderOpen className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Proyecto en {toolName}
+                </h3>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!canPublishWithNewProject) return;
+                          setPublishProjectMode("new");
+                          setSelectedExistingProjectId(null);
+                          setPublishError(null);
+                        }}
+                        disabled={!canPublishWithNewProject}
+                        title={
+                          canPublishWithNewProject
+                            ? undefined
+                            : "No hay proyecto nuevo creado para esta tarea."
+                        }
+                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                          !canPublishWithNewProject
+                            ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground opacity-70"
+                            : publishProjectMode === "new"
+                              ? "border-primary bg-primary/10 text-foreground"
+                              : "border-border bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <span className="block font-medium">
+                          Crear proyecto nuevo
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {canPublishWithNewProject
+                            ? "Usa el proyecto propuesto por el agente."
+                            : "No hay proyecto nuevo creado para esta tarea."}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPublishProjectMode("existing");
+                          setPublishError(null);
+                          if (existingProjects.length === 0) {
+                            void loadExistingProjects();
+                          }
+                        }}
+                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
+                          publishProjectMode === "existing"
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <span className="block font-medium">
+                          Usar proyecto existente
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          Publica la tarea dentro de un proyecto activo.
+                        </span>
+                      </button>
+                    </div>
+
+                    {publishProjectMode === "existing" && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                          <Search className="h-4 w-4 text-muted-foreground" />
+                          <input
+                            value={existingProjectSearch}
+                            onChange={(event) =>
+                              setExistingProjectSearch(event.target.value)
+                            }
+                            placeholder="Buscar proyecto existente"
+                            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void loadExistingProjects()}
+                            disabled={isLoadingExistingProjects}
+                            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            {isLoadingExistingProjects
+                              ? "Cargando..."
+                              : "Actualizar"}
+                          </button>
+                        </div>
+
+                        {existingProjectsError && (
+                          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span>{existingProjectsError}</span>
+                          </div>
+                        )}
+
+                        <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                          {isLoadingExistingProjects && (
+                            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Cargando proyectos activos...
+                            </div>
+                          )}
+
+                          {!isLoadingExistingProjects &&
+                            filteredExistingProjects.length === 0 && (
+                              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                                No hay proyectos activos para esta búsqueda.
+                              </div>
+                            )}
+
+                          {!isLoadingExistingProjects &&
+                            filteredExistingProjects.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedExistingProjectId(item.id);
+                                  setPublishError(null);
+                                }}
+                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${
+                                  selectedExistingProjectId === item.id
+                                    ? "border-primary bg-primary/10"
+                                    : "border-border bg-background hover:bg-muted"
+                                }`}
+                              >
+                                <span className="block text-sm font-medium text-foreground">
+                                  {item.name}
+                                </span>
+                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  <span>ID COR: {item.id}</span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <CalendarDays className="h-3 w-3" />
+                                    {formatExistingProjectDate(item.endDate)}
+                                  </span>
+                                  {typeof item.deliverables === "number" && (
+                                    <span>{item.deliverables} entregables</span>
+                                  )}
+                                </span>
+                              </button>
+                            ))}
+
+                          {!isLoadingExistingProjects &&
+                            hasMoreExistingProjects && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void loadExistingProjects({
+                                    page: existingProjectsPage + 1,
+                                    append: true,
+                                  })
+                                }
+                                disabled={isLoadingMoreExistingProjects}
+                                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isLoadingMoreExistingProjects && (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                )}
+                                {isLoadingMoreExistingProjects
+                                  ? "Cargando más..."
+                                  : "Cargar más proyectos"}
+                              </button>
+                            )}
+                        </div>
+
+                        {selectedExistingProject && (
+                          <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                            Se publicará dentro de{" "}
+                            <span className="font-medium text-foreground">
+                              {selectedExistingProject.name}
+                            </span>
+                            .
+                          </div>
+                        )}
+                      </div>
+                    )}
+              </div>
+            )}
+
             {/* Sync status info */}
             {syncStatus === "synced" && (
               <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 mb-3">
@@ -1568,205 +1741,8 @@ export function TaskDetailDialog({
               </p>
             )}
 
-            {canSelectPublishProject && (
-              <div className="mb-4 rounded-lg border border-border bg-card/70 p-3">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setIsPublishProjectSectionOpen((open) => !open)
-                  }
-                  className={`flex w-full cursor-pointer items-center justify-between gap-3 text-left text-sm font-medium text-foreground outline-none transition-colors hover:text-primary ${
-                    isPublishProjectSectionOpen ? "mb-2" : ""
-                  }`}
-                  aria-expanded={isPublishProjectSectionOpen}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <FolderOpen className="h-4 w-4 flex-shrink-0 text-primary" />
-                    <span className="truncate">Proyecto en {toolName}</span>
-                  </span>
-                  {isPublishProjectSectionOpen ? (
-                    <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                  )}
-                </button>
 
-                {isPublishProjectSectionOpen && (
-                  <>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!canPublishWithNewProject) return;
-                          setPublishProjectMode("new");
-                          setSelectedExistingProjectId(null);
-                          setPublishError(null);
-                        }}
-                        disabled={!canPublishWithNewProject}
-                        title={
-                          canPublishWithNewProject
-                            ? undefined
-                            : "No hay proyecto nuevo creado para esta tarea."
-                        }
-                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                          !canPublishWithNewProject
-                            ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground opacity-70"
-                            : publishProjectMode === "new"
-                              ? "border-primary bg-primary/10 text-foreground"
-                              : "border-border bg-background hover:bg-muted"
-                        }`}
-                      >
-                        <span className="block font-medium">
-                          Crear proyecto nuevo
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {canPublishWithNewProject
-                            ? "Usa el proyecto propuesto por el agente."
-                            : "No hay proyecto nuevo creado para esta tarea."}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPublishProjectMode("existing");
-                          setPublishError(null);
-                          if (existingProjects.length === 0) {
-                            void loadExistingProjects();
-                          }
-                        }}
-                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
-                          publishProjectMode === "existing"
-                            ? "border-primary bg-primary/10 text-foreground"
-                            : "border-border bg-background hover:bg-muted"
-                        }`}
-                      >
-                        <span className="block font-medium">
-                          Usar proyecto existente
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          Publica la tarea dentro de un proyecto activo.
-                        </span>
-                      </button>
-                    </div>
-
-                    {publishProjectMode === "existing" && (
-                      <div className="mt-3 space-y-2">
-                        <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
-                          <Search className="h-4 w-4 text-muted-foreground" />
-                          <input
-                            value={existingProjectSearch}
-                            onChange={(event) =>
-                              setExistingProjectSearch(event.target.value)
-                            }
-                            placeholder="Buscar proyecto existente"
-                            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void loadExistingProjects()}
-                            disabled={isLoadingExistingProjects}
-                            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                          >
-                            {isLoadingExistingProjects
-                              ? "Cargando..."
-                              : "Actualizar"}
-                          </button>
-                        </div>
-
-                        {existingProjectsError && (
-                          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
-                            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                            <span>{existingProjectsError}</span>
-                          </div>
-                        )}
-
-                        <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
-                          {isLoadingExistingProjects && (
-                            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Cargando proyectos activos...
-                            </div>
-                          )}
-
-                          {!isLoadingExistingProjects &&
-                            filteredExistingProjects.length === 0 && (
-                              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                                No hay proyectos activos para esta búsqueda.
-                              </div>
-                            )}
-
-                          {!isLoadingExistingProjects &&
-                            filteredExistingProjects.map((item) => (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedExistingProjectId(item.id);
-                                  setPublishError(null);
-                                }}
-                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${
-                                  selectedExistingProjectId === item.id
-                                    ? "border-primary bg-primary/10"
-                                    : "border-border bg-background hover:bg-muted"
-                                }`}
-                              >
-                                <span className="block text-sm font-medium text-foreground">
-                                  {item.name}
-                                </span>
-                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                  <span>ID COR: {item.id}</span>
-                                  <span className="inline-flex items-center gap-1">
-                                    <CalendarDays className="h-3 w-3" />
-                                    {formatExistingProjectDate(item.endDate)}
-                                  </span>
-                                  {typeof item.deliverables === "number" && (
-                                    <span>{item.deliverables} entregables</span>
-                                  )}
-                                </span>
-                              </button>
-                            ))}
-
-                          {!isLoadingExistingProjects &&
-                            hasMoreExistingProjects && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void loadExistingProjects({
-                                    page: existingProjectsPage + 1,
-                                    append: true,
-                                  })
-                                }
-                                disabled={isLoadingMoreExistingProjects}
-                                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isLoadingMoreExistingProjects && (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                )}
-                                {isLoadingMoreExistingProjects
-                                  ? "Cargando más..."
-                                  : "Cargar más proyectos"}
-                              </button>
-                            )}
-                        </div>
-
-                        {selectedExistingProject && (
-                          <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-                            Se publicará dentro de{" "}
-                            <span className="font-medium text-foreground">
-                              {selectedExistingProject.name}
-                            </span>
-                            .
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            </div>
-          </details>
+          </div>
             {publishError && <p role="alert" className="mt-2 text-xs text-destructive">{publishError}</p>}
             {/* Action buttons */}
             <div className="mt-3 flex flex-wrap items-center gap-3">

@@ -79,7 +79,7 @@ function dayLabel(timestamp: number) {
   return prefix + date.toLocaleDateString("es", { day: "numeric", month: "short", ...(date.getFullYear() !== today.getFullYear() ? { year: "numeric" as const } : {}) });
 }
 
-export function RequestCommentsSection({ taskId }: { taskId: Id<"tasks"> }) {
+export function RequestCommentsSection({ taskId, appearance = "trello" }: { taskId: Id<"tasks">; appearance?: "trello" | "classic" }) {
   const data = useTaskPanelActivity(taskId);
   const [oldestFirst, setOldestFirst] = useState(false);
   const needsReview = data?.entries.some(e => e.trelloState === "needs_review" || e.corState === "needs_review");
@@ -100,7 +100,7 @@ export function RequestCommentsSection({ taskId }: { taskId: Id<"tasks"> }) {
   }
   roots.sort((a, b) => oldestFirst ? a.createdAt - b.createdAt : b.createdAt - a.createdAt);
   const replyCount = comments.length - roots.length;
-  return <aside aria-labelledby="request-comments-title" className={`${styles.panel} flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-border lg:border-l lg:border-t-0`}>
+  return <aside aria-labelledby="request-comments-title" className={`${styles.panel} ${appearance === "classic" ? styles.classic : ""} flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-border lg:border-l lg:border-t-0`}>
     <div className={styles.header}>
       <MessageSquare className="h-4 w-4 shrink-0" />
       <h3 id="request-comments-title">Comentarios</h3>
