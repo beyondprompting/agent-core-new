@@ -1,11 +1,9 @@
 "use client";
 
-import { TaskFieldEditor } from "../task/TaskFieldEditor";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useAction, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { TaskFieldButton, useTaskFieldButtons } from "../task/TaskFieldButton";
 import { InternalTaskComments } from "./InternalTaskComments";
 import { TaskBriefContent } from "../task/TaskBriefContent";
 import { ProjectBriefContent } from "../task/ProjectBriefContent";
@@ -29,7 +27,6 @@ import {
   Check,
   Search,
   FolderOpen,
-  Sparkles,
   CalendarDays,
   Pencil,
   ChevronDown,
@@ -176,7 +173,6 @@ function EditableTaxonomyItem({
   editable,
   onApply,
 }: EditableTaxonomyItemProps) {
-  const fieldButtons = useTaskFieldButtons();
   const [isEditing, setIsEditing] = useState(false);
   const [editBrandId, setEditBrandId] = useState(brandId);
   const [editSubBrandId, setEditSubBrandId] = useState(subBrandId);
@@ -250,7 +246,6 @@ function EditableTaxonomyItem({
             Categoría
           </p>
           {isEditing ? (
-            <TaskFieldEditor floating={fieldButtons} label="Categoría y marca" value={[selectedBrand?.name || "Sin categoría", selectedSubBrand?.name].filter(Boolean).join(" · ")} onClose={handleCancel} busy={isApplying}>
             <div className="mt-1">
               <select
                 ref={selectRef}
@@ -328,11 +323,6 @@ function EditableTaxonomyItem({
                 </button>
               </div>
             </div>
-            </TaskFieldEditor>
-          ) : fieldButtons ? (
-            <TaskFieldButton label="categoría y marca" editable={editable} onEdit={handleStartEdit}>
-              {[selectedBrand?.name || "Sin categoría", selectedSubBrand?.name].filter(Boolean).join(" · ")}
-            </TaskFieldButton>
           ) : (
             <>
               <p className="text-sm text-foreground mt-0.5 truncate">
@@ -351,7 +341,7 @@ function EditableTaxonomyItem({
             </>
           )}
         </div>
-        {editable && !isEditing && !fieldButtons && (
+        {editable && !isEditing && (
           <button
             type="button"
             onClick={handleStartEdit}
@@ -421,6 +411,8 @@ export function TaskDetailDialog({
     useState(false);
   const [publishProjectMode, setPublishProjectMode] =
     useState<PublishProjectMode>("new");
+  const [isPublishProjectSectionOpen, setIsPublishProjectSectionOpen] =
+    useState(true);
   const [existingProjectSearch, setExistingProjectSearch] = useState("");
   const [existingProjects, setExistingProjects] = useState<
     ExistingProjectOption[]
@@ -440,7 +432,9 @@ export function TaskDetailDialog({
   const [draftBrandId, setDraftBrandId] = useState<string>("");
   const [draftSubBrandId, setDraftSubBrandId] = useState<string>("");
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
-
+  const [activeTab, setActiveTab] = useState<"task" | "project" | "evaluation" | "comments">(
+    "task",
+  );
 
   // === Evaluation state ===
   const [evaluationThreadId, setEvaluationThreadId] = useState<string | null>(
@@ -465,17 +459,6 @@ export function TaskDetailDialog({
   const liveTask = useQuery(api.data.tasks.getTask, { taskId: task._id });
 
   // Tracking: saber si el usuario inició la publicación desde ESTE dialog
-  const projectSectionRef = useRef<HTMLDetailsElement>(null);
-  const evaluationSectionRef = useRef<HTMLDetailsElement>(null);
-  const openSection = (section: HTMLDetailsElement | null) => {
-    if (!section) return;
-    for (const other of [projectSectionRef.current, evaluationSectionRef.current]) {
-      if (other && other !== section) other.open = false;
-    }
-    section.open = true;
-    section.scrollIntoView({ block: "start", behavior: "instant" });
-    section.querySelector("summary")?.focus({ preventScroll: true });
-  };
   const publishInitiatedRef = useRef(false);
   const archiveInitiatedRef = useRef(false);
 
@@ -615,8 +598,6 @@ export function TaskDetailDialog({
     (liveTask as any)?.corProjectMissingInCOR ??
     task.corProjectMissingInCOR,
   );
-
-
   // Detectar cuando la publicación finaliza (synced o error)
   useEffect(() => {
     if (syncStatus === "synced") {
@@ -982,6 +963,7 @@ export function TaskDetailDialog({
         taskId: task._id,
       });
       setEvaluationThreadId(result.evaluationThreadId);
+      setActiveTab("evaluation");
     } catch (error) {
       console.error("Error creando thread de evaluación:", error);
     }
@@ -1168,18 +1150,18 @@ export function TaskDetailDialog({
       />
 
       {/* Dialog */}
-      <div role="dialog" aria-modal="true" aria-label="Detalle de tarea" className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-6xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div role="dialog" aria-modal="true" aria-label="Detalle de tarea" className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-5xl h-[92dvh] max-h-[92dvh] flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">
-              Tarea
+              Detalle de Tarea
             </h2>
             {/* Status badge */}
             <span
               className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)}`}
             >
-              {isPublishedInCOR ? getStatusDisplay(liveTask?.status ?? task.status) : "Sin ingresar a COR"}
+              {getStatusDisplay(task.status)}
             </span>
           </div>
           <button
@@ -1191,16 +1173,74 @@ export function TaskDetailDialog({
           </button>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-rows-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]">
+        {/* Tabs */}
+        <div className="flex flex-wrap border-b border-border flex-shrink-0 px-4 sm:px-6">
+          <button
+            onClick={() => setActiveTab("task")}
+            className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
+              activeTab === "task"
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            📋 Tarea
+            {activeTab === "task" && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+            )}
+          </button>
+          {project && (
+            <button
+              onClick={() => setActiveTab("project")}
+              className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
+                activeTab === "project"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              📁 Proyecto
+              {activeTab === "project" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+              )}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (!evaluationThreadId) {
+                handleStartEvaluation();
+              } else {
+                setActiveTab("evaluation");
+              }
+            }}
+            className={`px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${
+              activeTab === "evaluation"
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            ✨ Evaluación
+            {activeTab === "evaluation" && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+            )}
+          </button>
+          <button type="button" onClick={() => setActiveTab("comments")}
+            aria-pressed={activeTab === "comments"}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${activeTab === "comments" ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+            <MessageCircle className="h-4 w-4" aria-hidden="true" />Comentarios
+            {activeTab === "comments" && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />}
+          </button>
+        </div>
+
         {/* Body — Tab content */}
         <div
-          className="min-h-0 min-w-0 overflow-y-auto overscroll-contain"
+          className={`flex-1 min-h-0 ${
+            activeTab === "comments"
+              ? "flex flex-col overflow-hidden"
+              : activeTab === "evaluation"
+              ? "flex flex-col overflow-hidden"
+              : "overflow-y-auto"
+          }`}
         >
-          <nav aria-label="Secciones de la tarea" className="sticky top-0 z-10 flex flex-wrap gap-2 border-b border-border bg-card px-6 py-3">
-            {project && <button type="button" aria-controls="task-project-section" onClick={() => openSection(projectSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><FolderOpen className="h-4 w-4 text-primary" />Proyecto<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>}
-            <button type="button" aria-controls="task-evaluation-section" onClick={() => openSection(evaluationSectionRef.current)} className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"><Sparkles className="h-4 w-4 text-primary" />Evaluación<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>
-          </nav>
-          {(
+          {activeTab === "task" && (
             <div>
               {taskMissingInCOR && (
                 <div className="mx-6 mt-4 mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1237,9 +1277,26 @@ export function TaskDetailDialog({
                 </div>
               ) : (
                 <>
+                  {/* ID de la task para edición via agente */}
+                  <div className="mx-6 mt-4 mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+                    <span className="font-medium">ID para edición:</span>
+                    <code className="font-mono text-foreground/80 select-all">
+                      {task._id}
+                    </code>
+                    <button
+                      onClick={() => handleCopyId(task._id)}
+                      className="ml-auto p-1 hover:bg-muted rounded transition-colors cursor-pointer"
+                      title="Copiar ID"
+                    >
+                      {copiedId === task._id ? (
+                        <Check className="h-3.5 w-3.5 text-green-500" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
                   <TaskBriefContent
                     task={liveTask ?? task}
-                    layout="board"
                     contentEditable={canEditTaskContent}
                     editable={canEditFromDialog}
                     syncStatus={syncStatus}
@@ -1260,9 +1317,8 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          {project && (
-            <details ref={projectSectionRef} id="task-project-section" className="group mx-6 my-4 scroll-mt-20 rounded-xl border border-border bg-muted/20 p-4">
-              <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden group-open:mb-4"><span className="rounded-lg bg-primary/10 p-2 text-primary"><FolderOpen className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">Proyecto</span><span className="block truncate text-xs text-muted-foreground">{project.name}</span></span><ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" /></summary>
+          {activeTab === "project" && project && (
+            <div className="p-4">
               {projectMissingInCOR && (
                 <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   <span>
@@ -1346,13 +1402,12 @@ export function TaskDetailDialog({
                 editable={canEditFromDialog}
                 syncStatus={project.corSyncStatus || "pending"}
               />
-            </details>
+            </div>
           )}
 
-          {(
-            <details ref={evaluationSectionRef} id="task-evaluation-section" className="group mx-6 my-4 scroll-mt-20 rounded-xl border border-border bg-muted/20 p-4" onToggle={event => { if (event.currentTarget.open && !evaluationThreadId) handleStartEvaluation(); }}>
-              <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden"><span className="rounded-lg bg-primary/10 p-2 text-primary"><Sparkles className="h-5 w-5" /></span><span className="flex-1"><span className="block text-sm font-semibold">Evaluación</span><span className="block text-xs text-muted-foreground">Revisá el brief con el agente evaluador</span></span><ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" /></summary>
-              <div className="mt-3 flex h-[420px] flex-col">
+          {activeTab === "comments" && <InternalTaskComments taskId={task._id} />}
+          {activeTab === "evaluation" && (
+            <>
               <EvaluationMessageList
                 messages={evalMessageList}
                 isThinking={isEvaluatorThinking}
@@ -1366,211 +1421,13 @@ export function TaskDetailDialog({
                 onSubmit={handleSubmitEvaluation}
                 isSubmitting={isSubmittingEval}
               />
-              </div>
-            </details>
-          )}
-          {!taskMissingInCOR && (
-                  <div className="mx-6 mt-4 mb-6 flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-                    <span className="font-medium">ID para edición:</span>
-                    <code className="font-mono text-foreground/80 select-all">
-                      {task._id}
-                    </code>
-                    <button
-                      onClick={() => handleCopyId(task._id)}
-                      className="ml-auto p-1 hover:bg-muted rounded transition-colors cursor-pointer"
-                      title="Copiar ID"
-                    >
-                      {copiedId === task._id ? (
-                        <Check className="h-3.5 w-3.5 text-green-500" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </div>
+            </>
           )}
         </div>
-        <InternalTaskComments taskId={task._id} />
-        </div>
-        {/* Fixed publication footer; controls reuse their existing handlers. */}
-        {showPublishButton && (
-          <footer className="shrink-0 border-t border-border bg-card px-6 py-3">
-          <div className="max-h-[35dvh] overflow-y-auto">
-            {canSelectPublishProject && (
-              <div className="mb-4 rounded-lg border border-border bg-card/70 p-3">
-                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <FolderOpen className="h-4 w-4 text-primary" aria-hidden="true" />
-                  Proyecto en {toolName}
-                </h3>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!canPublishWithNewProject) return;
-                          setPublishProjectMode("new");
-                          setSelectedExistingProjectId(null);
-                          setPublishError(null);
-                        }}
-                        disabled={!canPublishWithNewProject}
-                        title={
-                          canPublishWithNewProject
-                            ? undefined
-                            : "No hay proyecto nuevo creado para esta tarea."
-                        }
-                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                          !canPublishWithNewProject
-                            ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground opacity-70"
-                            : publishProjectMode === "new"
-                              ? "border-primary bg-primary/10 text-foreground"
-                              : "border-border bg-background hover:bg-muted"
-                        }`}
-                      >
-                        <span className="block font-medium">
-                          Crear proyecto nuevo
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {canPublishWithNewProject
-                            ? "Usa el proyecto propuesto por el agente."
-                            : "No hay proyecto nuevo creado para esta tarea."}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPublishProjectMode("existing");
-                          setPublishError(null);
-                          if (existingProjects.length === 0) {
-                            void loadExistingProjects();
-                          }
-                        }}
-                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
-                          publishProjectMode === "existing"
-                            ? "border-primary bg-primary/10 text-foreground"
-                            : "border-border bg-background hover:bg-muted"
-                        }`}
-                      >
-                        <span className="block font-medium">
-                          Usar proyecto existente
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          Publica la tarea dentro de un proyecto activo.
-                        </span>
-                      </button>
-                    </div>
 
-                    {publishProjectMode === "existing" && (
-                      <div className="mt-3 space-y-2">
-                        <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
-                          <Search className="h-4 w-4 text-muted-foreground" />
-                          <input
-                            value={existingProjectSearch}
-                            onChange={(event) =>
-                              setExistingProjectSearch(event.target.value)
-                            }
-                            placeholder="Buscar proyecto existente"
-                            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void loadExistingProjects()}
-                            disabled={isLoadingExistingProjects}
-                            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                          >
-                            {isLoadingExistingProjects
-                              ? "Cargando..."
-                              : "Actualizar"}
-                          </button>
-                        </div>
-
-                        {existingProjectsError && (
-                          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
-                            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                            <span>{existingProjectsError}</span>
-                          </div>
-                        )}
-
-                        <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
-                          {isLoadingExistingProjects && (
-                            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Cargando proyectos activos...
-                            </div>
-                          )}
-
-                          {!isLoadingExistingProjects &&
-                            filteredExistingProjects.length === 0 && (
-                              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                                No hay proyectos activos para esta búsqueda.
-                              </div>
-                            )}
-
-                          {!isLoadingExistingProjects &&
-                            filteredExistingProjects.map((item) => (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedExistingProjectId(item.id);
-                                  setPublishError(null);
-                                }}
-                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${
-                                  selectedExistingProjectId === item.id
-                                    ? "border-primary bg-primary/10"
-                                    : "border-border bg-background hover:bg-muted"
-                                }`}
-                              >
-                                <span className="block text-sm font-medium text-foreground">
-                                  {item.name}
-                                </span>
-                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                  <span>ID COR: {item.id}</span>
-                                  <span className="inline-flex items-center gap-1">
-                                    <CalendarDays className="h-3 w-3" />
-                                    {formatExistingProjectDate(item.endDate)}
-                                  </span>
-                                  {typeof item.deliverables === "number" && (
-                                    <span>{item.deliverables} entregables</span>
-                                  )}
-                                </span>
-                              </button>
-                            ))}
-
-                          {!isLoadingExistingProjects &&
-                            hasMoreExistingProjects && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void loadExistingProjects({
-                                    page: existingProjectsPage + 1,
-                                    append: true,
-                                  })
-                                }
-                                disabled={isLoadingMoreExistingProjects}
-                                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isLoadingMoreExistingProjects && (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                )}
-                                {isLoadingMoreExistingProjects
-                                  ? "Cargando más..."
-                                  : "Cargar más proyectos"}
-                              </button>
-                            )}
-                        </div>
-
-                        {selectedExistingProject && (
-                          <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-                            Se publicará dentro de{" "}
-                            <span className="font-medium text-foreground">
-                              {selectedExistingProject.name}
-                            </span>
-                            .
-                          </div>
-                        )}
-                      </div>
-                    )}
-              </div>
-            )}
-
+        {/* Footer — Publish action (hidden on evaluation tab) */}
+        {showPublishButton && (activeTab === "task" || activeTab === "project") && (
+          <div className="max-h-[35dvh] overflow-y-auto px-6 py-4 border-t border-border flex-shrink-0 bg-muted/30">
             {/* Sync status info */}
             {syncStatus === "synced" && (
               <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 mb-3">
@@ -1741,11 +1598,205 @@ export function TaskDetailDialog({
               </p>
             )}
 
+            {canSelectPublishProject && (
+              <div className="mb-4 rounded-lg border border-border bg-card/70 p-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsPublishProjectSectionOpen((open) => !open)
+                  }
+                  className={`flex w-full cursor-pointer items-center justify-between gap-3 text-left text-sm font-medium text-foreground outline-none transition-colors hover:text-primary ${
+                    isPublishProjectSectionOpen ? "mb-2" : ""
+                  }`}
+                  aria-expanded={isPublishProjectSectionOpen}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <FolderOpen className="h-4 w-4 flex-shrink-0 text-primary" />
+                    <span className="truncate">Proyecto en {toolName}</span>
+                  </span>
+                  {isPublishProjectSectionOpen ? (
+                    <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  )}
+                </button>
 
-          </div>
-            {publishError && <p role="alert" className="mt-2 text-xs text-destructive">{publishError}</p>}
+                {isPublishProjectSectionOpen && (
+                  <>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!canPublishWithNewProject) return;
+                          setPublishProjectMode("new");
+                          setSelectedExistingProjectId(null);
+                          setPublishError(null);
+                        }}
+                        disabled={!canPublishWithNewProject}
+                        title={
+                          canPublishWithNewProject
+                            ? undefined
+                            : "No hay proyecto nuevo creado para esta tarea."
+                        }
+                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                          !canPublishWithNewProject
+                            ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground opacity-70"
+                            : publishProjectMode === "new"
+                              ? "border-primary bg-primary/10 text-foreground"
+                              : "border-border bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <span className="block font-medium">
+                          Crear proyecto nuevo
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {canPublishWithNewProject
+                            ? "Usa el proyecto propuesto por el agente."
+                            : "No hay proyecto nuevo creado para esta tarea."}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPublishProjectMode("existing");
+                          setPublishError(null);
+                          if (existingProjects.length === 0) {
+                            void loadExistingProjects();
+                          }
+                        }}
+                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
+                          publishProjectMode === "existing"
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <span className="block font-medium">
+                          Usar proyecto existente
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          Publica la tarea dentro de un proyecto activo.
+                        </span>
+                      </button>
+                    </div>
+
+                    {publishProjectMode === "existing" && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                          <Search className="h-4 w-4 text-muted-foreground" />
+                          <input
+                            value={existingProjectSearch}
+                            onChange={(event) =>
+                              setExistingProjectSearch(event.target.value)
+                            }
+                            placeholder="Buscar proyecto existente"
+                            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void loadExistingProjects()}
+                            disabled={isLoadingExistingProjects}
+                            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            {isLoadingExistingProjects
+                              ? "Cargando..."
+                              : "Actualizar"}
+                          </button>
+                        </div>
+
+                        {existingProjectsError && (
+                          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span>{existingProjectsError}</span>
+                          </div>
+                        )}
+
+                        <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                          {isLoadingExistingProjects && (
+                            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Cargando proyectos activos...
+                            </div>
+                          )}
+
+                          {!isLoadingExistingProjects &&
+                            filteredExistingProjects.length === 0 && (
+                              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                                No hay proyectos activos para esta búsqueda.
+                              </div>
+                            )}
+
+                          {!isLoadingExistingProjects &&
+                            filteredExistingProjects.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedExistingProjectId(item.id);
+                                  setPublishError(null);
+                                }}
+                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${
+                                  selectedExistingProjectId === item.id
+                                    ? "border-primary bg-primary/10"
+                                    : "border-border bg-background hover:bg-muted"
+                                }`}
+                              >
+                                <span className="block text-sm font-medium text-foreground">
+                                  {item.name}
+                                </span>
+                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  <span>ID COR: {item.id}</span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <CalendarDays className="h-3 w-3" />
+                                    {formatExistingProjectDate(item.endDate)}
+                                  </span>
+                                  {typeof item.deliverables === "number" && (
+                                    <span>{item.deliverables} entregables</span>
+                                  )}
+                                </span>
+                              </button>
+                            ))}
+
+                          {!isLoadingExistingProjects &&
+                            hasMoreExistingProjects && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void loadExistingProjects({
+                                    page: existingProjectsPage + 1,
+                                    append: true,
+                                  })
+                                }
+                                disabled={isLoadingMoreExistingProjects}
+                                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isLoadingMoreExistingProjects && (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                )}
+                                {isLoadingMoreExistingProjects
+                                  ? "Cargando más..."
+                                  : "Cargar más proyectos"}
+                              </button>
+                            )}
+                        </div>
+
+                        {selectedExistingProject && (
+                          <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                            Se publicará dentro de{" "}
+                            <span className="font-medium text-foreground">
+                              {selectedExistingProject.name}
+                            </span>
+                            .
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Action buttons */}
-            <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3">
               {/* Show publish button only when task has never been published, or publish failed (no corTaskId yet) */}
               {syncStatus !== "synced" &&
                 syncStatus !== "retrying" &&
@@ -1851,9 +1902,8 @@ export function TaskDetailDialog({
                 </button>
               )}
             </div>
-          </footer>
+          </div>
         )}
-
       </div>
 
       <ConfirmDialog
