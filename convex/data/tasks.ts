@@ -1,3 +1,4 @@
+import { notifyExternalTaskCreated } from "../lib/taskCreationNotifications";
 import { notifyTaskComment } from "../lib/commentNotifications";
 // convex/data/tasks.ts
 // Funciones Convex para manejar tasks/requerimientos
@@ -2678,6 +2679,7 @@ export const createProjectAndTask = internalMutation({
       corClientId: args.taskCorClientId,
       corClientName: args.taskCorClientName,
     });
+    await notifyExternalTaskCreated(ctx, taskId);
     console.log(`[CreateProjectAndTask] ✅ Task creada: ${taskId}`);
 
     const attachedAt = Date.now();

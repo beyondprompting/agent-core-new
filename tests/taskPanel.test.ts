@@ -4,7 +4,10 @@ import { getFunctionName } from "convex/server";
 import * as panel from "../convex/data/taskPanel";
 import * as sender from "../convex/data/taskPanelSync";
 import * as tasks from "../convex/data/tasks";
+import * as history from "../convex/data/notificationHistory";
 import * as notifications from "../convex/data/commentNotifications";
+import * as taskNotifications from "../convex/data/taskCreationNotifications";
+import { notifyExternalTaskCreated, taskCreationEmail } from "../convex/lib/taskCreationNotifications";
 import { notifyTaskComment } from "../convex/lib/commentNotifications";
 import { clientConfig } from "../config/tenant.config";
 
@@ -23,17 +26,31 @@ function fixture() {
     patch: async (id: string, data: any) => { const row = rows.get(id); assert.ok(row); for (const [key, value] of Object.entries(data)) { if (value === undefined) delete row[key]; else row[key] = value; } },
     query: (table: string) => {
       const filters: ((r: any) => boolean)[] = [];
+      let descending = false;
       const builder: any = {
         eq: (key: string, value: any) => { filters.push(r => r[key] === value); return builder; },
+        lt: (key: string, value: any) => { filters.push(r => r[key] < value); return builder; },
+        gt: (key: string, value: any) => { filters.push(r => r[key] > value); return builder; },
+        gte: (key: string, value: any) => { filters.push(r => r[key] >= value); return builder; },
         lte: (key: string, value: any) => { filters.push(r => r[key] <= value); return builder; },
       };
       const result = () => Array.from(rows.values()).filter(r => r._table === table && filters.every(f => f(r)));
       const query: any = { withIndex: (_: string, build: any) => { build(builder); return query; }, collect: async () => result(), unique: async () => { assert.ok(result().length < 2); return result()[0] ?? null; }, first: async () => result()[0] ?? null, take: async (n: number) => result().slice(0,n) };
+      query.order = (direction: string) => { descending = direction === "desc"; return query; };
+      query[Symbol.asyncIterator] = async function* () {
+        const sorted = result().sort((a, b) => {
+          for (const key of ["createdAt", "_creationTime", "_id"]) {
+            if (a[key] !== b[key]) return (a[key] < b[key] ? -1 : 1) * (descending ? -1 : 1);
+          }
+          return 0;
+        });
+        yield* sorted;
+      };
       return query;
     },
   };
   const ctx: any = { db, auth: { getUserIdentity: async () => ({ subject: "user1|session" }) }, storage: { getUrl: async (id: string) => `https://files.example/${id}`, get: async () => new Blob(["test"], { type: "application/pdf" }) }, scheduler: { runAfter: async (...args: any[]) => { scheduled.push(args); } } };
-  const modules: any = { "data/taskPanel": panel, "data/taskPanelSync": sender, "data/tasks": tasks };
+  const modules: any = { "data/taskPanel": panel, "data/taskPanelSync": sender, "data/tasks": tasks, "data/taskCreationNotifications": taskNotifications };
   const run = async (ref: any, args: any) => { const [module, name] = getFunctionName(ref).split(":"); return modules[module][name]._handler(ctx, args); };
   ctx.runQuery = run; ctx.runMutation = run;
   const upload = (id = "upload1", patch: any = {}) => put("taskPanelUploads", { _id: id, taskId: "task1", userId: "user1", key: id, filename: `${id}.pdf`, mimeType: "application/pdf", size: 4, state: "ready", fileId: `file-${id}`, storageId: `storage-${id}`, createdAt: 1, ...patch });
@@ -389,4 +406,138 @@ test("internal replies notify the external author; imported comments never notif
   assert.equal(rows[0].messageIds.filter((id: string) => id === "imported").length, 1);
   f.rows.get("task1").convexStatus = "deleted";
   assert.deepEqual(await f.unread(), []);
+});
+
+test("new external tasks notify only authorized internals, once per task and recipient", async () => {
+  const f = notificationFixture();
+  f.put("clientUserAssignments", { _id: "other-client", userId: "unrelated", clientId: "client2" });
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  const rows = [...f.rows.values()].filter(r => r._table === "taskCreationNotifications");
+  assert.deepEqual(rows.map(r => r.userId).sort(), ["internal1", "internal2"]);
+  f.as("user1"); assert.deepEqual(await f.call(taskNotifications.unread, {}), []);
+  f.as("internal1"); assert.equal((await f.call(taskNotifications.unread, {})).length, 1);
+  await f.call(taskNotifications.markRead, { taskId: "task1" });
+  assert.deepEqual(await f.call(taskNotifications.unread, {}), []);
+  f.as("internal2"); assert.equal((await f.call(taskNotifications.unread, {})).length, 1);
+  f.rows.delete("assignment-internal2");
+  assert.deepEqual(await f.call(taskNotifications.unread, {}), []);
+  await f.call(taskNotifications.markRead, { taskId: "task1" });
+  const revoked = rows.find(r => r.userId === "internal2");
+  assert.equal(revoked.read, false);
+  assert.equal(await f.call(taskNotifications.claimEmail, { id: revoked._id }), null);
+  assert.equal(revoked.emailState, "cancelled");
+  const other = notificationFixture(); other.rows.get("task1").createdBy = "internal1";
+  await notifyExternalTaskCreated(other.ctx, "task1" as any);
+  assert.equal([...other.rows.values()].filter(r => r._table === "taskCreationNotifications").length, 0);
+});
+
+test("creation email retries keep payload and idempotency key, suppress concurrent sends and respect expiry", async () => {
+  const f = notificationFixture();
+  f.rows.get("internal1").email = "internal@example.com";
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  const row = [...f.rows.values()].find(r => r._table === "taskCreationNotifications" && r.userId === "internal1");
+  const env = { APP_URL: process.env.APP_URL, RESEND_API_KEY: process.env.RESEND_API_KEY };
+  const originalFetch = globalThis.fetch;
+  const calls: any[] = [];
+  try {
+    process.env.APP_URL = "https://app.example.com"; process.env.RESEND_API_KEY = "test-only";
+    globalThis.fetch = (async (_url: any, init: any) => { calls.push(init); return new Response(JSON.stringify(calls.length === 1 ? { name: "rate_limit_exceeded" } : { id: "email-1" }), { status: calls.length === 1 ? 429 : 200 }); }) as typeof fetch;
+    await f.call(taskNotifications.sendEmail, { id: row._id });
+    assert.equal(row.emailState, "pending"); assert.equal(calls.length, 1);
+    await f.call(taskNotifications.sendEmail, { id: row._id });
+    assert.equal(calls.length, 1); // wait for backoff
+    row.nextAttemptAt = 0; f.rows.get("task1").title = "Edited after first attempt";
+    await f.call(taskNotifications.sendEmail, { id: row._id });
+    assert.equal(row.emailState, "sent"); assert.equal(row.resendId, "email-1");
+    assert.equal(calls[0].body, calls[1].body);
+    assert.equal(calls[0].headers["Idempotency-Key"], calls[1].headers["Idempotency-Key"]);
+    await f.call(taskNotifications.sendEmail, { id: row._id }); assert.equal(calls.length, 2);
+    row.emailState = "sending"; row.nextAttemptAt = Date.now() + 120000;
+    assert.equal(await f.call(taskNotifications.claimEmail, { id: row._id }), null);
+    row.nextAttemptAt = 0; row.firstAttemptAt = Date.now() - 23 * 60 * 60 * 1000;
+    assert.equal(await f.call(taskNotifications.claimEmail, { id: row._id }), null);
+    assert.equal(row.emailState, "failed");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
+test("email configuration waits safely; changed address and revoked rights prevent delivery", async () => {
+  const f = notificationFixture(); f.rows.get("internal1").email = "internal@example.com";
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  const row = [...f.rows.values()].find(r => r._table === "taskCreationNotifications" && r.userId === "internal1");
+  const env = { APP_URL: process.env.APP_URL, RESEND_API_KEY: process.env.RESEND_API_KEY };
+  try {
+    process.env.APP_URL = "http://app.example.com"; process.env.RESEND_API_KEY = "test-only";
+    assert.equal(await f.call(taskNotifications.claimEmail, { id: row._id }), null);
+    assert.equal(row.emailState, "pending"); assert.equal(row.attempts, 0);
+    process.env.APP_URL = "https://app.example.com"; row.nextAttemptAt = 0;
+    const claim = await f.call(taskNotifications.claimEmail, { id: row._id }); assert.ok(claim);
+    await f.call(taskNotifications.finishEmail, { id: row._id, attempt: claim.attempt + 1, resendId: "stale", retry: false });
+    assert.equal(row.emailState, "sending");
+    row.nextAttemptAt = 0; f.rows.get("internal1").email = "changed@example.com";
+    assert.equal(await f.call(taskNotifications.claimEmail, { id: row._id }), null);
+    assert.equal(row.emailState, "cancelled");
+  } finally {
+    for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
+test("creation email escapes untrusted content and links directly to authenticated task tab", () => {
+  const args = { from: "sender@example.com", to: "recipient@example.com", baseUrl: "https://app.example.com", taskId: "task1", title: "<script>alert(1)</script>", author: "Someone & another", client: "Client" };
+  const email = taskCreationEmail(args);
+  assert.ok(!email.html.includes("<script>")); assert.ok(email.html.includes("&lt;script&gt;"));
+  assert.ok(email.text.includes("https://app.example.com/workspace/control-panel?taskId=task1&tab=task"));
+  const localEmail = taskCreationEmail({ ...args, baseUrl: "http://localhost:3000" });
+  assert.ok(localEmail.text.includes("http://localhost:3000/workspace/control-panel?taskId=task1&tab=task"));
+  for (const baseUrl of ["http://app.example.com", "http://localhost.evil.example", "javascript:alert(1)"]) assert.throws(() => taskCreationEmail({ ...args, baseUrl }));
+});
+
+test("notification history paginates mixed read/unread records, survives reads, and rechecks access", async () => {
+  const f = notificationFixture();
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  const created = [...f.rows.values()].find(r => r._table === "taskCreationNotifications" && r.userId === "internal2");
+  created.createdAt = 105;
+  for (let i = 0; i < 11; i++) {
+    f.put("taskMessages", { _id: `history-message-${i}`, taskId: "task1", userId: "internal1", source: "internal_panel" });
+    f.put("commentNotifications", { _id: `history-${i}`, userId: "internal2", taskId: "task1", messageId: `history-message-${i}`, read: i % 2 === 0, createdAt: 100 + Math.floor(i / 2) });
+  }
+  // Invalid records cannot fill a page or leak titles.
+  f.put("commentNotifications", { _id: "missing-message", userId: "internal2", taskId: "task1", messageId: "missing", read: false, createdAt: 200 });
+  f.as("internal2");
+  const list = (cursor: string | null = null) => f.call(history.list, { paginationOpts: { numItems: 5, cursor } });
+  const first = await list();
+  assert.equal(first.page.length, 5);
+  assert.ok(first.page.some((r: any) => r.read)); assert.ok(first.page.some((r: any) => !r.read));
+  await f.call(taskNotifications.markRead, { taskId: "task1" });
+  const afterRead = await list();
+  assert.deepEqual(afterRead.page.map((r: any) => r.id), first.page.map((r: any) => r.id));
+  assert.equal(afterRead.page.find((r: any) => r.kind === "task").read, true);
+  const second = await list(first.continueCursor);
+  assert.equal(second.page.length, 5);
+  const third = await list(second.continueCursor);
+  const all = [...first.page, ...second.page, ...third.page];
+  assert.equal(all.length, 12); assert.equal(new Set(all.map(r => r.id)).size, 12);
+  assert.ok(all.every((r, i) => i === 0 || all[i - 1].createdAt >= r.createdAt));
+  if (!third.isDone) assert.equal((await list(third.continueCursor)).isDone, true);
+  f.rows.delete("assignment-internal2");
+  assert.deepEqual((await list()).page, []);
+  assert.deepEqual((await list(first.continueCursor)).page, []);
+  f.as("otherExternal"); assert.deepEqual((await list()).page, []);
+  f.ctx.auth.getUserIdentity = async () => null;
+  assert.deepEqual((await list()).page, []);
+});
+
+test("external notification history retains read comments only for the external task owner", async () => {
+  const f = notificationFixture(); f.as("internal1"); await f.post("history-comment");
+  f.as("user1");
+  const [group] = await f.unread();
+  await f.call(notifications.markRead, { taskId: "task1", messageIds: group.messageIds });
+  const args = { paginationOpts: { numItems: 5, cursor: null } };
+  const result = await f.call(history.list, args);
+  assert.equal(result.page.length, 1); assert.equal(result.page[0].read, true); assert.equal(result.page[0].external, true);
+  f.rows.get("task1").createdBy = "otherExternal";
+  assert.deepEqual((await f.call(history.list, args)).page, []);
 });

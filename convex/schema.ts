@@ -10,8 +10,20 @@ export default defineSchema({
     userId: v.id("users"), taskId: v.id("tasks"), messageId: v.id("taskMessages"),
     read: v.boolean(), createdAt: v.number(),
   }).index("by_user_read", ["userId", "read"])
+    .index("by_user_created", ["userId", "createdAt"])
     .index("by_user_task_read", ["userId", "taskId", "read"])
     .index("by_user_message", ["userId", "messageId"]),
+
+  taskCreationNotifications: defineTable({
+    userId: v.id("users"), taskId: v.id("tasks"), read: v.boolean(), createdAt: v.number(),
+    emailState: v.union(v.literal("pending"), v.literal("sending"), v.literal("sent"), v.literal("failed"), v.literal("cancelled")),
+    attempts: v.number(), nextAttemptAt: v.number(), firstAttemptAt: v.optional(v.number()),
+    emailPayload: v.optional(v.string()), emailError: v.optional(v.string()),
+    resendId: v.optional(v.string()), emailSentAt: v.optional(v.number()),
+  }).index("by_user_read", ["userId", "read"])
+    .index("by_user_created", ["userId", "createdAt"])
+    .index("by_user_task", ["userId", "taskId"])
+    .index("by_email_due", ["emailState", "nextAttemptAt"]),
 
   // Workspaces - uno por usuario
   workspaces: defineTable({

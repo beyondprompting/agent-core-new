@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useAction, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { useReadTaskCreation } from "../notifications/useReadTaskCreation";
 import { InternalTaskComments } from "./InternalTaskComments";
 import { TaskBriefContent } from "../task/TaskBriefContent";
 import { ProjectBriefContent } from "../task/ProjectBriefContent";
@@ -439,7 +440,11 @@ export function TaskDetailDialog({
     params.get("tab") === "comments" ? "comments" : "task",
   );
 
-  useEffect(() => { if (params.get("tab") === "comments") setActiveTab("comments"); }, [params]);
+  useEffect(() => {
+    const tab = params.get("tab");
+    if (tab === "comments" || tab === "task") setActiveTab(tab);
+  }, [params]);
+  useReadTaskCreation(task._id, activeTab === "task");
 
   // === Evaluation state ===
   const [evaluationThreadId, setEvaluationThreadId] = useState<string | null>(
