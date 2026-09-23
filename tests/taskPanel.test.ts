@@ -12,9 +12,9 @@ import { notifyExternalTaskCreated, taskCreationEmail } from "../convex/lib/task
 import { notifyTaskComment } from "../convex/lib/commentNotifications";
 import { clientConfig } from "../config/tenant.config";
 
-const originalRequestsClientId = clientConfig.ui.externalRequestsClientId;
-test.beforeEach(() => { clientConfig.ui.externalRequestsClientId = "client1"; });
-test.afterEach(() => { clientConfig.ui.externalRequestsClientId = originalRequestsClientId; });
+const originalRequestsClientIds = clientConfig.ui.externalRequestsClientIds;
+test.beforeEach(() => { clientConfig.ui.externalRequestsClientIds = ["client1"]; });
+test.afterEach(() => { clientConfig.ui.externalRequestsClientIds = originalRequestsClientIds; });
 
 // A small transactional Convex context double; tests run real handlers/helpers.
 function fixture() {
@@ -559,7 +559,7 @@ test("external requests and notifications require the configured client, regardl
   f.as("internal1"); await f.post("enabled-client");
   f.as("user1"); assert.equal((await f.unread()).length, 1);
   // Existing read and unread records disappear after changing the configured client.
-  clientConfig.ui.externalRequestsClientId = "client2";
+  clientConfig.ui.externalRequestsClientIds = ["client2"];
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), false);
   assert.deepEqual(await f.unread(), []);
   assert.deepEqual((await f.call(history.list, { paginationOpts: { numItems: 5, cursor: null } })).page, []);
@@ -569,14 +569,14 @@ test("external requests and notifications require the configured client, regardl
   f.as("internal1"); await assert.rejects(f.post("disabled-client"), /acceso/);
   assert.equal([...f.rows.values()].filter(r => r._table === "commentNotifications" && r.userId === "user1").length, 1);
   f.as("internal2"); assert.deepEqual(await f.unread(), []);
-  clientConfig.ui.externalRequestsClientId = "client1";
+  clientConfig.ui.externalRequestsClientIds = ["client1"];
   f.rows.get("task1").clientBrandId = undefined;
   f.rows.get("task1").clientId = "client2";
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), false);
   f.rows.get("task1").clientId = "client1";
   f.rows.delete("assignment-user1");
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), false);
-  clientConfig.ui.externalRequestsClientId = "";
+  clientConfig.ui.externalRequestsClientIds = [];
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), false);
 });
 
@@ -586,7 +586,7 @@ test("internal comments tab requires the enabled task client and existing task p
   await f.post("allowed");
   f.as("wrongBrandUser");
   assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
-  f.as("internal1"); clientConfig.ui.externalRequestsClientId = "client2";
+  f.as("internal1"); clientConfig.ui.externalRequestsClientIds = ["client2"];
   assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
   assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
   await assert.rejects(f.call(panel.detail, { taskId: "task1" }), /acceso/);
@@ -595,6 +595,32 @@ test("internal comments tab requires the enabled task client and existing task p
   assert.ok(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }));
   await notifyExternalTaskCreated(f.ctx, "task1" as any);
   assert.equal((await f.call(taskNotifications.unread, {})).length, 1);
-  clientConfig.ui.externalRequestsClientId = "";
+  clientConfig.ui.externalRequestsClientIds = [];
   assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
+});
+
+test("multiple enabled clients preserve per-client assignment, task ownership and notification access", async () => {
+  const f = notificationFixture();
+  clientConfig.ui.externalRequestsClientIds = ["client1", " client2 ", "client1", ""];
+  f.put("corClients", { _id: "client2", corClientId: 100 });
+  f.put("clientUserAssignments", { _id: "internal-client2", clientId: "client2", userId: "internal1" });
+  f.put("tasks", { ...f.rows.get("task1"), _id: "task2", clientBrandId: undefined, clientId: "client2", corClientId: 100 });
+  f.as("user1");
+  assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), true);
+  assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), true);
+  assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task2")), false);
+  f.put("clientUserAssignments", { _id: "external-client2", clientId: "client2", userId: "user1", brandId: "any-category" });
+  assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task2")), true);
+  f.as("internal1");
+  assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), true);
+  assert.equal(await f.call(panel.canAccessComments, { taskId: "task2" }), true);
+  await f.call(panel.submit, { taskId: "task2", key: "multi-client", text: "Hello", uploadIds: [] });
+  f.as("user1"); assert.equal((await f.unread())[0].taskId, "task2");
+  f.rows.delete("external-client2");
+  assert.deepEqual(await f.unread(), []);
+  f.rows.get("task2").createdBy = "otherExternal";
+  assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task2")), false);
+  clientConfig.ui.externalRequestsClientIds = [];
+  assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), false);
+  f.as("internal1"); assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
 });
