@@ -215,7 +215,7 @@ const activeTenantConfig: TenantConfig = {
     showPublishToExternalTool: true,
     externalToolName: "COR",
     trelloPublishCorClientIds: [197246, 178768],
-    externalRequestsClientIds: ["md7b7fapbpxvqy3e1jv5rzm50d8439d5", "md74zjh7mfna884qsvce3warn9856dga", "md74mrcjkfz3638qcashjfrqqd85603y"],
+    externalRequestsClientIds: ["md7b7fapbpxvqy3e1jv5rzm50d8439d5", "md74zjh7mfna884qsvce3warn9856dga"],
     sidebarWidth: "280px",
   },
 };
