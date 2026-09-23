@@ -1,4 +1,6 @@
 "use client";
+import { CommentUnreadBadge } from "../notifications/CommentNotifications";
+import { useReadVisibleComments } from "../notifications/useReadVisibleComments";
 import { useState } from "react";
 import { MessageSquare, Loader2, Reply, ListFilter } from "lucide-react";
 import { TaskCommentBody } from "./TaskCommentBody";
@@ -45,7 +47,7 @@ function CommentContent({ comment }: { comment: Comment }) {
   return <div className="flex min-w-0 gap-3">
     <div aria-hidden="true" className={`${styles.avatar} ${comment.own ? styles.own : ""}`}>{initials}</div>
     <div className="min-w-0 flex-1">
-      <div className={styles.meta}>
+      <div className={styles.meta} data-comment-id={comment.id}>
         <span className={styles.name}>{name}</span>
         <time dateTime={date.toISOString()} title={date.toLocaleString("es")} className={styles.time}>{date.toLocaleDateString("es")} · {date.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}</time>
         {comment.isClient && <span className={styles.client}>CLIENTE</span>}
@@ -80,6 +82,7 @@ function dayLabel(timestamp: number) {
 }
 
 export function RequestCommentsSection({ taskId, appearance = "trello" }: { taskId: Id<"tasks">; appearance?: "trello" | "classic" }) {
+  const readRoot = useReadVisibleComments(taskId);
   const data = useTaskPanelActivity(taskId);
   const [oldestFirst, setOldestFirst] = useState(false);
   const needsReview = data?.entries.some(e => e.trelloState === "needs_review" || e.corState === "needs_review");
@@ -100,10 +103,10 @@ export function RequestCommentsSection({ taskId, appearance = "trello" }: { task
   }
   roots.sort((a, b) => oldestFirst ? a.createdAt - b.createdAt : b.createdAt - a.createdAt);
   const replyCount = comments.length - roots.length;
-  return <aside aria-labelledby="request-comments-title" className={`${styles.panel} ${appearance === "classic" ? styles.classic : ""} flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-border lg:border-l lg:border-t-0`}>
+  return <aside ref={readRoot} aria-labelledby="request-comments-title" className={`${styles.panel} ${appearance === "classic" ? styles.classic : ""} flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-border lg:border-l lg:border-t-0`}>
     <div className={styles.header}>
       <MessageSquare className="h-4 w-4 shrink-0" />
-      <h3 id="request-comments-title">Comentarios</h3>
+      <h3 id="request-comments-title">Comentarios <CommentUnreadBadge taskId={taskId} /></h3>
       {data && <span className={styles.count}>{roots.length} {roots.length === 1 ? "hilo" : "hilos"} · {replyCount} {replyCount === 1 ? "respuesta" : "respuestas"}</span>}
     </div>
     <div className={styles.toolbar}><label className="flex items-center gap-1.5"><ListFilter className="h-3 w-3 text-muted-foreground" /><select aria-label="Orden de los comentarios" value={oldestFirst ? "oldest" : "newest"} onChange={event => setOldestFirst(event.target.value === "oldest")} className={styles.sort}><option value="newest">Más recientes</option><option value="oldest">Más antiguos</option></select></label></div>

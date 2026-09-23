@@ -59,6 +59,7 @@ function ControlPanelContent() {
   const closeTask = () => {
     const next = new URLSearchParams(params.toString());
     next.delete("taskId");
+    next.delete("tab");
     router.replace(`${pathname}${next.size ? `?${next}` : ""}`, { scroll: false });
   };
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(

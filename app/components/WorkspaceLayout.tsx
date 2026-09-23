@@ -1,5 +1,6 @@
 "use client";
 
+import { CommentNotificationBell } from "./notifications/CommentNotifications";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -420,6 +421,7 @@ export function WorkspaceLayout({
               {clientConfig.brand.name}
             </h2>
           </div>
+          <CommentNotificationBell />
         </header>
 
         {/* Tab Navigation — Chat / Panel de Control */}

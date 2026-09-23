@@ -6,6 +6,13 @@ import { v } from "convex/values";
 export default defineSchema({
   ...authTables,
 
+  commentNotifications: defineTable({
+    userId: v.id("users"), taskId: v.id("tasks"), messageId: v.id("taskMessages"),
+    read: v.boolean(), createdAt: v.number(),
+  }).index("by_user_read", ["userId", "read"])
+    .index("by_user_task_read", ["userId", "taskId", "read"])
+    .index("by_user_message", ["userId", "messageId"]),
+
   // Workspaces - uno por usuario
   workspaces: defineTable({
     ownerId: v.id("users"),

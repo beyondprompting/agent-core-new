@@ -1,3 +1,4 @@
+import { notifyTaskComment } from "../lib/commentNotifications";
 import { resolvePanelComment } from "../lib/taskPanelComment";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
@@ -96,6 +97,7 @@ export const submit = mutation({
     if (text) {
       const messageId = await ctx.db.insert("taskMessages", { taskId: task._id, replyTo: args.replyTo, panelEntryId: entryId, userId: userId!, source: external ? "external_panel" : "internal_panel", message: resolvePanelComment(text, commentFiles), trelloSyncStatus: "pending", corMessageSyncStatus: task.corTaskId ? "pending" : "pending_cor_task", createdAt: Date.now(), updatedAt: Date.now() });
       await ctx.db.patch(entryId, { messageId });
+      await notifyTaskComment(ctx, messageId);
     }
     await ctx.scheduler.runAfter(0, internal.data.taskPanelSync.sync, { entryId });
     return entryId;

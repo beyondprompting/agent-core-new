@@ -1,5 +1,6 @@
 "use client";
 
+import { CommentNotificationBell } from "@/app/components/notifications/CommentNotifications";
 import { useEffect } from "react";
 import { useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
@@ -26,7 +27,7 @@ export default function RequestsLayout({ children }: { children: React.ReactNode
     <div className="flex h-dvh flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-4 sm:px-8">
         <BrandLogo />
-        <div className="flex items-center gap-3"><UserMenu /><SwitchThemeButton /></div>
+        <div className="flex items-center gap-3"><CommentNotificationBell /><UserMenu /><SwitchThemeButton /></div>
       </header>
       <TopNavigation />
       <main className="min-h-0 flex-1 overflow-hidden">{children}</main>

@@ -4,6 +4,8 @@ import { getFunctionName } from "convex/server";
 import * as panel from "../convex/data/taskPanel";
 import * as sender from "../convex/data/taskPanelSync";
 import * as tasks from "../convex/data/tasks";
+import * as notifications from "../convex/data/commentNotifications";
+import { notifyTaskComment } from "../convex/lib/commentNotifications";
 import { clientConfig } from "../config/tenant.config";
 
 // A small transactional Convex context double; tests run real handlers/helpers.
@@ -15,6 +17,7 @@ function fixture() {
   put("approvedExternalUsers", { _id: "external1", userId: "user1" });
   put("tasks", { _id: "task1", createdBy: "user1", source: "external", threadId: "thread1", corClientId: clientConfig.ui.trelloPublishCorClientIds[0], title: "Original", description: "Original brief", status: "nueva" });
   const db: any = {
+    normalizeId: (_table: string, id: string) => id || null,
     get: async (id: string) => rows.get(id) ?? null,
     insert: async (table: string, data: any) => put(table, { ...data, _id: `${table}-${++counter}` }),
     patch: async (id: string, data: any) => { const row = rows.get(id); assert.ok(row); for (const [key, value] of Object.entries(data)) { if (value === undefined) delete row[key]; else row[key] = value; } },
@@ -316,4 +319,74 @@ test("external users and already published COR tasks reject dialog edits", async
     await assert.rejects(f.call(tasks.updateTaskFields, { taskId: "task1", updates: { title: "Changed" } }), /solo lectura/);
     assert.equal(f.rows.get("task1").title, "Original");
   }
+});
+
+function notificationFixture() {
+  const f = fixture();
+  f.put("users", { _id: "user1", name: "Externo" });
+  f.put("users", { _id: "internal1", name: "Interno" });
+  f.put("users", { _id: "internal2", name: "Colega" });
+  f.put("users", { _id: "otherExternal", name: "Otro externo" });
+  f.put("approvedExternalUsers", { _id: "external2", userId: "otherExternal" });
+  f.put("corClients", { _id: "client1", corClientId: 99 });
+  f.put("clientBrands", { _id: "brand1", clientId: "client1" });
+  f.put("clientBrands", { _id: "brand2", clientId: "client1" });
+  Object.assign(f.rows.get("task1"), { clientId: "client1", corClientId: 99, clientBrandId: "brand1" });
+  for (const id of ["internal1", "internal2", "otherExternal"]) f.put("clientUserAssignments", { _id: `assignment-${id}`, userId: id, clientId: "client1" });
+  f.put("clientUserAssignments", { _id: "wrong-brand", userId: "wrongBrandUser", clientId: "client1", brandId: "brand2" });
+  const as = (id: string) => { f.ctx.auth.getUserIdentity = async () => ({ subject: `${id}|session` }); };
+  const post = (key: string, replyTo?: string) => f.call(panel.submit, { taskId: "task1", key, text: "Nuevo comentario", uploadIds: [], replyTo });
+  const unread = () => f.call(notifications.unread, {});
+  return { ...f, as, post, unread };
+}
+
+test("notifications target authorized internal users and only the external creator for internal comments", async () => {
+  const f = notificationFixture();
+  f.as("internal1");
+  await f.post("one");
+  const rows = [...f.rows.values()].filter(r => r._table === "commentNotifications");
+  assert.deepEqual(rows.map(r => r.userId).sort(), ["internal2", "user1"]);
+  await f.post("one"); // retried submission cannot notify twice
+  assert.equal([...f.rows.values()].filter(r => r._table === "commentNotifications").length, 2);
+  f.as("user1");
+  assert.equal((await f.unread())[0].count, 1);
+  await f.post("external-comment");
+  assert.equal((await f.unread())[0].count, 1); // own comment excluded
+  f.as("otherExternal");
+  assert.deepEqual(await f.unread(), []);
+  f.as("wrongBrandUser");
+  assert.deepEqual(await f.unread(), []);
+});
+
+test("read acknowledgments are individual, limited to displayed IDs, and revalidate revoked access", async () => {
+  const f = notificationFixture(); f.as("internal1");
+  await f.post("one"); await f.post("two");
+  f.as("user1");
+  const [group] = await f.unread();
+  await f.call(notifications.markRead, { taskId: "task1", messageIds: [group.messageIds[0]] });
+  assert.equal((await f.unread())[0].count, 1);
+  f.as("internal2");
+  assert.equal((await f.unread())[0].count, 2);
+  f.rows.delete("assignment-internal2");
+  assert.deepEqual(await f.unread(), []);
+  await f.call(notifications.markRead, { taskId: "task1", messageIds: group.messageIds });
+  assert.equal([...f.rows.values()].filter(r => r._table === "commentNotifications" && r.userId === "internal2" && !r.read).length, 2);
+  f.as("user1"); f.rows.get("task1").createdBy = "otherExternal";
+  assert.deepEqual(await f.unread(), []);
+});
+
+test("internal replies notify the external author; imported comments never notify externals", async () => {
+  const f = notificationFixture(); f.as("user1");
+  const entry = await f.post("question");
+  f.as("internal1"); await f.post("answer", f.rows.get(entry).messageId);
+  f.as("user1"); assert.equal((await f.unread())[0].count, 1);
+  f.put("taskMessages", { _id: "imported", taskId: "task1", source: "trello", message: "From Trello", createdAt: Date.now() });
+  await notifyTaskComment(f.ctx, "imported" as any);
+  await notifyTaskComment(f.ctx, "imported" as any);
+  assert.equal((await f.unread())[0].count, 1);
+  f.as("internal2");
+  const rows = await f.unread();
+  assert.equal(rows[0].messageIds.filter((id: string) => id === "imported").length, 1);
+  f.rows.get("task1").convexStatus = "deleted";
+  assert.deepEqual(await f.unread(), []);
 });

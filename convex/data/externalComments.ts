@@ -1,3 +1,4 @@
+import { notifyTaskComment } from "../lib/commentNotifications";
 import { v } from "convex/values";
 import { internalAction, internalMutation } from "../_generated/server";
 import { components, internal } from "../_generated/api";
@@ -78,6 +79,7 @@ export const save = internalMutation({
       requestMessageId: args.requestMessageId, commentFileIds: files.map(f => f._id),
       corTaskId, corMessageSyncStatus: status, createdAt: now, updatedAt: now,
     });
+    await notifyTaskComment(ctx, id);
     for (const file of files) await ctx.db.patch(file._id, { commentMessageId: id });
     if (corTaskId) await ctx.scheduler.runAfter(0, refs().send, { id });
     return { id, status };

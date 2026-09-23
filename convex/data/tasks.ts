@@ -1,3 +1,4 @@
+import { notifyTaskComment } from "../lib/commentNotifications";
 // convex/data/tasks.ts
 // Funciones Convex para manejar tasks/requerimientos
 // (mutations, queries, internalActions, publish flow, sync flow)
@@ -1215,7 +1216,7 @@ export const createTaskMessageInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    return await ctx.db.insert("taskMessages", {
+    const messageId = await ctx.db.insert("taskMessages", {
       ...args,
       trelloSyncedAt:
         args.trelloSyncStatus === "synced" ? now : undefined,
@@ -1224,6 +1225,8 @@ export const createTaskMessageInternal = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
+    await notifyTaskComment(ctx, messageId);
+    return messageId;
   },
 });
 

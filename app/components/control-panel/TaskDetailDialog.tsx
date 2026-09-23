@@ -1,5 +1,7 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { CommentUnreadBadge } from "../notifications/CommentNotifications";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useAction, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -369,6 +371,7 @@ export function TaskDetailDialog({
   onPublishResult,
 }: TaskDetailDialogProps) {
   const convex = useConvex();
+  const params = useSearchParams();
   const viewer = useQuery(api.data.userAccess.viewerAccessProfile);
   const startPublish = useMutation(api.data.tasks.startPublishTaskToExternal);
   const retryTask = useMutation(api.data.tasks.retryTaskSync);
@@ -433,8 +436,10 @@ export function TaskDetailDialog({
   const [draftSubBrandId, setDraftSubBrandId] = useState<string>("");
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"task" | "project" | "evaluation" | "comments">(
-    "task",
+    params.get("tab") === "comments" ? "comments" : "task",
   );
+
+  useEffect(() => { if (params.get("tab") === "comments") setActiveTab("comments"); }, [params]);
 
   // === Evaluation state ===
   const [evaluationThreadId, setEvaluationThreadId] = useState<string | null>(
@@ -1225,7 +1230,7 @@ export function TaskDetailDialog({
           <button type="button" onClick={() => setActiveTab("comments")}
             aria-pressed={activeTab === "comments"}
             className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative cursor-pointer ${activeTab === "comments" ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-            <MessageCircle className="h-4 w-4" aria-hidden="true" />Comentarios
+            <MessageCircle className="h-4 w-4" aria-hidden="true" />Comentarios <CommentUnreadBadge taskId={task._id} />
             {activeTab === "comments" && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />}
           </button>
         </div>

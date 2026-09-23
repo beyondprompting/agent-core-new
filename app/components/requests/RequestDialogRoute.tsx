@@ -16,6 +16,7 @@ export function RequestDialogRoute({ requests }: { requests: ExternalRequest[] |
   const close = () => {
     const next = new URLSearchParams(params.toString());
     next.delete("taskId");
+    next.delete("tab");
     router.replace(`${pathname}${next.size ? `?${next}` : ""}`, { scroll: false });
   };
   if (!request) return <div role="status" className="mx-4 my-4 rounded-lg border border-border bg-card p-4 text-sm sm:mx-8">
