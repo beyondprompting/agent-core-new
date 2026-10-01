@@ -753,3 +753,43 @@ test("multiple revoked collaborators can be removed individually but cannot be p
   await f.call(tasks.setTaskCorCollaborators, { taskId: "task1", userIds: ["viewer"] });
   assert.deepEqual((await f.call(tasks.getTaskCollaboratorSelectionInternal, { taskId: "task1" })).collaboratorUserIds, ["viewer"]);
 });
+
+test("external profile names appear in both comment views, notifications, history and email", async () => {
+  const f = notificationFixture();
+  f.rows.get("external1").name = "  Julia Pérez  ";
+  // Auth profiles may contain a different name or no name at all.
+  f.rows.get("user1").name = "Nombre desactualizado";
+  await f.post("named-comment");
+  const detail = () => f.call(panel.detail, { taskId: "task1" });
+  assert.equal((await detail()).comments[0].authorName, "Julia Pérez");
+  delete f.rows.get("user1").name;
+  f.as("internal1");
+  assert.equal((await detail()).comments[0].authorName, "Julia Pérez");
+  assert.equal((await f.call(tasks.listInternalTaskComments, { taskId: "task1" }))[0].author, "Julia Pérez");
+  assert.equal((await f.unread())[0].author, "Julia Pérez");
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  assert.equal((await f.call(taskNotifications.unread, {}))[0].author, "Julia Pérez");
+  const historyRows = (await f.call(history.list, { paginationOpts: { numItems: 10, cursor: null } })).page;
+  assert.equal(historyRows.length, 2);
+  assert.ok(historyRows.every((row: any) => row.author === "Julia Pérez"));
+  const row = [...f.rows.values()].find(r => r._table === "taskCreationNotifications" && r.userId === "internal1");
+  f.rows.get("internal1").email = "internal@example.com";
+  const env = { APP_URL: process.env.APP_URL, RESEND_API_KEY: process.env.RESEND_API_KEY };
+  try {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.RESEND_API_KEY = "test-only";
+    const claim = await f.call(taskNotifications.claimEmail, { id: row._id });
+    const email = JSON.parse(claim.payload);
+    assert.ok(email.text.includes("Julia Pérez creó una nueva tarea."));
+    assert.ok(email.html.includes("Julia Pérez creó una nueva tarea."));
+    assert.ok(email.html.includes("<h2>Nueva tarea</h2>"));
+    assert.ok(!/usuario externo|tarea externa/i.test(email.html));
+  } finally {
+    for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+  await f.post("internal-named-comment");
+  assert.ok((await detail()).comments.some((comment: any) => comment.authorName === "Interno"));
+  f.as("user1");
+  assert.ok((await detail()).comments.some((comment: any) => comment.authorName === "Interno"));
+  assert.equal((await f.unread())[0].author, "Interno");
+});

@@ -1,3 +1,4 @@
+import { getAuthorName } from "../lib/authorName";
 import { canViewExternalRequest, hasExternalRequestsAccess, isRequestsClientTask } from "../lib/externalRequestsAccess";
 import { notifyExternalTaskCreated } from "../lib/taskCreationNotifications";
 import { notifyTaskComment } from "../lib/commentNotifications";
@@ -1284,7 +1285,7 @@ export const listInternalTaskComments = query({
     const messages = await ctx.db.query("taskMessages").withIndex("by_task", q => q.eq("taskId", taskId)).collect();
     return await Promise.all(messages.sort((a, b) => b.createdAt - a.createdAt).map(async message => ({
       id: message._id, text: message.message, createdAt: message.createdAt,
-      author: message.userId === userId ? "Vos" : message.userId ? (await ctx.db.get(message.userId))?.name ?? "Comentario" : "Comentario",
+      author: await getAuthorName(ctx, message.userId),
     })));
   },
 });
