@@ -1,5 +1,5 @@
 import { getAuthorName } from "../lib/authorName";
-import { canViewExternalRequest, hasExternalRequestsAccess, isRequestsClientTask } from "../lib/externalRequestsAccess";
+import { canViewExternalRequest, externalRequestCandidates, hasExternalRequestsAccess, isRequestsClientTask } from "../lib/externalRequestsAccess";
 import { notifyExternalTaskCreated } from "../lib/taskCreationNotifications";
 import { notifyTaskComment } from "../lib/commentNotifications";
 // convex/data/tasks.ts
@@ -3550,29 +3550,26 @@ export const listMyExternalRequests = query({
     const userId = await getAuthUserId(ctx);
     if (!userId || !(await hasExternalRequestsAccess(ctx, userId))) return [];
 
-    const creator = await ctx.db.get(userId);
     const readBoardLabel = createBoardLabelReader(ctx);
 
-    const tasks = await ctx.db
-      .query("tasks")
-      .withIndex("by_createdBy", (q) => q.eq("createdBy", String(userId)))
-      .order("desc")
-      .collect();
+    const tasks = await externalRequestCandidates(ctx, userId);
 
     const authorized = await Promise.all(tasks.map(async task => await canViewExternalRequest(ctx, userId, task) ? task : null));
     return await Promise.all(
       authorized.filter((task): task is Doc<"tasks"> => task !== null)
         .filter((task) => task.source === "external" && task.convexStatus !== "deleted")
         .map(async (task) => {
-          const thread = await ctx.db
+          const isCreator = task.createdBy === String(userId);
+          const creatorId = task.createdBy ? ctx.db.normalizeId("users", task.createdBy) : null;
+          const thread = isCreator ? await ctx.db
             .query("chatThreads")
             .withIndex("by_thread", (q) => q.eq("threadId", task.threadId))
-            .first();
+            .first() : null;
           // Explicit projection: never expose evaluations or internal sync metadata.
           return {
             _id: task._id,
             createdAt: task._creationTime,
-            createdByName: creator?.name,
+            createdByName: await getAuthorName(ctx, creatorId),
             deliverablesCount: task.deliverablesCount,
             boardLabel: await readBoardLabel(task.subBrandId),
             title: task.title,

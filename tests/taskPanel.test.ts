@@ -4,6 +4,7 @@ import { getFunctionName } from "convex/server";
 import * as panel from "../convex/data/taskPanel";
 import * as sender from "../convex/data/taskPanelSync";
 import * as tasks from "../convex/data/tasks";
+import * as threads from "../convex/messaging/threads";
 import { hasExternalRequestsAccess, canViewExternalRequest } from "../convex/lib/externalRequestsAccess";
 import * as history from "../convex/data/notificationHistory";
 import * as notifications from "../convex/data/commentNotifications";
@@ -333,6 +334,8 @@ test("board dialog exposes only the authorized task label and member names", asy
   const result = await f.call(tasks.getBoardDialogDetails, { taskId: "task1" });
   assert.deepEqual(result, { label: { name: "Marca Corporativa", color: "orange" }, members: [{ id: "member1", name: "Ximena Torres" }] });
   f.rows.get("task1").createdBy = "another-user";
+  assert.deepEqual(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }), result);
+  f.rows.delete("assignment-user1");
   assert.equal(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }), null);
 });
 
@@ -551,10 +554,12 @@ test("external notification history retains read comments only for the external 
   assert.deepEqual((await f.call(history.list, args)).page, []);
 });
 
-test("external requests and notifications require the configured client, regardless of category", async () => {
+test("external requests require an enabled client and matching brand permissions", async () => {
   const f = notificationFixture();
   f.rows.get("assignment-user1").brandId = "brand2";
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), true);
+  assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), false);
+  f.rows.get("assignment-user1").brandId = "brand1";
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), true);
   f.as("internal1"); await f.post("enabled-client");
   f.as("user1"); assert.equal((await f.unread()).length, 1);
@@ -599,7 +604,7 @@ test("internal comments tab requires the enabled task client and existing task p
   assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
 });
 
-test("multiple enabled clients preserve per-client assignment, task ownership and notification access", async () => {
+test("multiple enabled clients preserve per-client assignment and notification access", async () => {
   const f = notificationFixture();
   clientConfig.ui.externalRequestsClientIds = ["client1", " client2 ", "client1", ""];
   f.put("corClients", { _id: "client2", corClientId: 100 });
@@ -609,7 +614,7 @@ test("multiple enabled clients preserve per-client assignment, task ownership an
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), true);
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), true);
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task2")), false);
-  f.put("clientUserAssignments", { _id: "external-client2", clientId: "client2", userId: "user1", brandId: "any-category" });
+  f.put("clientUserAssignments", { _id: "external-client2", clientId: "client2", userId: "user1" });
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task2")), true);
   f.as("internal1");
   assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), true);
@@ -792,4 +797,85 @@ test("external profile names appear in both comment views, notifications, histor
   f.as("user1");
   assert.ok((await detail()).comments.some((comment: any) => comment.authorName === "Interno"));
   assert.equal((await f.unread())[0].author, "Interno");
+});
+
+test("three external users share brand tasks, comments and uploads while chats remain private", async () => {
+  const f = notificationFixture();
+  f.put("approvedExternalUsers", { _id: "external3", userId: "thirdExternal", name: "Tercera persona" });
+  f.put("clientUserAssignments", { _id: "assignment-third", userId: "thirdExternal", clientId: "client1", brandId: "brand1" });
+  f.rows.get("assignment-user1").brandId = "brand1";
+  f.rows.get("assignment-otherExternal").brandId = "brand1";
+  f.rows.get("external1").name = "Creadora";
+  f.put("chatThreads", { _id: "chat1", threadId: "thread1", userId: "user1" });
+  for (const id of ["user1", "otherExternal", "thirdExternal"]) {
+    f.as(id);
+    const board = await f.call(tasks.listMyExternalRequests, {});
+    assert.equal(board.length, 1); // Deduplicates matches across client, COR and brand indexes.
+    assert.equal(board[0].createdByName, "Creadora");
+    assert.equal(board[0].threadId, id === "user1" ? "thread1" : null);
+    const chat = await f.call(threads.getThread, { threadId: "thread1" });
+    assert.equal(Boolean(chat), id === "user1");
+    assert.ok(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }));
+    assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), true);
+    f.upload(`file-${id}`, { userId: id });
+    await f.call(panel.submit, { taskId: "task1", key: `shared-${id}`, text: `Comentario de ${id}`, uploadIds: [`file-${id}`] });
+  }
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  assert.equal(detail.comments.length, 3);
+  assert.equal(detail.attachments.length, 3);
+  assert.equal(detail.comments.find((c: any) => c.own).authorName, "Tercera persona");
+  // Even a mismatched task/thread ownership must not reveal the chat link.
+  f.rows.get("task1").createdBy = "otherExternal";
+  f.as("user1");
+  assert.equal((await f.call(tasks.listMyExternalRequests, {}))[0].threadId, null);
+});
+
+test("external board enforces client and brand access on reads, comments and file uploads", async () => {
+  const f = notificationFixture();
+  f.as("otherExternal");
+  f.rows.get("assignment-otherExternal").brandId = "brand2";
+  const denied = async () => {
+    assert.deepEqual(await f.call(tasks.listMyExternalRequests, {}), []);
+    assert.equal(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }), null);
+    assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
+    await assert.rejects(f.call(panel.detail, { taskId: "task1" }), /acceso/);
+    await assert.rejects(f.post("forbidden"), /acceso/);
+    await assert.rejects(f.call(panel.prepareUpload, { taskId: "task1", key: "forbidden", filename: "file.pdf", mimeType: "application/pdf", size: 4 }), /acceso/);
+  };
+  await denied();
+  // A second matching assignment qualifies even if the first one doesn't.
+  f.put("clientUserAssignments", { _id: "matching-brand", userId: "otherExternal", clientId: "client1", brandId: "brand1" });
+  assert.equal((await f.call(tasks.listMyExternalRequests, {})).length, 1);
+  f.upload("ready-before-revocation", { userId: "otherExternal" });
+  f.rows.delete("matching-brand");
+  await assert.rejects(f.call(panel.submit, { taskId: "task1", key: "revoked", text: "File", uploadIds: ["ready-before-revocation"] }), /acceso/);
+  f.rows.get("assignment-otherExternal").clientId = "client2";
+  delete f.rows.get("assignment-otherExternal").brandId;
+  clientConfig.ui.externalRequestsClientIds = ["client1", "client2"];
+  await denied();
+  f.rows.get("assignment-otherExternal").clientId = "client1";
+  assert.equal((await f.call(tasks.listMyExternalRequests, {})).length, 1);
+  f.rows.get("task1").source = "internal";
+  await denied();
+  f.rows.get("task1").source = "external";
+  f.rows.get("task1").convexStatus = "deleted";
+  await denied();
+});
+
+test("external board includes legacy client and brand links without granting brand-only access to unbranded tasks", async () => {
+  const f = notificationFixture(); f.as("otherExternal");
+  const task = f.rows.get("task1");
+  delete task.clientId; delete task.corClientId;
+  assert.equal((await f.call(tasks.listMyExternalRequests, {})).length, 1); // Brand-only task.
+  delete task.clientBrandId;
+  task.corClientId = 99;
+  assert.equal((await f.call(tasks.listMyExternalRequests, {})).length, 1); // COR-only task.
+  delete task.corClientId;
+  task.clientId = "client1";
+  assert.equal((await f.call(tasks.listMyExternalRequests, {})).length, 1); // Client-only task.
+  f.rows.get("assignment-otherExternal").brandId = "brand1";
+  assert.deepEqual(await f.call(tasks.listMyExternalRequests, {}), []);
+  task.clientBrandId = "missing-brand";
+  delete f.rows.get("assignment-otherExternal").brandId;
+  assert.deepEqual(await f.call(tasks.listMyExternalRequests, {}), []);
 });
