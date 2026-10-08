@@ -358,6 +358,7 @@ export default defineSchema({
     .index("by_task", ["taskId"]).index("by_next_check", ["nextCheckAt"]),
 
   taskMessages: defineTable({
+    mentionedUserIds: v.optional(v.array(v.id("users"))),
     userQuote: v.optional(v.string()),
     replyTo: v.optional(v.id("taskMessages")),
     panelEntryId: v.optional(v.id("taskPanelEntries")),

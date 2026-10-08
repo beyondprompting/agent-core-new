@@ -879,3 +879,30 @@ test("external board includes legacy client and brand links without granting bra
   delete f.rows.get("assignment-otherExternal").brandId;
   assert.deepEqual(await f.call(tasks.listMyExternalRequests, {}), []);
 });
+
+test("mention candidates are restricted to this client and brand, including inherited subbrands", async () => {
+  const f = fixture();
+  f.put("clientBrands", { _id: "brand1", clientId: "client1" });
+  f.put("subBrands", { _id: "sub1", clientBrandId: "brand1" });
+  f.rows.get("task1").clientBrandId = "brand1";
+  f.rows.get("task1").subBrandId = "sub1";
+  for (const [id, clientId, brandId] of [["internal1", "client1", "brand1"], ["otherBrand", "client1", "brand2"], ["otherClient", "client2", undefined], ["wholeClient", "client1", undefined]]) {
+    f.put("users", { _id: id, name: id });
+    f.put("clientUserAssignments", { _id: `a-${id}`, userId: id, clientId, brandId });
+  }
+  f.put("users", { _id: "user1", name: "External" });
+  const people = await f.call(panel.mentionUsers, { taskId: "task1" });
+  assert.deepEqual(people.map((p: any) => p.id).sort(), ["internal1", "user1", "wholeClient"]);
+  const args = { taskId: "task1", key: "mention", text: "Hola {{task-panel-mention:internal1}}", uploadIds: [] };
+  const entryId = await f.call(panel.submit, args);
+  assert.equal(await f.call(panel.submit, args), entryId);
+  const message = f.rows.get(f.rows.get(entryId).messageId);
+  assert.deepEqual(message.mentionedUserIds, ["internal1"]);
+  const sync = await f.call(panel.syncContext, { entryId });
+  assert.equal(sync.message.message, "Hola @internal1");
+  await assert.rejects(f.call(panel.submit, { ...args, key: "forged", text: "{{task-panel-mention:otherBrand}}" }));
+  f.rows.delete("a-internal1");
+  await assert.rejects(f.call(panel.submit, { ...args, key: "revoked" }));
+  clientConfig.ui.externalRequestsClientIds = [];
+  await assert.rejects(f.call(panel.mentionUsers, { taskId: "task1" }));
+});
