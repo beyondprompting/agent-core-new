@@ -2,7 +2,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Node, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps, type Editor } from "@tiptap/react";
-import { filterMentionPeople, mentionQuery, type MentionPerson } from "./mentions";
+import type { Transaction } from "@tiptap/pm/state";
+import { DISMISS_MENTION, nextMentionSession, filterMentionPeople, mentionQuery, type MentionSession, type MentionPerson } from "./mentions";
 
 export function MentionLabel({ name, onRemove }: { name: string; onRemove?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -44,23 +45,27 @@ export const Mention = Node.create({
 
 export function MentionSuggestions({ editor, people }: { editor: Editor; people: MentionPerson[] }) {
   const [revision, update] = useState(0);
-  const [dismissed, setDismissed] = useState("");
+  const session = useRef<MentionSession>(null);
   const [active, setActive] = useState(0);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   useEffect(() => {
     const refresh = () => update(value => value + 1);
-    editor.on("transaction", refresh); editor.on("focus", refresh); editor.on("blur", refresh);
+    const onTransaction = ({ transaction }: { transaction: Transaction }) => {
+      session.current = nextMentionSession(session.current, transaction);
+      refresh();
+    };
+    const onBlur = () => { session.current = null; refresh(); };
+    editor.on("transaction", onTransaction); editor.on("focus", refresh); editor.on("blur", onBlur);
     window.addEventListener("scroll", refresh, true); window.addEventListener("resize", refresh);
-    return () => { editor.off("transaction", refresh); editor.off("focus", refresh); editor.off("blur", refresh); window.removeEventListener("scroll", refresh, true); window.removeEventListener("resize", refresh); };
+    return () => { editor.off("transaction", onTransaction); editor.off("focus", refresh); editor.off("blur", onBlur); window.removeEventListener("scroll", refresh, true); window.removeEventListener("resize", refresh); };
   }, [editor]);
   const { selection } = editor.state;
-  const query = selection.empty && editor.isFocused && editor.isEditable
+  const query = session.current && selection.empty && editor.isFocused && editor.isEditable
     ? mentionQuery(selection.$from.parent.textBetween(0, selection.$from.parentOffset, "\n", "\ufffc")) : null;
   const key = query ? `${selection.from}:${query.query}` : "";
   const options = query ? filterMentionPeople(people, query.query) : [];
-  const visible = Boolean(query && options.length && dismissed !== key);
+  const visible = Boolean(query && options.length);
   useEffect(() => { setActive(0); }, [key]);
-  useEffect(() => { if (!query) setDismissed(""); }, [key]);
   const choose = (person: MentionPerson) => {
     if (!query) return;
     editor.chain().focus().insertContentAt({ from: selection.from - query.length, to: selection.from }, [{ type: "mention", attrs: { userId: person.id, label: person.name } }, { type: "text", text: " " }]).run();
@@ -72,13 +77,19 @@ export function MentionSuggestions({ editor, people }: { editor: Editor; people:
     setPosition({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 296)), top: rect.bottom + 6 + height > window.innerHeight ? Math.max(8, rect.top - height - 6) : rect.bottom + 6 });
   }, [revision, visible, selection.from, options.length, editor]);
   useEffect(() => {
-    if (!visible) return;
+    if (!query) return;
     const handleKey = (event: KeyboardEvent) => {
       if (event.isComposing) return;
+      if ([" ", "Backspace", "Delete", "Escape"].includes(event.key)) {
+        editor.view.dispatch(editor.state.tr.setMeta(DISMISS_MENTION, true));
+        // Space and deletion must still reach the editor normally.
+        if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); }
+        return;
+      }
+      if (!visible) return;
       if (!["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      if (event.key === "Escape") setDismissed(key);
-      else if (event.key === "Enter") choose(options[Math.min(active, options.length - 1)]);
+      if (event.key === "Enter") choose(options[Math.min(active, options.length - 1)]);
       else setActive(index => (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length);
     };
     editor.view.dom.addEventListener("keydown", handleKey, true);
