@@ -634,10 +634,17 @@ test("multiple enabled clients preserve per-client assignment and notification a
 function collaboratorFixture() {
   const f = fixture();
   f.ctx.auth.getUserIdentity = async () => ({ subject: "viewer|session" });
-  const member = (id: string, clientId = "client1", brandId?: string, resolved = true) => {
+  const member = (
+    id: string,
+    clientId = "client1",
+    brandId?: string,
+    resolved = true,
+    corRoleId?: number,
+    corUserId = id.length + 100,
+  ) => {
     f.put("users", { _id: id, name: `Member ${id}`, email: `${id}@example.com` });
     f.put("clientUserAssignments", { _id: `access-${id}`, userId: id, clientId, brandId });
-    if (resolved) f.put("corUsers", { _id: `cor-${id}`, userId: id, corUserId: id.length + 100, corEmail: `${id}@example.com`, corFirstName: "Member", corLastName: id });
+    if (resolved) f.put("corUsers", { _id: `cor-${id}`, userId: id, corUserId, corEmail: `${id}@example.com`, corFirstName: "Member", corLastName: id, corRoleId });
   };
   member("viewer");
   member("full");
@@ -692,7 +699,75 @@ test("edited and empty collaborator selections persist without being refilled fr
   await f.call(tasks.setTaskCorCollaborators, { taskId: "task1", userIds: [] });
   result = await f.call(tasks.getTaskCorCollaborators, { taskId: "task1" });
   assert.deepEqual(result.collaborators, []);
-  assert.deepEqual(await f.call(tasks.getTaskCollaboratorSelectionInternal, { taskId: "task1" }), { collaboratorUserIds: [], requiredCorUserIds: [] });
+  assert.deepEqual(await f.call(tasks.getTaskCollaboratorSelectionInternal, { taskId: "task1" }), { collaboratorUserIds: [], requiredCorUserIds: [], projectManagerCorUserIds: [], projectManagerCorUserId: undefined });
+});
+
+test("COR leadership stays out, existing project PM wins and creator PM is the fallback", async () => {
+  const f = collaboratorFixture();
+  f.rows.delete("access-unresolved");
+  f.member("c-level", "client1", "category1", true, 1, 101);
+  f.member("director", "client1", "category1", true, 2, 201);
+  f.member("project-manager", "client1", "category1", true, 3, 303);
+  f.member("pm-two", "client1", "category1", true, 3, 302);
+  f.member("worker", "client1", "category1", true, 4, 401);
+  f.put("projects", { _id: "project1", pmId: 302 });
+  f.rows.get("task1").projectId = "project1";
+  f.rows.get("task1").createdBy = "project-manager";
+
+  const displayed = await f.call(tasks.getTaskCorCollaborators, {
+    taskId: "task1",
+  });
+  assert.ok(displayed.collaborators.some((c: any) => c.userId === "worker"));
+  assert.ok(!displayed.collaborators.some((c: any) => c.userId === "c-level"));
+  assert.ok(!displayed.collaborators.some((c: any) => c.userId === "director"));
+  assert.ok(!displayed.collaborators.some((c: any) => c.userId === "project-manager"));
+  assert.ok(!displayed.collaborators.some((c: any) => c.userId === "pm-two"));
+
+  const selection = await f.call(
+    tasks.getTaskCollaboratorSelectionInternal,
+    { taskId: "task1" },
+  );
+  assert.ok(selection.collaboratorUserIds.includes("worker"));
+  assert.ok(!selection.collaboratorUserIds.includes("c-level"));
+  assert.ok(!selection.collaboratorUserIds.includes("director"));
+  assert.ok(!selection.collaboratorUserIds.includes("project-manager"));
+  assert.ok(!selection.collaboratorUserIds.includes("pm-two"));
+  assert.deepEqual(selection.projectManagerCorUserIds, [302, 303]);
+  assert.equal(selection.projectManagerCorUserId, 302);
+
+  // Sin PM previo, el creador role 3 pasa a ser el PM principal.
+  delete f.rows.get("project1").pmId;
+  const creatorPmSelection = await f.call(
+    tasks.getTaskCollaboratorSelectionInternal,
+    { taskId: "task1" },
+  );
+  assert.equal(creatorPmSelection.projectManagerCorUserId, 303);
+
+  // Si quien crea es colaborador y no hay PM previo, se elige otro role 3.
+  f.rows.get("task1").createdBy = "worker";
+  const collaboratorCreatorSelection = await f.call(
+    tasks.getTaskCollaboratorSelectionInternal,
+    { taskId: "task1" },
+  );
+  assert.equal(collaboratorCreatorSelection.projectManagerCorUserId, 302);
+
+  f.rows.get("task1").corCollaboratorUserIds = [];
+  const candidates = await f.call(
+    tasks.searchTaskCorCollaboratorCandidates,
+    { taskId: "task1", search: "Member" },
+  );
+  assert.ok(candidates.some((c: any) => c.userId === "worker"));
+  assert.ok(!candidates.some((c: any) => c.userId === "c-level"));
+  assert.ok(!candidates.some((c: any) => c.userId === "director"));
+  assert.ok(!candidates.some((c: any) => c.userId === "project-manager"));
+  assert.ok(!candidates.some((c: any) => c.userId === "pm-two"));
+  await assert.rejects(
+    f.call(tasks.setTaskCorCollaborators, {
+      taskId: "task1",
+      userIds: ["director"],
+    }),
+    /C-Level, Director o Project Manager/,
+  );
 });
 
 test("publishing collaborator resolution revalidates revoked access and category changes", async () => {
