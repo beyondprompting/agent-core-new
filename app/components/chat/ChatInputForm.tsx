@@ -3,13 +3,16 @@
 import { useRef, useState, useCallback, DragEvent, ClipboardEvent } from "react";
 import { FilePreviewList, FileInfo } from "./FilePreviewList";
 import { VoiceRecorderPanel } from "./VoiceRecorderPanel";
+import {
+  CHAT_MAX_FILES as MAX_FILES,
+  CHAT_MAX_FILE_SIZE_MB as MAX_FILE_SIZE_MB,
+  CHAT_MAX_FILE_SIZE_BYTES as MAX_FILE_SIZE_BYTES,
+  CHAT_MAX_TOTAL_SIZE_MB,
+} from "@/config/chatUploads";
 
 // Constantes
 const FILE_ACCEPT =
   "image/*,application/pdf,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac";
-const MAX_FILES = 3;
-const MAX_FILE_SIZE_MB = 20;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // Tipos permitidos vía drag & drop
 const DRAG_ALLOWED_TYPES = [
@@ -197,7 +200,7 @@ export function ChatInputForm({
           continue;
         }
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB}MB.`);
+          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB} MiB.`);
           continue;
         }
         valid.push(file);
@@ -225,7 +228,7 @@ export function ChatInputForm({
       const valid: File[] = [];
       for (const file of Array.from(files)) {
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB}MB.`);
+          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB} MiB.`);
           continue;
         }
         valid.push(file);
@@ -311,7 +314,7 @@ export function ChatInputForm({
       const valid: File[] = [];
       for (const file of imageFiles.slice(0, remainingSlots)) {
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB}MB.`);
+          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB} MiB.`);
           continue;
         }
         valid.push(file);
@@ -536,8 +539,7 @@ export function ChatInputForm({
       {/* Drag hint */}
       {!isDragging && selectedFiles.length < MAX_FILES && (
         <p className="mt-1 hidden text-center text-xs text-muted-foreground sm:block">
-          Imágenes, PDF o Word (botón o arrastrar) · máx. {MAX_FILE_SIZE_MB}MB
-          por archivo
+          Hasta {MAX_FILES} archivos · {MAX_FILE_SIZE_MB} MiB por archivo · {CHAT_MAX_TOTAL_SIZE_MB} MB en total
         </p>
       )}
     </div>

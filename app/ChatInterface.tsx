@@ -6,6 +6,14 @@ import { useUIMessages } from "@convex-dev/agent/react";
 import { api } from "@/convex/_generated/api";
 import mammoth from "mammoth";
 import TurndownService from "turndown";
+import {
+  CHAT_MAX_FILES as MAX_FILES,
+  CHAT_MAX_FILE_SIZE_MB as MAX_FILE_SIZE_MB,
+  CHAT_MAX_FILE_SIZE_BYTES as MAX_FILE_SIZE_BYTES,
+  assertChatFileSizes,
+  assertChatOriginalCount,
+  selectedChatFileSizes,
+} from "@/config/chatUploads";
 
 // Importar componentes extraídos
 import { ChatMessageList } from "./components/chat/ChatMessageList";
@@ -84,10 +92,6 @@ const SUPPORTED_FILE_TYPES = [
   "audio/flac",
 ];
 
-const MAX_FILES = 3;
-const MAX_FILE_SIZE_MB = 20;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-
 // =============================================================================
 // Utilidades
 // =============================================================================
@@ -120,6 +124,8 @@ export default function ChatInterface({
   // Estado de archivos
   const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([]);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const selectingFilesRef = useRef<FileInfo[] | null>(null);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
 
   // Estado de grabación de voz
   const [isRecording, setIsRecording] = useState(false);
@@ -167,6 +173,7 @@ export default function ChatInterface({
   // ===========================================================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (selectingFilesRef.current || isUploadingFile) return;
 
     const voiceText = finalTranscript.trim();
     const textInput = input.trim();
@@ -178,6 +185,14 @@ export default function ChatInterface({
 
     if ((!combinedInput && selectedFiles.length === 0) || !currentThreadId)
       return;
+
+    try {
+      assertChatOriginalCount(selectedFiles.length);
+      assertChatFileSizes(selectedChatFileSizes(selectedFiles));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Revisá los archivos seleccionados.");
+      return;
+    }
 
     const currentInput = combinedInput;
     const currentFiles = [...selectedFiles];
@@ -215,17 +230,31 @@ export default function ChatInterface({
             storageId,
             filename: file.name,
             mimeType: actualMimeType,
-            extractedMarkdown: file.extractedMarkdown,
-            extractedImages: file.extractedImages,
           });
 
           // Siempre incluir el archivo original (para adjuntar a la tarea)
-          // chat.ts ya se encarga de omitir Word/PDF al construir el contenido para el LLM
+          // chat.ts omite el Word original: el modelo recibe su texto e imágenes.
           fileIds.push(result.fileId);
           attachmentFileIds.push(result.fileId);
 
-          if (result.extractedImageFileIds?.length > 0) {
-            fileIds.push(...result.extractedImageFileIds);
+          // Auxiliary Word images are uploaded individually as binary, keeping
+          // large base64 arrays out of action arguments. They are not task attachments.
+          for (const [index, image] of (file.extractedImages ?? []).entries()) {
+            const imageBlob = base64ToBlob(`data:${image.mimeType};base64,${image.data}`);
+            const imageUploadUrl = await generateUploadUrl();
+            const imageResponse = await fetch(imageUploadUrl, {
+              method: "POST",
+              headers: { "Content-Type": image.mimeType },
+              body: imageBlob,
+            });
+            if (!imageResponse.ok) throw new Error("Error subiendo imagen del documento");
+            const { storageId: imageStorageId } = await imageResponse.json();
+            const imageResult = await registerUploadedFile({
+              storageId: imageStorageId,
+              filename: `${file.name}-img-${index}.${image.mimeType.split("/")[1] || "png"}`,
+              mimeType: image.mimeType,
+            });
+            fileIds.push(imageResult.fileId);
           }
 
           if (file.extractedMarkdown) {
@@ -254,6 +283,7 @@ export default function ChatInterface({
       });
     } catch (error) {
       console.error("Error enviando mensaje:", error);
+      alert(error instanceof Error ? error.message : "No se pudo enviar el mensaje. Podés volver a intentar.");
       setInput(currentInput);
       setSelectedFiles(currentFiles);
       setIsUploadingFile(false);
@@ -276,98 +306,102 @@ export default function ChatInterface({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const remainingSlots = MAX_FILES - selectedFiles.length;
-    if (remainingSlots <= 0) {
-      alert(`Solo puedes subir hasta ${MAX_FILES} archivos.`);
-      return;
-    }
-
-    const filesToProcess = Array.from(files).slice(0, remainingSlots);
-    for (const file of filesToProcess) {
-      if (!SUPPORTED_FILE_TYPES.includes(file.type)) {
-        alert(`Tipo de archivo no soportado: ${file.name}`);
-        continue;
+    if (selectingFilesRef.current || isUploadingFile) return;
+    const selection = [...selectedFiles];
+    selectingFilesRef.current = selection;
+    setIsProcessingFiles(true);
+    try {
+      const remainingSlots = MAX_FILES - selection.length;
+      if (remainingSlots <= 0) {
+        alert(`Solo puedes subir hasta ${MAX_FILES} archivos.`);
+        return;
       }
 
-      if (file.size > MAX_FILE_SIZE_BYTES) {
-        alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB}MB.`);
-        continue;
-      }
+      const filesToProcess = Array.from(files).slice(0, remainingSlots);
+      if (files.length > remainingSlots) alert(`Se agregarán hasta ${remainingSlots} archivos. El máximo es ${MAX_FILES} por mensaje.`);
+      for (const file of filesToProcess) {
+        if (!SUPPORTED_FILE_TYPES.includes(file.type)) {
+          alert(`Tipo de archivo no soportado: ${file.name}`);
+          continue;
+        }
 
-      const isImage = file.type.startsWith("image/");
-      const isAudio = file.type.startsWith("audio/");
-      const isWordDoc =
-        file.type.includes("word") ||
-        file.type === "application/msword" ||
-        file.type ===
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      const isDocument = file.type === "application/pdf" || isWordDoc;
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          alert(`"${file.name}" supera el límite de ${MAX_FILE_SIZE_MB} MiB.`);
+          continue;
+        }
 
-      let base64String: string;
+        const isImage = file.type.startsWith("image/");
+        const isAudio = file.type.startsWith("audio/");
+        const isWordDoc =
+          file.type.includes("word") ||
+          file.type === "application/msword" ||
+          file.type ===
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        const isDocument = file.type === "application/pdf" || isWordDoc;
 
-      if (isImage) {
-        try {
-          base64String = await compressImage(file);
-        } catch {
+        let base64String: string;
+
+        if (isImage) {
+          try {
+            base64String = await compressImage(file);
+          } catch {
+            base64String = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(file);
+            });
+          }
+        } else {
           base64String = await new Promise<string>((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
             reader.readAsDataURL(file);
           });
         }
-      } else {
-        base64String = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        });
-      }
 
-      let extractedMarkdown: string | undefined;
-      let extractedImages: ExtractedImage[] | undefined;
+        let extractedMarkdown: string | undefined;
+        let extractedImages: ExtractedImage[] | undefined;
 
-      if (isWordDoc) {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const images: ExtractedImage[] = [];
+        if (isWordDoc) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const images: ExtractedImage[] = [];
 
-          const options = {
-            convertImage: mammoth.images.imgElement(async (image: any) => {
-              const imageBuffer = await image.read();
-              const uint8Array = new Uint8Array(imageBuffer);
-              let binary = "";
-              uint8Array.forEach((byte) => {
-                binary += String.fromCharCode(byte);
-              });
-              const base64 = btoa(binary);
-              const mimeType = image.contentType || "image/png";
-              images.push({ data: base64, mimeType });
-              return { src: `__IMAGE_PLACEHOLDER_${images.length - 1}__` };
-            }),
-          };
+            const options = {
+              convertImage: mammoth.images.imgElement(async (image: any) => {
+                const imageBuffer = await image.read();
+                const uint8Array = new Uint8Array(imageBuffer);
+                let binary = "";
+                uint8Array.forEach((byte) => {
+                  binary += String.fromCharCode(byte);
+                });
+                const base64 = btoa(binary);
+                const mimeType = image.contentType || "image/png";
+                images.push({ data: base64, mimeType });
+                return { src: `__IMAGE_PLACEHOLDER_${images.length - 1}__` };
+              }),
+            };
 
-          const result = await mammoth.convertToHtml({ arrayBuffer }, options);
-          const turndown = new TurndownService({
-            headingStyle: "atx",
-            codeBlockStyle: "fenced",
-          });
+            const result = await mammoth.convertToHtml({ arrayBuffer }, options);
+            const turndown = new TurndownService({
+              headingStyle: "atx",
+              codeBlockStyle: "fenced",
+            });
 
-          let markdown = turndown.turndown(result.value);
-          markdown = markdown.replace(
-            /__IMAGE_PLACEHOLDER_\d+__/g,
-            "[Imagen adjunta]",
-          );
+            let markdown = turndown.turndown(result.value);
+            markdown = markdown.replace(
+              /__IMAGE_PLACEHOLDER_\d+__/g,
+              "[Imagen adjunta]",
+            );
 
-          extractedMarkdown = markdown;
-          extractedImages = images;
-        } catch (error) {
-          console.error("Error procesando Word:", error);
+            extractedMarkdown = markdown;
+            extractedImages = images;
+          } catch (error) {
+            console.error("Error procesando Word:", error);
+          }
         }
-      }
 
-      setSelectedFiles((prev) => [
-        ...prev,
-        {
+        const candidate: FileInfo = {
           name: file.name,
           type: file.type,
           isImage,
@@ -376,15 +410,26 @@ export default function ChatInterface({
           base64: base64String,
           extractedMarkdown,
           extractedImages,
-        },
-      ]);
+        };
+        // Validate the whole selection, including extracted Word images, before upload.
+        try {
+          assertChatFileSizes(selectedChatFileSizes([...selection, candidate]));
+        } catch (error) {
+          alert(error instanceof Error ? error.message : "Revisá el peso de los archivos.");
+          continue;
+        }
+        selection.push(candidate);
+        setSelectedFiles([...selection]);
+      }
+    } finally {
+      e.target.value = "";
+      selectingFilesRef.current = null;
+      setIsProcessingFiles(false);
     }
-
-    // Reset input
-    e.target.value = "";
   };
 
   const handleRemoveFile = (index: number) => {
+    selectingFilesRef.current?.splice(index, 1);
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -577,7 +622,7 @@ export default function ChatInterface({
         onClearTranscript={() => setFinalTranscript("")}
         currentThreadId={currentThreadId}
         isCreatingThread={isCreatingThread}
-        isUploadingFile={isUploadingFile}
+        isUploadingFile={isUploadingFile || isProcessingFiles}
         isAgentThinking={isAgentThinking}
       />
     </div>
