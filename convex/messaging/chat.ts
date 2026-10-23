@@ -43,10 +43,11 @@ export const sendMessage = mutation({
     // Solo archivos originales elegidos por el usuario. fileIds también puede
     // contener imágenes auxiliares extraídas de documentos para contexto del LLM.
     attachmentFileIds: v.optional(v.array(v.string())),
+    clientMessageId: v.optional(v.string()),
   },
   handler: async (
     ctx,
-    { threadId, prompt, fileId, fileIds, attachmentFileIds },
+    { threadId, prompt, fileId, fileIds, attachmentFileIds, clientMessageId },
   ) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) {
@@ -60,6 +61,12 @@ export const sendMessage = mutation({
 
     if (!chatThread || chatThread.userId !== userId) {
       throw new Error("Thread not found or access denied");
+    }
+
+    if (clientMessageId) {
+      if (clientMessageId.length > 128) throw new Error("Identificador de envío inválido.");
+      const receipt = chatThread.clientMessageReceipts?.find(row => row.clientMessageId === clientMessageId);
+      if (receipt) return { messageId: receipt.messageId };
     }
 
     console.log(`[Chat] 📤 Guardando mensaje en thread ${threadId}`);
@@ -226,6 +233,14 @@ export const sendMessage = mutation({
     }
     
     // Disparar generación de respuesta asíncrona
+    if (clientMessageId) {
+      await ctx.db.patch(chatThread._id, {
+        clientMessageReceipts: [
+          ...(chatThread.clientMessageReceipts ?? []),
+          { clientMessageId, messageId },
+        ].slice(-100),
+      });
+    }
     await ctx.scheduler.runAfter(0, internal.messaging.chatGenerate.generateResponseAsync, {
       threadId,
       promptMessageId: messageId,
@@ -269,11 +284,17 @@ export const listThreadMessages = query({
 
     // Obtener mensajes regulares (no-streaming)
     const paginated = await listUIMessages(ctx, components.agent, args);
+    const clientIds = new Map((chatThread.clientMessageReceipts ?? []).map(row => [row.messageId, row.clientMessageId]));
 
     // Sincronizar deltas de streaming activos para este thread
     const streams = await syncStreams(ctx, components.agent, args);
 
-    return { ...paginated, streams };
+    return {
+      ...paginated,
+      page: paginated.page.map(message => clientIds.has(message.id)
+        ? { ...message, clientMessageId: clientIds.get(message.id) } : message),
+      streams,
+    };
   },
 });
 

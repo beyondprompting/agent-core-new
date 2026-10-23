@@ -94,6 +94,11 @@ export default defineSchema({
     title: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    // Bounded UI acknowledgements; never part of the model or attachment content.
+    clientMessageReceipts: v.optional(v.array(v.object({
+      clientMessageId: v.string(),
+      messageId: v.string(),
+    }))),
   })
     .index("by_thread", ["threadId"])
     .index("by_user", ["userId"])

@@ -106,6 +106,7 @@ interface ChatInputFormProps {
   currentThreadId: string | null;
   isCreatingThread: boolean;
   isUploadingFile: boolean;
+  isSendingMessage?: boolean;
   isAgentThinking?: boolean;
 }
 
@@ -130,6 +131,7 @@ export function ChatInputForm({
   currentThreadId,
   isCreatingThread,
   isUploadingFile,
+  isSendingMessage = false,
   isAgentThinking = false,
 }: ChatInputFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -149,6 +151,7 @@ export function ChatInputForm({
     currentThreadId &&
     !isCreatingThread &&
     !isUploadingFile &&
+    !isSendingMessage &&
     !isProcessingPastedFiles &&
     !isRecording &&
     !isAgentThinking;
