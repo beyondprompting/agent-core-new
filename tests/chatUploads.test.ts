@@ -4,7 +4,7 @@ import { getFunctionName } from "convex/server";
 import { getFile } from "@convex-dev/agent";
 import { components } from "../convex/_generated/api";
 import { registerUploadedFile } from "../convex/data/files";
-import { sendMessage } from "../convex/messaging/chat";
+import { sendMessage, listThreadMessages } from "../convex/messaging/chat";
 import * as tasks from "../convex/data/tasks";
 import * as trello from "../convex/data/trello";
 import { trelloProvider } from "../convex/integrations/trelloProvider";
@@ -56,6 +56,7 @@ function fixture() {
   };
   ctx.runQuery = async (ref: any, args: any) => {
     if (args.fileId) return agentFiles.get(args.fileId) ?? null;
+    if (args.paginationOpts) return { page: list("agentMessages").filter(row => row.threadId === args.threadId), isDone: true, continueCursor: "" };
     const name = getFunctionName(ref).split(":")[1];
     return (tasks as any)[name]._handler(ctx, args);
   };
@@ -70,7 +71,7 @@ function fixture() {
     }
     if (args.messages) {
       return { messages: args.messages.map((message: any) => {
-        const row = { ...message, _id: `message-${++counter}`, threadId: args.threadId };
+        const row = { ...message, _id: `message-${++counter}`, threadId: args.threadId, status: "success", order: counter, stepOrder: 0, tool: false };
         put("agentMessages", row);
         return row;
       }) };
@@ -87,7 +88,7 @@ function fixture() {
     const result = await (registerUploadedFile as any)._handler(ctx, { storageId: id, filename: name, mimeType: type });
     return { ...result, inputStorageId: id };
   };
-  const send = (ids: string[], attachmentFileIds?: string[]) => (sendMessage as any)._handler(ctx, { threadId: "thread", prompt: "Revisá estos archivos", fileIds: ids, attachmentFileIds });
+  const send = (ids: string[], attachmentFileIds?: string[], clientMessageId?: string) => (sendMessage as any)._handler(ctx, { threadId: "thread", prompt: "Revisá estos archivos", fileIds: ids, attachmentFileIds, clientMessageId });
   return { ctx, rows, blobs, metadata, agentFiles, deleted, scheduled, list, upload, send };
 }
 
@@ -126,7 +127,7 @@ test("registration preserves original bytes and Agent references without fetchin
 test("five chat uploads retain their exact storage references when attached to a task and forwarded to Trello", async t => {
   const f = fixture();
   const files = await Promise.all(Array.from({ length: 5 }, (_, index) => f.upload(`Brief ${index}.pdf`)));
-  await f.send(files.map(file => file.fileId), files.map(file => file.fileId));
+  await f.send(files.map(file => file.fileId), files.map(file => file.fileId), "five-originals");
   assert.equal(f.list("agentMessages")[0].fileIds.length, 5);
   assert.equal(f.list("taskAttachments").length, 5);
   assert.deepEqual(f.list("taskAttachments").map(row => row.storageId).sort(), files.map(file => file.storageId).sort());
@@ -141,6 +142,42 @@ test("five chat uploads retain their exact storage references when attached to a
   assert.equal(result.failed, 0);
   await trello.syncPendingTaskAttachmentsToTrello._handler(f.ctx, { taskId: "task" });
   assert.equal(sent.length, 5);
+});
+
+test("client receipts reconcile text and file messages through the real Agent query without changing message content or resending", async () => {
+  const f = fixture();
+  const file = await f.upload("Brief.pdf");
+  const first = await f.send([file.fileId], undefined, "file-send");
+  const second = await (sendMessage as any)._handler(f.ctx, { threadId: "thread", prompt: "Solo texto", clientMessageId: "text-send" });
+  const page = await (listThreadMessages as any)._handler(f.ctx, { threadId: "thread", paginationOpts: { numItems: 50, cursor: null } });
+  assert.equal(page.page.find((row: any) => row.id === first.messageId).clientMessageId, "file-send");
+  assert.equal(page.page.find((row: any) => row.id === second.messageId).clientMessageId, "text-send");
+  assert.equal(page.page.find((row: any) => row.id === second.messageId).text, "Solo texto");
+  assert.equal(page.page[0].parts.filter((part: any) => part.type === "file").length, 1);
+  assert.equal(f.list("taskAttachments").length, 1);
+  const before = f.scheduled.length;
+  const retry = await f.send([file.fileId], undefined, "file-send");
+  assert.equal(retry.messageId, first.messageId);
+  assert.equal(f.list("agentMessages").length, 2);
+  assert.equal(f.list("taskAttachments").length, 1);
+  assert.equal(f.scheduled.length, before);
+  // Receipt fields stay outside the content and metadata passed to models.
+  assert.doesNotMatch(JSON.stringify(f.list("agentMessages")), /file-send|text-send|clientMessageId/);
+  f.ctx.auth.getUserIdentity = async () => ({ subject: "another-user|session" });
+  await assert.rejects(f.send([file.fileId], undefined, "file-send"), /access denied/);
+});
+
+test("receipt history is bounded and legacy sends keep the existing storage shape", async () => {
+  const f = fixture();
+  f.rows.get("chat").clientMessageReceipts = Array.from({ length: 100 }, (_, index) => ({ clientMessageId: `old-${index}`, messageId: `message-old-${index}` }));
+  await f.send([], undefined, "newest");
+  const receipts = f.rows.get("chat").clientMessageReceipts;
+  assert.equal(receipts.length, 100);
+  assert.equal(receipts[0].clientMessageId, "old-1");
+  assert.equal(receipts[99].clientMessageId, "newest");
+  await f.send([]);
+  assert.equal(f.rows.get("chat").clientMessageReceipts, receipts);
+  await assert.rejects(f.send([], undefined, "x".repeat(129)), /Identificador/);
 });
 
 test("server rejects a sixth original even with a partial attachment list, and rejects oversized stored bytes before saving", async () => {

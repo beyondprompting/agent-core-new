@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useSyncExternalStore } from "react";
 import { useMutation, useAction, useQuery } from "convex/react";
 import { useUIMessages } from "@convex-dev/agent/react";
 import { api } from "@/convex/_generated/api";
@@ -20,6 +20,11 @@ import { ChatMessageList } from "./components/chat/ChatMessageList";
 import { ChatInputForm } from "./components/chat/ChatInputForm";
 import { FileInfo, ExtractedImage } from "./components/chat/FilePreviewList";
 import { Message } from "./components/chat/MessageContent";
+import { showChatWaitingIndicator } from "./lib/chatWaitingIndicator";
+import {
+  pendingChatMessages, belongsToChat, visiblePendingMessages, localChatMessage,
+  type PendingChatMessage,
+} from "./lib/pendingChatMessages";
 
 // =============================================================================
 // Tipos para Web Speech API
@@ -144,17 +149,34 @@ export default function ChatInterface({
   const generateUploadUrl = useMutation(api.data.files.generateUploadUrl);
   const registerUploadedFile = useAction(api.data.files.registerUploadedFile);
   const accessProfile = useQuery(api.data.userAccess.viewerAccessProfile);
+  const viewerUserId = accessProfile && "userId" in accessProfile ? accessProfile.userId : undefined;
+  const sendScope = viewerUserId && currentThreadId
+    ? { userId: viewerUserId, threadId: currentThreadId } : null;
+  const allPendingMessages = useSyncExternalStore(
+    pendingChatMessages.subscribe, pendingChatMessages.getSnapshot, pendingChatMessages.getServerSnapshot,
+  );
 
   const { results: uiMessages, status: streamStatus } = useUIMessages(
     api.messaging.chat.listThreadMessages,
     currentThreadId ? { threadId: currentThreadId as any } : "skip",
     { initialNumItems: 50, stream: true },
   );
+  const pendingMessages = sendScope
+    ? visiblePendingMessages(allPendingMessages, sendScope, uiMessages) : [];
+  const hasPendingMessage = sendScope
+    ? allPendingMessages.some(message => belongsToChat(message, sendScope)) : false;
+  const pendingScrollKey = pendingMessages.map(message => `${message.id}:${message.status}`).join(",");
+
+  useEffect(() => {
+    if (viewerUserId && currentThreadId) {
+      pendingChatMessages.acknowledge({ userId: viewerUserId, threadId: currentThreadId }, uiMessages);
+    }
+  }, [uiMessages, viewerUserId, currentThreadId]);
 
   // Auto-scroll al final cuando hay mensajes nuevos
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [uiMessages]);
+  }, [uiMessages, pendingScrollKey]);
 
   // Sincronizar con threadId inicial
   useEffect(() => {
@@ -173,7 +195,7 @@ export default function ChatInterface({
   // ===========================================================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectingFilesRef.current || isUploadingFile) return;
+    if (selectingFilesRef.current || isUploadingFile || !sendScope) return;
 
     const voiceText = finalTranscript.trim();
     const textInput = input.trim();
@@ -196,19 +218,29 @@ export default function ChatInterface({
 
     const currentInput = combinedInput;
     const currentFiles = [...selectedFiles];
+    // Insert before any upload starts. The store also guards rapid double submits.
+    const pending = pendingChatMessages.start(sendScope, currentInput, currentFiles);
+    if (!pending) return;
     setInput("");
     setFinalTranscript("");
     setInterimTranscript("");
     setSelectedFiles([]);
+    await deliverPendingMessage(pending);
+  };
 
+  const deliverPendingMessage = async (pending: PendingChatMessage) => {
+    const currentInput = pending.text;
+    const currentFiles = pending.files;
     try {
+      // Give React a chance to display the message before converting file bytes.
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
       const fileIds: string[] = [];
       const attachmentFileIds: string[] = [];
       const extractedTexts: string[] = [];
 
       if (currentFiles.length > 0) {
         setIsUploadingFile(true);
-        for (const file of currentFiles) {
+        for (const [fileIndex, file] of currentFiles.entries()) {
           // 1. Convertir base64 (preview) a Blob binario
           const blob = base64ToBlob(file.base64);
           // Para imágenes, blob.type refleja el formato real tras compresión (JPEG)
@@ -262,6 +294,8 @@ export default function ChatInterface({
               `--- Contenido extraído del documento "${file.name}" ---\n${file.extractedMarkdown}\n--- Fin del documento ---`,
             );
           }
+          // Visual progress only: Word is ready after its auxiliary images too.
+          pendingChatMessages.markFileUploaded(pending.id, fileIndex);
         }
         setIsUploadingFile(false);
       }
@@ -274,20 +308,27 @@ export default function ChatInterface({
           : docsText;
       }
 
-      await sendMessage({
-        threadId: currentThreadId as any,
+      const { messageId } = await sendMessage({
+        threadId: pending.threadId,
+        clientMessageId: pending.id,
         prompt: finalPrompt,
         fileIds: fileIds.length > 0 ? fileIds : undefined,
         attachmentFileIds:
           attachmentFileIds.length > 0 ? attachmentFileIds : undefined,
       });
+      pendingChatMessages.confirm(pending.id, messageId);
     } catch (error) {
       console.error("Error enviando mensaje:", error);
-      alert(error instanceof Error ? error.message : "No se pudo enviar el mensaje. Podés volver a intentar.");
-      setInput(currentInput);
-      setSelectedFiles(currentFiles);
+      pendingChatMessages.fail(pending.id);
+    } finally {
       setIsUploadingFile(false);
     }
+  };
+
+  const handleRetryMessage = (id: string) => {
+    if (!sendScope) return;
+    const pending = pendingChatMessages.retry(id, sendScope);
+    if (pending) void deliverPendingMessage(pending);
   };
 
   const handleNewChat = async () => {
@@ -521,9 +562,9 @@ export default function ChatInterface({
   // ===========================================================================
   // Procesar mensajes (adaptado para useUIMessages + streaming)
   // ===========================================================================
-  const messageList: Message[] = (uiMessages || [])
+  const savedMessageList: Message[] = (uiMessages || [])
     .map((msg: any) => ({
-      key: msg.key,
+      key: msg.role === "user" && msg.clientMessageId ? msg.clientMessageId : msg.key,
       role: msg.role,
       content: msg.parts || msg.text || "",
       _creationTime: msg._creationTime,
@@ -538,39 +579,14 @@ export default function ChatInterface({
         const hasContent = Array.isArray(msg.content)
           ? msg.content.some((p) => p.text || p.url)
           : typeof msg.content === "string" && msg.content.trim() !== "";
-        return hasContent || msg.status === "streaming";
+        // Empty streaming placeholders keep using the same waiting indicator.
+        return hasContent;
       }
       return true;
     });
+  const messageList = [...savedMessageList, ...pendingMessages.map(localChatMessage)];
 
-  // Detectar si el último mensaje es un error (contiene ⚠️)
-  const lastAssistantMessage = (uiMessages || [])
-    .filter((msg: any) => msg.role === "assistant")
-    .pop();
-  const isErrorMessage =
-    lastAssistantMessage?.text?.includes("⚠️") ||
-    (Array.isArray(lastAssistantMessage?.parts) &&
-      lastAssistantMessage.parts.some((p: any) => p.text?.includes("⚠️")));
-
-  // isAgentThinking: mostrar indicador solo cuando el agente está procesando
-  // pero NO hay ningún mensaje streaming ya visible (evita doble loader)
-  const hasAnyStreamingMessage = (uiMessages || []).some(
-    (msg: any) => msg.role === "assistant" && msg.status === "streaming",
-  );
-
-  const isAgentThinking =
-    !isErrorMessage &&
-    !hasAnyStreamingMessage &&
-    ((uiMessages || []).some(
-      (msg: any) =>
-        msg.role === "assistant" &&
-        msg.status === "pending" &&
-        !msg.text &&
-        (!msg.parts || msg.parts.length === 0),
-    ) ||
-      (messageList.length > 0 &&
-        messageList[messageList.length - 1]?.role === "user" &&
-        !isErrorMessage));
+  const isAgentThinking = showChatWaitingIndicator(uiMessages, pendingMessages);
 
   // ===========================================================================
   // Render
@@ -600,6 +616,8 @@ export default function ChatInterface({
           currentThreadId={currentThreadId}
           isCreatingThread={isCreatingThread}
           showUserLinkPreviews={Boolean(accessProfile)}
+          onRetryMessage={handleRetryMessage}
+          onDismissMessage={id => { if (sendScope) pendingChatMessages.dismiss(id, sendScope); }}
         />
         <div ref={messagesEndRef} />
       </div>
@@ -621,8 +639,9 @@ export default function ChatInterface({
         onCancelRecording={cancelRecording}
         onClearTranscript={() => setFinalTranscript("")}
         currentThreadId={currentThreadId}
-        isCreatingThread={isCreatingThread}
+        isCreatingThread={isCreatingThread || !viewerUserId}
         isUploadingFile={isUploadingFile || isProcessingFiles}
+        isSendingMessage={hasPendingMessage}
         isAgentThinking={isAgentThinking}
       />
     </div>
