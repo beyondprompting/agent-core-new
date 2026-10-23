@@ -9,9 +9,13 @@ import { hasExternalRequestsAccess, canViewExternalRequest } from "../convex/lib
 import * as history from "../convex/data/notificationHistory";
 import * as notifications from "../convex/data/commentNotifications";
 import * as taskNotifications from "../convex/data/taskCreationNotifications";
-import { notifyExternalTaskCreated, taskCreationEmail } from "../convex/lib/taskCreationNotifications";
+import { canReceiveTaskCreation, notifyExternalTaskCreated, taskCreationEmail } from "../convex/lib/taskCreationNotifications";
 import { notifyTaskComment, mentionEmail } from "../convex/lib/commentNotifications";
 import { clientConfig } from "../config/tenant.config";
+import { setInternalUserRoles } from "../convex/data/internalUserAdmin";
+import { setExternalUserRoles } from "../convex/data/externalUserAdmin";
+import { listMyClientProjects } from "../convex/data/controlPanel";
+import { INTERNAL_USER_ADMIN_ALLOWED_USER_IDS } from "../convex/lib/internalUserAdminAccess";
 
 const originalRequestsClientIds = clientConfig.ui.externalRequestsClientIds;
 test.beforeEach(() => { clientConfig.ui.externalRequestsClientIds = ["client1"]; });
@@ -442,6 +446,105 @@ test("new external tasks notify only authorized internals, once per task and rec
   const other = notificationFixture(); other.rows.get("task1").createdBy = "internal1";
   await notifyExternalTaskCreated(other.ctx, "task1" as any);
   assert.equal([...other.rows.values()].filter(r => r._table === "taskCreationNotifications").length, 0);
+});
+
+test("external coordinator gets new-task notifications only for already-visible tasks, without changing board or detail", async () => {
+  const f = notificationFixture();
+  f.as("otherExternal");
+  const board = await f.call(tasks.listMyExternalRequests, {});
+  const detail = await f.call(panel.detail, { taskId: "task1" });
+  const adminId = INTERNAL_USER_ADMIN_ALLOWED_USER_IDS[0];
+  f.put("users", { _id: adminId });
+  f.as(adminId);
+  await f.call(setExternalUserRoles, { approvedExternalUserId: "external2", isCoordinator: true });
+  f.as("otherExternal");
+  assert.deepEqual(await f.call(tasks.listMyExternalRequests, {}), board);
+  assert.deepEqual(await f.call(panel.detail, { taskId: "task1" }), detail);
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  const rows = [...f.rows.values()].filter(r => r._table === "taskCreationNotifications");
+  assert.deepEqual(rows.map(r => r.userId).sort(), ["internal1", "internal2", "otherExternal"]);
+  assert.equal((await f.call(taskNotifications.unread, {})).length, 1);
+  const page = await f.call(history.list, { paginationOpts: { numItems: 5, cursor: null } });
+  assert.equal(page.page[0].external, true);
+  assert.equal(page.page[0].kind, "task");
+  await f.call(taskNotifications.markRead, { taskId: "task1" });
+  assert.deepEqual(await f.call(taskNotifications.unread, {}), []);
+  assert.equal((await f.call(history.list, { paginationOpts: { numItems: 5, cursor: null } })).page[0].read, true);
+});
+
+test("stored internal work and platform roles preserve existing boards, task access and details", async () => {
+  const f = notificationFixture();
+  f.rows.get("client1").name = "Cliente";
+  f.rows.get("brand1").name = "Categoría A";
+  f.rows.get("brand2").name = "Categoría B";
+  f.as("internal1");
+  const snapshot = async () => ({
+    board: await f.call(listMyClientProjects, {}),
+    task: await f.call(tasks.getTask, { taskId: "task1" }),
+    detail: await f.call(panel.detail, { taskId: "task1" }),
+  });
+  const before = await snapshot();
+  const adminId = INTERNAL_USER_ADMIN_ALLOWED_USER_IDS[0];
+  f.put("users", { _id: adminId });
+  f.as(adminId);
+  await f.call(setInternalUserRoles, { targetUserId: "internal1", platformRole: "super_admin", workRole: "Cuentas" });
+  f.as("internal1");
+  assert.deepEqual(await snapshot(), before);
+  assert.equal(await canViewExternalRequest(f.ctx, "internal1" as any, f.rows.get("task1")), false);
+});
+
+test("coordinator designation never expands category, client or feature access and excludes own tasks", async () => {
+  for (const denied of ["own", "category", "client", "disabled-client", "internal-task", "deleted", "archived"]) {
+    const f = notificationFixture();
+    f.rows.get("external2").isCoordinator = true;
+    if (denied === "own") f.rows.get("task1").createdBy = "otherExternal";
+    if (denied === "category") f.rows.get("assignment-otherExternal").brandId = "brand2";
+    if (denied === "client") f.rows.get("assignment-otherExternal").clientId = "other-client";
+    if (denied === "disabled-client") clientConfig.ui.externalRequestsClientIds = [];
+    if (denied === "internal-task") f.rows.get("task1").source = "internal";
+    if (["deleted", "archived"].includes(denied)) f.rows.get("task1").convexStatus = denied;
+    assert.equal(await canReceiveTaskCreation(f.ctx, "otherExternal" as any, f.rows.get("task1")), false, denied);
+    await notifyExternalTaskCreated(f.ctx, "task1" as any);
+    assert.equal([...f.rows.values()].filter(r => r._table === "taskCreationNotifications" && r.userId === "otherExternal").length, 0, denied);
+    clientConfig.ui.externalRequestsClientIds = ["client1"];
+  }
+});
+
+test("removing coordinator designation or assignments hides queued notifications and cancels email", async () => {
+  for (const revoke of ["role", "assignment"]) {
+    const f = notificationFixture();
+    f.rows.get("external2").isCoordinator = true;
+    await notifyExternalTaskCreated(f.ctx, "task1" as any);
+    const row = [...f.rows.values()].find(r => r._table === "taskCreationNotifications" && r.userId === "otherExternal");
+    if (revoke === "role") f.rows.get("external2").isCoordinator = false;
+    else f.rows.delete("assignment-otherExternal");
+    f.as("otherExternal");
+    assert.deepEqual(await f.call(taskNotifications.unread, {}), []);
+    assert.deepEqual((await f.call(history.list, { paginationOpts: { numItems: 5, cursor: null } })).page, []);
+    assert.equal(await f.call(taskNotifications.claimEmail, { id: row._id }), null);
+    assert.equal(row.emailState, "cancelled");
+  }
+});
+
+test("coordinator emails use the existing external task panel", async () => {
+  const f = notificationFixture();
+  f.rows.get("external2").isCoordinator = true;
+  f.rows.get("otherExternal").email = "coordinator@example.com";
+  await notifyExternalTaskCreated(f.ctx, "task1" as any);
+  const row = [...f.rows.values()].find(r => r._table === "taskCreationNotifications" && r.userId === "otherExternal");
+  const saved = { RESEND_API_KEY: process.env.RESEND_API_KEY, APP_URL: process.env.APP_URL };
+  process.env.RESEND_API_KEY = "test";
+  process.env.APP_URL = "https://app.example.com";
+  try {
+    const claim = await f.call(taskNotifications.claimEmail, { id: row._id });
+    const email = JSON.parse(claim.payload);
+    assert.match(email.text, /https:\/\/app.example.com\/workspace\/requests\?taskId=task1/);
+    assert.ok(!email.text.includes("control-panel"));
+    assert.deepEqual(email.to, ["coordinator@example.com"]);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
 });
 
 test("creation email retries keep payload and idempotency key, suppress concurrent sends and respect expiry", async () => {

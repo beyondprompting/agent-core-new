@@ -83,6 +83,7 @@ import type * as lib_taskPanelComment from "../lib/taskPanelComment.js";
 import type * as lib_taskStatuses from "../lib/taskStatuses.js";
 import type * as lib_trelloCommentFormat from "../lib/trelloCommentFormat.js";
 import type * as lib_trelloPolicy from "../lib/trelloPolicy.js";
+import type * as lib_userRoles from "../lib/userRoles.js";
 import type * as messaging_chat from "../messaging/chat.js";
 import type * as messaging_chatGenerate from "../messaging/chatGenerate.js";
 import type * as messaging_threadTitle from "../messaging/threadTitle.js";
@@ -198,6 +199,7 @@ declare const fullApi: ApiFromModules<{
   "lib/taskStatuses": typeof lib_taskStatuses;
   "lib/trelloCommentFormat": typeof lib_trelloCommentFormat;
   "lib/trelloPolicy": typeof lib_trelloPolicy;
+  "lib/userRoles": typeof lib_userRoles;
   "messaging/chat": typeof messaging_chat;
   "messaging/chatGenerate": typeof messaging_chatGenerate;
   "messaging/threadTitle": typeof messaging_threadTitle;

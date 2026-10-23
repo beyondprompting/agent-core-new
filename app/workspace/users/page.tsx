@@ -22,8 +22,10 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { WorkspaceLayout } from "../../components/WorkspaceLayout";
 import { Button } from "../../components/ui/Button";
+import { UserRolesEditor } from "../../components/UserRolesEditor";
 
 type AdminUser = {
+  roleProfile: { platformRole: "user" | "admin" | "super_admin"; workRole?: string } | null;
   _id: Id<"users">;
   name: string;
   email: string;
@@ -524,6 +526,8 @@ export default function InternalUsersAdminPage() {
                     <PermissionStatusPanel user={selectedUser} />
                   </div>
                 </section>
+
+                <UserRolesEditor key={selectedUser._id} kind="internal" userId={selectedUser._id} platformRole={selectedUser.roleProfile?.platformRole} workRole={selectedUser.roleProfile?.workRole} />
 
                 <section className="rounded-lg border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3 dark:bg-muted/20">

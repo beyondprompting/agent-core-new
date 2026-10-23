@@ -6,6 +6,26 @@ import { v } from "convex/values";
 export default defineSchema({
   ...authTables,
 
+  // Roles preparados para una futura migración. No autorizan pantallas ni acciones.
+  // Solo se guardan perfiles internos; los externos nunca tienen platformRole.
+  userAccessProfiles: defineTable({
+    userId: v.id("users"),
+    platformRole: v.union(v.literal("user"), v.literal("admin"), v.literal("super_admin")),
+    workRole: v.optional(v.string()),
+    updatedAt: v.number(),
+    updatedBy: v.id("users"),
+  }).index("by_user", ["userId"]),
+
+  userRoleAuditLog: defineTable({
+    actorId: v.id("users"),
+    targetUserId: v.optional(v.id("users")),
+    approvedExternalUserId: v.optional(v.id("approvedExternalUsers")),
+    before: v.string(),
+    after: v.string(),
+    createdAt: v.number(),
+  }).index("by_target_user", ["targetUserId"])
+    .index("by_external_user", ["approvedExternalUserId"]),
+
   commentNotifications: defineTable({
     userId: v.id("users"), taskId: v.id("tasks"), messageId: v.id("taskMessages"),
     read: v.boolean(), createdAt: v.number(),
@@ -53,6 +73,9 @@ export default defineSchema({
   // Si el email existe en esta tabla, el usuario puede solicitar un código.
   approvedExternalUsers: defineTable({
     email: v.string(),
+    // Solo cambia destinatarios de notificaciones, nunca permisos ni visibilidad.
+    isCoordinator: v.optional(v.boolean()),
+    workRole: v.optional(v.string()),
     name: v.optional(v.string()),
     userId: v.optional(v.id("users")),
     preapprovedClientAccess: v.optional(
