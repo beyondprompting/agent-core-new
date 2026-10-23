@@ -22,7 +22,10 @@ import { FileInfo, ExtractedImage } from "./components/chat/FilePreviewList";
 import { Message } from "./components/chat/MessageContent";
 import { showChatWaitingIndicator } from "./lib/chatWaitingIndicator";
 import {
-  pendingChatMessages, belongsToChat, visiblePendingMessages, localChatMessage,
+  pendingChatMessages,
+  belongsToChat,
+  visiblePendingMessages,
+  localChatMessage,
   type PendingChatMessage,
 } from "./lib/pendingChatMessages";
 
@@ -149,11 +152,18 @@ export default function ChatInterface({
   const generateUploadUrl = useMutation(api.data.files.generateUploadUrl);
   const registerUploadedFile = useAction(api.data.files.registerUploadedFile);
   const accessProfile = useQuery(api.data.userAccess.viewerAccessProfile);
-  const viewerUserId = accessProfile && "userId" in accessProfile ? accessProfile.userId : undefined;
-  const sendScope = viewerUserId && currentThreadId
-    ? { userId: viewerUserId, threadId: currentThreadId } : null;
+  const viewerUserId =
+    accessProfile && "userId" in accessProfile
+      ? accessProfile.userId
+      : undefined;
+  const sendScope =
+    viewerUserId && currentThreadId
+      ? { userId: viewerUserId, threadId: currentThreadId }
+      : null;
   const allPendingMessages = useSyncExternalStore(
-    pendingChatMessages.subscribe, pendingChatMessages.getSnapshot, pendingChatMessages.getServerSnapshot,
+    pendingChatMessages.subscribe,
+    pendingChatMessages.getSnapshot,
+    pendingChatMessages.getServerSnapshot,
   );
 
   const { results: uiMessages, status: streamStatus } = useUIMessages(
@@ -162,14 +172,21 @@ export default function ChatInterface({
     { initialNumItems: 50, stream: true },
   );
   const pendingMessages = sendScope
-    ? visiblePendingMessages(allPendingMessages, sendScope, uiMessages) : [];
+    ? visiblePendingMessages(allPendingMessages, sendScope, uiMessages)
+    : [];
   const hasPendingMessage = sendScope
-    ? allPendingMessages.some(message => belongsToChat(message, sendScope)) : false;
-  const pendingScrollKey = pendingMessages.map(message => `${message.id}:${message.status}`).join(",");
+    ? allPendingMessages.some((message) => belongsToChat(message, sendScope))
+    : false;
+  const pendingScrollKey = pendingMessages
+    .map((message) => `${message.id}:${message.status}`)
+    .join(",");
 
   useEffect(() => {
     if (viewerUserId && currentThreadId) {
-      pendingChatMessages.acknowledge({ userId: viewerUserId, threadId: currentThreadId }, uiMessages);
+      pendingChatMessages.acknowledge(
+        { userId: viewerUserId, threadId: currentThreadId },
+        uiMessages,
+      );
     }
   }, [uiMessages, viewerUserId, currentThreadId]);
 
@@ -212,14 +229,22 @@ export default function ChatInterface({
       assertChatOriginalCount(selectedFiles.length);
       assertChatFileSizes(selectedChatFileSizes(selectedFiles));
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Revisá los archivos seleccionados.");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Revisá los archivos seleccionados.",
+      );
       return;
     }
 
     const currentInput = combinedInput;
     const currentFiles = [...selectedFiles];
     // Insert before any upload starts. The store also guards rapid double submits.
-    const pending = pendingChatMessages.start(sendScope, currentInput, currentFiles);
+    const pending = pendingChatMessages.start(
+      sendScope,
+      currentInput,
+      currentFiles,
+    );
     if (!pending) return;
     setInput("");
     setFinalTranscript("");
@@ -233,7 +258,7 @@ export default function ChatInterface({
     const currentFiles = pending.files;
     try {
       // Give React a chance to display the message before converting file bytes.
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const fileIds: string[] = [];
       const attachmentFileIds: string[] = [];
       const extractedTexts: string[] = [];
@@ -272,14 +297,17 @@ export default function ChatInterface({
           // Auxiliary Word images are uploaded individually as binary, keeping
           // large base64 arrays out of action arguments. They are not task attachments.
           for (const [index, image] of (file.extractedImages ?? []).entries()) {
-            const imageBlob = base64ToBlob(`data:${image.mimeType};base64,${image.data}`);
+            const imageBlob = base64ToBlob(
+              `data:${image.mimeType};base64,${image.data}`,
+            );
             const imageUploadUrl = await generateUploadUrl();
             const imageResponse = await fetch(imageUploadUrl, {
               method: "POST",
               headers: { "Content-Type": image.mimeType },
               body: imageBlob,
             });
-            if (!imageResponse.ok) throw new Error("Error subiendo imagen del documento");
+            if (!imageResponse.ok)
+              throw new Error("Error subiendo imagen del documento");
             const { storageId: imageStorageId } = await imageResponse.json();
             const imageResult = await registerUploadedFile({
               storageId: imageStorageId,
@@ -354,12 +382,15 @@ export default function ChatInterface({
     try {
       const remainingSlots = MAX_FILES - selection.length;
       if (remainingSlots <= 0) {
-        alert(`Solo puedes subir hasta ${MAX_FILES} archivos.`);
+        alert(`Solo puedes subir hasta ${MAX_FILES} archivos por mensaje.`);
         return;
       }
 
       const filesToProcess = Array.from(files).slice(0, remainingSlots);
-      if (files.length > remainingSlots) alert(`Se agregarán hasta ${remainingSlots} archivos. El máximo es ${MAX_FILES} por mensaje.`);
+      if (files.length > remainingSlots)
+        alert(
+          `Se agregarán hasta ${remainingSlots} archivos. El máximo es ${MAX_FILES} por mensaje.`,
+        );
       for (const file of filesToProcess) {
         if (!SUPPORTED_FILE_TYPES.includes(file.type)) {
           alert(`Tipo de archivo no soportado: ${file.name}`);
@@ -423,7 +454,10 @@ export default function ChatInterface({
               }),
             };
 
-            const result = await mammoth.convertToHtml({ arrayBuffer }, options);
+            const result = await mammoth.convertToHtml(
+              { arrayBuffer },
+              options,
+            );
             const turndown = new TurndownService({
               headingStyle: "atx",
               codeBlockStyle: "fenced",
@@ -456,7 +490,11 @@ export default function ChatInterface({
         try {
           assertChatFileSizes(selectedChatFileSizes([...selection, candidate]));
         } catch (error) {
-          alert(error instanceof Error ? error.message : "Revisá el peso de los archivos.");
+          alert(
+            error instanceof Error
+              ? error.message
+              : "Revisá el peso de los archivos.",
+          );
           continue;
         }
         selection.push(candidate);
@@ -564,7 +602,10 @@ export default function ChatInterface({
   // ===========================================================================
   const savedMessageList: Message[] = (uiMessages || [])
     .map((msg: any) => ({
-      key: msg.role === "user" && msg.clientMessageId ? msg.clientMessageId : msg.key,
+      key:
+        msg.role === "user" && msg.clientMessageId
+          ? msg.clientMessageId
+          : msg.key,
       role: msg.role,
       content: msg.parts || msg.text || "",
       _creationTime: msg._creationTime,
@@ -584,7 +625,10 @@ export default function ChatInterface({
       }
       return true;
     });
-  const messageList = [...savedMessageList, ...pendingMessages.map(localChatMessage)];
+  const messageList = [
+    ...savedMessageList,
+    ...pendingMessages.map(localChatMessage),
+  ];
 
   const isAgentThinking = showChatWaitingIndicator(uiMessages, pendingMessages);
 
@@ -617,7 +661,9 @@ export default function ChatInterface({
           isCreatingThread={isCreatingThread}
           showUserLinkPreviews={Boolean(accessProfile)}
           onRetryMessage={handleRetryMessage}
-          onDismissMessage={id => { if (sendScope) pendingChatMessages.dismiss(id, sendScope); }}
+          onDismissMessage={(id) => {
+            if (sendScope) pendingChatMessages.dismiss(id, sendScope);
+          }}
         />
         <div ref={messagesEndRef} />
       </div>
