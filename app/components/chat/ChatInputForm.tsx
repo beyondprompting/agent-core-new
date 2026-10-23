@@ -546,8 +546,8 @@ export function ChatInputForm({
       {/* Drag hint */}
       {!isDragging && selectedFiles.length < MAX_FILES && (
         <p className="mt-1 hidden text-center text-xs text-muted-foreground sm:block">
-          Hasta {MAX_FILES} archivos · {MAX_FILE_SIZE_MB} MiB por archivo ·{" "}
-          {CHAT_MAX_TOTAL_SIZE_MB} MB en total
+          {MAX_FILE_SIZE_MB} MB por archivo · {CHAT_MAX_TOTAL_SIZE_MB} MB en
+          total
         </p>
       )}
     </div>
