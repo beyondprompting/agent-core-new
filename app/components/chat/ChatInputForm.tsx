@@ -1,6 +1,12 @@
 "use client";
 
-import { useRef, useState, useCallback, DragEvent, ClipboardEvent } from "react";
+import {
+  useRef,
+  useState,
+  useCallback,
+  DragEvent,
+  ClipboardEvent,
+} from "react";
 import { FilePreviewList, FileInfo } from "./FilePreviewList";
 import { VoiceRecorderPanel } from "./VoiceRecorderPanel";
 import {
@@ -48,9 +54,7 @@ function dataUrlToFile(dataUrl: string, filename: string): File | null {
 
   const mimeType = match[1];
   const base64Data = match[2].replace(/\s/g, "");
-  const bytes = Uint8Array.from(atob(base64Data), (char) =>
-    char.charCodeAt(0),
-  );
+  const bytes = Uint8Array.from(atob(base64Data), (char) => char.charCodeAt(0));
 
   return new File([bytes], filename, {
     type: mimeType,
@@ -189,7 +193,7 @@ export function ChatInputForm({
 
       const remainingSlots = MAX_FILES - selectedFiles.length;
       if (remainingSlots <= 0) {
-        alert(`Solo puedes subir hasta ${MAX_FILES} archivos.`);
+        alert(`Solo puedes subir hasta ${MAX_FILES} archivos por mensaje.`);
         return;
       }
 
@@ -280,7 +284,7 @@ export function ChatInputForm({
       const remainingSlots = MAX_FILES - selectedFiles.length;
       if (remainingSlots <= 0) {
         if (imageFilesFromClipboard.length > 0 || html.includes("<img")) {
-          alert(`Solo puedes subir hasta ${MAX_FILES} archivos.`);
+          alert(`Solo puedes subir hasta ${MAX_FILES} archivos por mensaje.`);
         }
         return;
       }
@@ -542,7 +546,8 @@ export function ChatInputForm({
       {/* Drag hint */}
       {!isDragging && selectedFiles.length < MAX_FILES && (
         <p className="mt-1 hidden text-center text-xs text-muted-foreground sm:block">
-          Hasta {MAX_FILES} archivos · {MAX_FILE_SIZE_MB} MiB por archivo · {CHAT_MAX_TOTAL_SIZE_MB} MB en total
+          Hasta {MAX_FILES} archivos · {MAX_FILE_SIZE_MB} MiB por archivo ·{" "}
+          {CHAT_MAX_TOTAL_SIZE_MB} MB en total
         </p>
       )}
     </div>
