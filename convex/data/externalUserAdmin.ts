@@ -15,6 +15,28 @@ import {
   validatePreapprovedClientAccess,
 } from "../lib/externalUserPreapproval";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
+import { normalizeWorkRole, removeInternalRoleProfileForExternal, requireUserRoleAdmin } from "../lib/userRoles";
+
+export const setExternalUserRoles = mutation({
+  args: {
+    approvedExternalUserId: v.id("approvedExternalUsers"),
+    isCoordinator: v.boolean(),
+    workRole: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actorId = await requireUserRoleAdmin(ctx);
+    const current = await ctx.db.get(args.approvedExternalUserId);
+    if (!current) throw new Error("No encontramos este usuario externo.");
+    const values = { isCoordinator: args.isCoordinator, workRole: normalizeWorkRole(args.workRole) };
+    if (current.userId) await removeInternalRoleProfileForExternal(ctx, current.userId, current._id, actorId);
+    const before = JSON.stringify({ isCoordinator: current.isCoordinator ?? false, workRole: current.workRole });
+    const after = JSON.stringify(values);
+    if (before === after) return { ok: true };
+    await ctx.db.patch(current._id, values);
+    await ctx.db.insert("userRoleAuditLog", { actorId, targetUserId: current.userId, approvedExternalUserId: current._id, before, after, createdAt: Date.now() });
+    return { ok: true };
+  },
+});
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -242,6 +264,8 @@ export const getDashboard = query({
 
       users.push({
         _id: approvedUser._id,
+        isCoordinator: approvedUser.isCoordinator ?? false,
+        workRole: approvedUser.workRole,
         email: approvedUser.email,
         name: approvedUser.name,
         userId: approvedUser.userId,

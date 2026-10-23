@@ -5,6 +5,32 @@ import { mutation, query } from "../_generated/server";
 import { canUserAccessInternalUserAdmin } from "../lib/internalUserAdminAccess";
 import { isExcludedUserId } from "../lib/excludedUsers";
 import { isInternalUserActive } from "../lib/internalUserStatus";
+import { isExternalRoleTarget, normalizeWorkRole, requireUserRoleAdmin } from "../lib/userRoles";
+
+export const setInternalUserRoles = mutation({
+  args: {
+    targetUserId: v.id("users"),
+    platformRole: v.union(v.literal("user"), v.literal("admin"), v.literal("super_admin")),
+    workRole: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actorId = await requireUserRoleAdmin(ctx);
+    if (!(await ctx.db.get(args.targetUserId))) throw new Error("Usuario no encontrado.");
+    if (await isExternalRoleTarget(ctx, args.targetUserId)) {
+      throw new Error("Un usuario externo nunca puede tener un rol de administración de la plataforma.");
+    }
+    const current = await ctx.db.query("userAccessProfiles").withIndex("by_user", q => q.eq("userId", args.targetUserId)).unique();
+    const values = { platformRole: args.platformRole, workRole: normalizeWorkRole(args.workRole) };
+    const before = JSON.stringify({ platformRole: current?.platformRole ?? "user", workRole: current?.workRole });
+    const after = JSON.stringify(values);
+    if (before === after) return { ok: true };
+    const profile = { ...values, updatedAt: Date.now(), updatedBy: actorId };
+    if (current) await ctx.db.patch(current._id, profile);
+    else await ctx.db.insert("userAccessProfiles", { userId: args.targetUserId, ...profile });
+    await ctx.db.insert("userRoleAuditLog", { actorId, targetUserId: args.targetUserId, before, after, createdAt: Date.now() });
+    return { ok: true };
+  },
+});
 
 function normalizeEmail(email: unknown) {
   return typeof email === "string" ? email.trim().toLowerCase() : "";
@@ -120,6 +146,7 @@ export const getDashboard = query({
 
       internalUsers.push({
         _id: user._id,
+        roleProfile: await ctx.db.query("userAccessProfiles").withIndex("by_user", q => q.eq("userId", user._id)).unique(),
         name: formatUserName(user as Record<string, unknown>),
         email: normalizeEmail((user as Record<string, unknown>).email),
         image:
