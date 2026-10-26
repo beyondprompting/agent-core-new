@@ -6,7 +6,7 @@ import { v } from "convex/values";
 export default defineSchema({
   ...authTables,
 
-  // Roles preparados para una futura migración. No autorizan pantallas ni acciones.
+  // Niveles de administración. No conceden acceso a clientes, categorías o tareas.
   // Solo se guardan perfiles internos; los externos nunca tienen platformRole.
   userAccessProfiles: defineTable({
     userId: v.id("users"),
@@ -14,7 +14,8 @@ export default defineSchema({
     workRole: v.optional(v.string()),
     updatedAt: v.number(),
     updatedBy: v.id("users"),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"])
+    .index("by_platform_role", ["platformRole"]),
 
   userRoleAuditLog: defineTable({
     actorId: v.id("users"),

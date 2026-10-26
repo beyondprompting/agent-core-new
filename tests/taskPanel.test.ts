@@ -15,7 +15,6 @@ import { clientConfig } from "../config/tenant.config";
 import { setInternalUserRoles } from "../convex/data/internalUserAdmin";
 import { setExternalUserRoles } from "../convex/data/externalUserAdmin";
 import { listMyClientProjects } from "../convex/data/controlPanel";
-import { INTERNAL_USER_ADMIN_ALLOWED_USER_IDS } from "../convex/lib/internalUserAdminAccess";
 
 const originalRequestsClientIds = clientConfig.ui.externalRequestsClientIds;
 test.beforeEach(() => { clientConfig.ui.externalRequestsClientIds = ["client1"]; });
@@ -453,8 +452,9 @@ test("external coordinator gets new-task notifications only for already-visible 
   f.as("otherExternal");
   const board = await f.call(tasks.listMyExternalRequests, {});
   const detail = await f.call(panel.detail, { taskId: "task1" });
-  const adminId = INTERNAL_USER_ADMIN_ALLOWED_USER_IDS[0];
+  const adminId = "platform-admin";
   f.put("users", { _id: adminId });
+  f.put("userAccessProfiles", { _id: "platform-admin-role", userId: adminId, platformRole: "admin" });
   f.as(adminId);
   await f.call(setExternalUserRoles, { approvedExternalUserId: "external2", isCoordinator: true });
   f.as("otherExternal");
@@ -485,10 +485,11 @@ test("stored internal work and platform roles preserve existing boards, task acc
     detail: await f.call(panel.detail, { taskId: "task1" }),
   });
   const before = await snapshot();
-  const adminId = INTERNAL_USER_ADMIN_ALLOWED_USER_IDS[0];
+  const adminId = "platform-admin";
   f.put("users", { _id: adminId });
+  f.put("userAccessProfiles", { _id: "platform-admin-role", userId: adminId, platformRole: "admin" });
   f.as(adminId);
-  await f.call(setInternalUserRoles, { targetUserId: "internal1", platformRole: "super_admin", workRole: "Cuentas" });
+  await f.call(setInternalUserRoles, { targetUserId: "internal1", platformRole: "admin", workRole: "Cuentas" });
   f.as("internal1");
   assert.deepEqual(await snapshot(), before);
   assert.equal(await canViewExternalRequest(f.ctx, "internal1" as any, f.rows.get("task1")), false);

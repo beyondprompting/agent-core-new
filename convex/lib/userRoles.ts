@@ -1,7 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { canUserAccessInternalUserAdmin } from "./internalUserAdminAccess";
 
 // Check email too: an approved external may not have completed the async link yet.
 export async function isExternalRoleTarget(ctx: QueryCtx, userId: Id<"users">) {
@@ -11,10 +10,27 @@ export async function isExternalRoleTarget(ctx: QueryCtx, userId: Id<"users">) {
   return Boolean(email && await ctx.db.query("approvedExternalUsers").withIndex("by_email", q => q.eq("email", email)).unique());
 }
 
-// Deliberately uses the existing allowlist. Stored platform roles are inert.
+// Administrative roles never bypass client/category/task access checks.
+export async function canAdministerPlatform(ctx: QueryCtx, userId: Id<"users"> | null) {
+  if (!userId || !(await ctx.db.get(userId)) || await isExternalRoleTarget(ctx, userId)) return false;
+  const profile = await ctx.db.query("userAccessProfiles").withIndex("by_user", q => q.eq("userId", userId)).unique();
+  return profile?.platformRole === "admin" || profile?.platformRole === "super_admin";
+}
+
+export async function listPlatformAdminIds(ctx: QueryCtx) {
+  const profiles = (await Promise.all((["admin", "super_admin"] as const).map(platformRole =>
+    ctx.db.query("userAccessProfiles").withIndex("by_platform_role", q => q.eq("platformRole", platformRole)).collect(),
+  ))).flat();
+  const ids: Id<"users">[] = [];
+  for (const userId of new Set(profiles.map(profile => profile.userId))) {
+    if (await canAdministerPlatform(ctx, userId)) ids.push(userId);
+  }
+  return ids;
+}
+
 export async function requireUserRoleAdmin(ctx: QueryCtx) {
   const userId = await getAuthUserId(ctx);
-  if (!userId || !canUserAccessInternalUserAdmin(String(userId)) || await isExternalRoleTarget(ctx, userId)) {
+  if (!userId || !(await canAdministerPlatform(ctx, userId))) {
     throw new Error("No tienes permisos para administrar roles de usuarios.");
   }
   return userId;
