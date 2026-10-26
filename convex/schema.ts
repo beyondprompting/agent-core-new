@@ -656,6 +656,9 @@ export default defineSchema({
   corClients: defineTable({
     corClientId: v.number(),
     name: v.string(),
+    // Only an explicit true enables the external board and its associated notifications.
+    // Kept local: COR synchronization must not overwrite this setting.
+    externalBoardEnabled: v.optional(v.boolean()),
     nomenclature: v.optional(v.string()), // Abreviatura/iniciales del cliente (ej: "AD" para American Deli). Se usa como prefijo en nombres de proyectos.
     businessName: v.optional(v.string()),
     nameContact: v.optional(v.string()),
