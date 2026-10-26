@@ -64,6 +64,7 @@ import type * as lib_analyticsAccess from "../lib/analyticsAccess.js";
 import type * as lib_authorName from "../lib/authorName.js";
 import type * as lib_boardLabel from "../lib/boardLabel.js";
 import type * as lib_briefFormat from "../lib/briefFormat.js";
+import type * as lib_chatModelFileBudget from "../lib/chatModelFileBudget.js";
 import type * as lib_commentNotifications from "../lib/commentNotifications.js";
 import type * as lib_corRetry from "../lib/corRetry.js";
 import type * as lib_deliverableAnalytics from "../lib/deliverableAnalytics.js";
@@ -75,6 +76,7 @@ import type * as lib_internalUserAdminAccess from "../lib/internalUserAdminAcces
 import type * as lib_internalUserStatus from "../lib/internalUserStatus.js";
 import type * as lib_llmFallback from "../lib/llmFallback.js";
 import type * as lib_math from "../lib/math.js";
+import type * as lib_registerStoredAgentFile from "../lib/registerStoredAgentFile.js";
 import type * as lib_serverConfig from "../lib/serverConfig.js";
 import type * as lib_speechToText from "../lib/speechToText.js";
 import type * as lib_taskCreationNotifications from "../lib/taskCreationNotifications.js";
@@ -180,6 +182,7 @@ declare const fullApi: ApiFromModules<{
   "lib/authorName": typeof lib_authorName;
   "lib/boardLabel": typeof lib_boardLabel;
   "lib/briefFormat": typeof lib_briefFormat;
+  "lib/chatModelFileBudget": typeof lib_chatModelFileBudget;
   "lib/commentNotifications": typeof lib_commentNotifications;
   "lib/corRetry": typeof lib_corRetry;
   "lib/deliverableAnalytics": typeof lib_deliverableAnalytics;
@@ -191,6 +194,7 @@ declare const fullApi: ApiFromModules<{
   "lib/internalUserStatus": typeof lib_internalUserStatus;
   "lib/llmFallback": typeof lib_llmFallback;
   "lib/math": typeof lib_math;
+  "lib/registerStoredAgentFile": typeof lib_registerStoredAgentFile;
   "lib/serverConfig": typeof lib_serverConfig;
   "lib/speechToText": typeof lib_speechToText;
   "lib/taskCreationNotifications": typeof lib_taskCreationNotifications;
