@@ -10,6 +10,33 @@ export async function isExternalRoleTarget(ctx: QueryCtx, userId: Id<"users">) {
   return Boolean(email && await ctx.db.query("approvedExternalUsers").withIndex("by_email", q => q.eq("email", email)).unique());
 }
 
+// Called only by the auth callback, in the same transaction as account creation.
+// Never backfill existing accounts or overwrite a role assigned by an administrator.
+export async function ensureDefaultRoleForNewInternalUser(
+  ctx: MutationCtx,
+  args: { userId: Id<"users">; existingUserId: Id<"users"> | null; providerId: string },
+) {
+  if (args.providerId !== "google" || args.existingUserId !== null) return;
+  if (!(await ctx.db.get(args.userId)) || await isExternalRoleTarget(ctx, args.userId)) return;
+  const existing = await ctx.db.query("userAccessProfiles").withIndex("by_user", q => q.eq("userId", args.userId)).unique();
+  if (existing) return;
+
+  const now = Date.now();
+  await ctx.db.insert("userAccessProfiles", {
+    userId: args.userId,
+    platformRole: "user",
+    updatedAt: now,
+    updatedBy: args.userId,
+  });
+  await ctx.db.insert("userRoleAuditLog", {
+    actorId: args.userId,
+    targetUserId: args.userId,
+    before: JSON.stringify({ platformRole: null }),
+    after: JSON.stringify({ platformRole: "user" }),
+    createdAt: now,
+  });
+}
+
 // Administrative roles never bypass client/category/task access checks.
 export async function canAdministerPlatform(ctx: QueryCtx, userId: Id<"users"> | null) {
   if (!userId || !(await ctx.db.get(userId)) || await isExternalRoleTarget(ctx, userId)) return false;
