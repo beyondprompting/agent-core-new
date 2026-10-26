@@ -6,16 +6,13 @@ import {
   mutation,
   query,
 } from "../_generated/server";
-import {
-  INTERNAL_USER_ADMIN_ALLOWED_USER_IDS,
-  canUserAccessInternalUserAdmin,
-} from "../lib/internalUserAdminAccess";
+import { canUserAccessInternalUserAdmin } from "../lib/internalUserAdminAccess";
 import {
   syncClientAssignmentsFromAccess,
   validatePreapprovedClientAccess,
 } from "../lib/externalUserPreapproval";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
-import { normalizeWorkRole, removeInternalRoleProfileForExternal, requireUserRoleAdmin } from "../lib/userRoles";
+import { listPlatformAdminIds, normalizeWorkRole, removeInternalRoleProfileForExternal, requireUserRoleAdmin } from "../lib/userRoles";
 
 export const setExternalUserRoles = mutation({
   args: {
@@ -27,7 +24,10 @@ export const setExternalUserRoles = mutation({
     const actorId = await requireUserRoleAdmin(ctx);
     const current = await ctx.db.get(args.approvedExternalUserId);
     if (!current) throw new Error("No encontramos este usuario externo.");
-    const values = { isCoordinator: args.isCoordinator, workRole: normalizeWorkRole(args.workRole) };
+    const values = {
+      isCoordinator: args.isCoordinator,
+      workRole: args.workRole === undefined ? current.workRole : normalizeWorkRole(args.workRole),
+    };
     if (current.userId) await removeInternalRoleProfileForExternal(ctx, current.userId, current._id, actorId);
     const before = JSON.stringify({ isCoordinator: current.isCoordinator ?? false, workRole: current.workRole });
     const after = JSON.stringify(values);
@@ -62,7 +62,7 @@ function formatUserName(user: Record<string, unknown> | null) {
 async function requireExternalUserAdmin(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("No autenticado");
-  if (!canUserAccessInternalUserAdmin(String(userId))) {
+  if (!(await canUserAccessInternalUserAdmin(ctx, userId))) {
     throw new Error("No tienes permisos para administrar usuarios externos.");
   }
   return userId;
@@ -97,7 +97,7 @@ export const viewerCanAccessExternalUserAdmin = query({
     return {
       isAuthenticated: true,
       userId,
-      canAccess: canUserAccessInternalUserAdmin(String(userId)),
+      canAccess: await canUserAccessInternalUserAdmin(ctx, userId),
     };
   },
 });
@@ -106,7 +106,7 @@ export const getDashboard = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
-    if (!userId || !canUserAccessInternalUserAdmin(String(userId))) {
+    if (!userId || !(await canUserAccessInternalUserAdmin(ctx, userId))) {
       return { canAccess: false as const };
     }
 
@@ -618,9 +618,7 @@ export const getExternalTrelloManualReviewNotificationContext = internalQuery({
     const client = brand?.clientId ? await ctx.db.get(brand.clientId) : null;
 
     const adminEmails = [];
-    for (const adminUserIdString of INTERNAL_USER_ADMIN_ALLOWED_USER_IDS) {
-      const adminUserId = ctx.db.normalizeId("users", adminUserIdString);
-      if (!adminUserId) continue;
+    for (const adminUserId of await listPlatformAdminIds(ctx)) {
       const adminUser = await ctx.db.get(adminUserId);
       const email =
         typeof (adminUser as Record<string, unknown> | null)?.email ===
