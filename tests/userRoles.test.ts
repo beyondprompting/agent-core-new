@@ -4,7 +4,7 @@ import { setInternalUserRoles, viewerCanAccessInternalUserAdmin, getDashboard as
 import { setExternalUserRoles, viewerCanAccessExternalUserAdmin, getDashboard as externalDashboard, getExternalTrelloManualReviewNotificationContext } from "../convex/data/externalUserAdmin";
 import { viewerCanAccessAnalytics, getDashboard as analyticsDashboard, rebuildDeliverableAnalyticsRollups } from "../convex/data/analytics";
 import { viewerAccessProfile, hasPlatformAdminAccess } from "../convex/data/userAccess";
-import { canAdministerPlatform } from "../convex/lib/userRoles";
+import { canAdministerPlatform, ensureDefaultRoleForNewInternalUser } from "../convex/lib/userRoles";
 import { linkApprovedExternalUser } from "../convex/data/approvedExternalUsers";
 import { getFunctionName } from "convex/server";
 import { resolveInternalUserInCORNow, verifyInternalUserInCORNow } from "../convex/data/internalUserAdminActions";
@@ -317,4 +317,77 @@ test("linking an external removes any previously stored internal role, retaining
     await f.call(linkApprovedExternalUser, { userId: "external", email: "external@example.com" });
     assert.equal(f.table("userRoleAuditLog").length, 1);
   }
+});
+
+test("new Google internals get an audited user role once without any additional client or administrative access", async () => {
+  const f = fixture();
+  const originalRows = structuredClone([...f.rows]);
+  const args = { userId: "internal" as any, existingUserId: null, providerId: "google" };
+  await ensureDefaultRoleForNewInternalUser(f.ctx, args);
+  const profiles = f.table("userAccessProfiles").filter(row => row.userId === "internal");
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].platformRole, "user");
+  assert.equal(profiles[0].workRole, undefined);
+  assert.equal(profiles[0].updatedBy, "internal");
+  const log = f.table("userRoleAuditLog")[0];
+  assert.equal(log.actorId, "internal");
+  assert.equal(log.targetUserId, "internal");
+  assert.equal(log.createdAt, profiles[0].updatedAt);
+  assert.deepEqual(JSON.parse(log.before), { platformRole: null });
+  assert.deepEqual(JSON.parse(log.after), { platformRole: "user" });
+  for (const [id, row] of originalRows) assert.deepEqual(f.rows.get(id), row);
+  f.as("internal");
+  for (const fn of [viewerCanAccessInternalUserAdmin, viewerCanAccessExternalUserAdmin, viewerCanAccessAnalytics]) assert.equal((await f.call(fn)).canAccess, false);
+  await ensureDefaultRoleForNewInternalUser(f.ctx, args);
+  assert.equal(f.table("userAccessProfiles").filter(row => row.userId === "internal").length, 1);
+  assert.equal(f.table("userRoleAuditLog").length, 1);
+});
+
+test("returning Google users are not backfilled or changed, including admins and users without a profile", async () => {
+  for (const role of [undefined, "user", "admin", "super_admin"]) {
+    const f = fixture();
+    if (role) f.put("userAccessProfiles", { _id: "existing-profile", userId: "internal", platformRole: role, workRole: "Cuentas", updatedAt: 1 });
+    const before = structuredClone([...f.rows]);
+    await ensureDefaultRoleForNewInternalUser(f.ctx, { userId: "internal" as any, existingUserId: "internal" as any, providerId: "google" });
+    assert.deepEqual([...f.rows], before);
+  }
+});
+
+test("signup initialization preserves every existing profile even if retried as a new account", async () => {
+  for (const role of ["user", "admin", "super_admin"]) {
+    const f = fixture();
+    f.put("userAccessProfiles", { _id: "existing-profile", userId: "internal", platformRole: role, workRole: "Diseño", updatedAt: 1 });
+    const before = structuredClone([...f.rows]);
+    await ensureDefaultRoleForNewInternalUser(f.ctx, { userId: "internal" as any, existingUserId: null, providerId: "google" });
+    assert.deepEqual([...f.rows], before);
+  }
+});
+
+test("external OTP and other providers never initialize an internal role", async () => {
+  const f = fixture();
+  const before = structuredClone([...f.rows]);
+  for (const providerId of ["external-email-otp", "email", "other"]) {
+    for (const userId of ["internal", "external"]) {
+      await ensureDefaultRoleForNewInternalUser(f.ctx, { userId: userId as any, existingUserId: null, providerId });
+    }
+  }
+  assert.deepEqual([...f.rows], before);
+});
+
+test("Google signup does not initialize externals identified by account or preapproved email", async () => {
+  for (const linked of [true, false]) {
+    const f = fixture();
+    if (!linked) delete f.rows.get("approved").userId;
+    f.rows.get("external").email = " External@Example.COM ";
+    const before = structuredClone([...f.rows]);
+    await ensureDefaultRoleForNewInternalUser(f.ctx, { userId: "external" as any, existingUserId: null, providerId: "google" });
+    assert.deepEqual([...f.rows], before);
+  }
+});
+
+test("signup initialization never creates a role for a missing user account", async () => {
+  const f = fixture();
+  const before = structuredClone([...f.rows]);
+  await ensureDefaultRoleForNewInternalUser(f.ctx, { userId: "missing" as any, existingUserId: null, providerId: "google" });
+  assert.deepEqual([...f.rows], before);
 });
