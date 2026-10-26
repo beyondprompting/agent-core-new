@@ -1,4 +1,4 @@
-import { canViewExternalRequest, isRequestsClientTask } from "./externalRequestsAccess";
+import { canViewExternalRequest } from "./externalRequestsAccess";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { hasTaskAccess } from "../data/tasks";
@@ -26,7 +26,7 @@ export function mentionEmail(args: { from: string; to: string; baseUrl: string; 
 export async function canReceiveMention(ctx: QueryCtx, userId: Id<"users">, task: Doc<"tasks">, message: Doc<"taskMessages">) {
   if (task.convexStatus === "deleted" || task.convexStatus === "archived" || message.taskId !== task._id ||
       message.userId === userId || !message.mentionedUserIds?.includes(userId)) return false;
-  if (!(await isRequestsClientTask(ctx, task)) || !(await eligibleMentionUsers(ctx, task)).some(person => person.id === userId)) return false;
+  if (!(await eligibleMentionUsers(ctx, task)).some(person => person.id === userId)) return false;
   const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId)).unique();
   if (!external) return await hasTaskAccess(ctx, task, userId);
   if (!["external_panel", "internal_panel", "external_agent", "trello"].includes(message.source)) return false;
@@ -41,7 +41,7 @@ export async function canReceiveComment(ctx: QueryCtx, userId: Id<"users">, task
   if (kind === "mention") return await canReceiveMention(ctx, userId, task, message);
   if (task.convexStatus === "deleted" || message.taskId !== task._id || message.userId === userId) return false;
   const external = await ctx.db.query("approvedExternalUsers").withIndex("by_user", q => q.eq("userId", userId)).unique();
-  if (!external) return await isRequestsClientTask(ctx, task) && await hasTaskAccess(ctx, task, userId);
+  if (!external) return await hasTaskAccess(ctx, task, userId);
   if (task.source !== "external" || task.createdBy !== String(userId) || message.source !== "internal_panel" || !message.userId) return false;
   if (!(await canViewExternalRequest(ctx, userId, task))) return false;
   // Only authenticated internal authors can notify an external task creator.

@@ -21,6 +21,8 @@ import type * as crons from "../crons.js";
 import type * as data_analytics from "../data/analytics.js";
 import type * as data_approvedExternalUsers from "../data/approvedExternalUsers.js";
 import type * as data_backfill from "../data/backfill.js";
+import type * as data_clientAdmin from "../data/clientAdmin.js";
+import type * as data_clientAdminActions from "../data/clientAdminActions.js";
 import type * as data_clientAssignmentsDashboard from "../data/clientAssignmentsDashboard.js";
 import type * as data_clientBrands from "../data/clientBrands.js";
 import type * as data_clientKnowledge from "../data/clientKnowledge.js";
@@ -139,6 +141,8 @@ declare const fullApi: ApiFromModules<{
   "data/analytics": typeof data_analytics;
   "data/approvedExternalUsers": typeof data_approvedExternalUsers;
   "data/backfill": typeof data_backfill;
+  "data/clientAdmin": typeof data_clientAdmin;
+  "data/clientAdminActions": typeof data_clientAdminActions;
   "data/clientAssignmentsDashboard": typeof data_clientAssignmentsDashboard;
   "data/clientBrands": typeof data_clientBrands;
   "data/clientKnowledge": typeof data_clientKnowledge;

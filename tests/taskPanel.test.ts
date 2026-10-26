@@ -16,10 +16,6 @@ import { setInternalUserRoles } from "../convex/data/internalUserAdmin";
 import { setExternalUserRoles } from "../convex/data/externalUserAdmin";
 import { listMyClientProjects } from "../convex/data/controlPanel";
 
-const originalRequestsClientIds = clientConfig.ui.externalRequestsClientIds;
-test.beforeEach(() => { clientConfig.ui.externalRequestsClientIds = ["client1"]; });
-test.afterEach(() => { clientConfig.ui.externalRequestsClientIds = originalRequestsClientIds; });
-
 // A small transactional Convex context double; tests run real handlers/helpers.
 function fixture() {
   let counter = 0;
@@ -27,7 +23,7 @@ function fixture() {
   const scheduled: any[] = [];
   const put = (table: string, doc: any) => { rows.set(doc._id, { _table: table, _creationTime: 1, ...doc }); return doc._id; };
   put("approvedExternalUsers", { _id: "external1", userId: "user1" });
-  put("corClients", { _id: "client1", corClientId: clientConfig.ui.trelloPublishCorClientIds[0] });
+  put("corClients", { _id: "client1", externalBoardEnabled: true, corClientId: clientConfig.ui.trelloPublishCorClientIds[0] });
   put("clientUserAssignments", { _id: "assignment-user1", clientId: "client1", userId: "user1" });
   put("tasks", { _id: "task1", clientId: "client1", createdBy: "user1", source: "external", threadId: "thread1", corClientId: clientConfig.ui.trelloPublishCorClientIds[0], title: "Original", description: "Original brief", status: "nueva" });
   const db: any = {
@@ -232,7 +228,7 @@ test("internal comment reader preserves task access and includes published comme
   f.rows.get("task1").corTaskId = "123";
   f.rows.delete("assignment-user1");
   assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
-  f.put("corClients", { _id: "client1", corClientId: f.rows.get("task1").corClientId });
+  f.put("corClients", { _id: "client1", externalBoardEnabled: true, corClientId: f.rows.get("task1").corClientId });
   f.put("clientUserAssignments", { _id: "assignment1", clientId: "client1", userId: "user1" });
   const comments = await f.call(tasks.listInternalTaskComments, { taskId: "task1" });
   assert.equal(comments.length, 1);
@@ -247,7 +243,7 @@ test("authorized internal comments reuse deferred sync and are visible to the ex
   const args = { taskId: "task1", key: "internal-comment", text: "Nueva propuesta {{task-panel-file:0}}", uploadIds: ["internal-upload"] };
   f.upload("internal-upload", { userId: "internal1" });
   await assert.rejects(f.call(panel.submit, args));
-  f.put("corClients", { _id: "client1", corClientId: f.rows.get("task1").corClientId });
+  f.put("corClients", { _id: "client1", externalBoardEnabled: true, corClientId: f.rows.get("task1").corClientId });
   f.put("clientUserAssignments", { _id: "internal-access", userId: "internal1", clientId: "client1" });
   f.rows.get("task1").trelloCardId = "card1";
   const id = await f.call(panel.submit, args);
@@ -321,7 +317,7 @@ test("structured agent quotes are returned separately from comment text", async 
 test("only internal viewers see client labels on external comments", async () => {
   const f = fixture();
   f.ctx.auth.getUserIdentity = async () => ({ subject: "internal1|session" });
-  f.put("corClients", { _id: "client1", corClientId: f.rows.get("task1").corClientId });
+  f.put("corClients", { _id: "client1", externalBoardEnabled: true, corClientId: f.rows.get("task1").corClientId });
   f.put("clientUserAssignments", { _id: "access", userId: "internal1", clientId: "client1" });
   f.put("taskMessages", { _id: "client-comment", taskId: "task1", userId: "user1", source: "external_panel", message: "Hola", createdAt: 1 });
   const detail = await f.call(panel.detail, { taskId: "task1" });
@@ -360,7 +356,7 @@ function notificationFixture() {
   f.put("users", { _id: "internal2", name: "Colega" });
   f.put("users", { _id: "otherExternal", name: "Otro externo" });
   f.put("approvedExternalUsers", { _id: "external2", userId: "otherExternal" });
-  f.put("corClients", { _id: "client1", corClientId: 99 });
+  f.put("corClients", { _id: "client1", externalBoardEnabled: true, corClientId: 99 });
   f.put("clientBrands", { _id: "brand1", clientId: "client1" });
   f.put("clientBrands", { _id: "brand2", clientId: "client1" });
   Object.assign(f.rows.get("task1"), { clientId: "client1", corClientId: 99, clientBrandId: "brand1" });
@@ -502,13 +498,13 @@ test("coordinator designation never expands category, client or feature access a
     if (denied === "own") f.rows.get("task1").createdBy = "otherExternal";
     if (denied === "category") f.rows.get("assignment-otherExternal").brandId = "brand2";
     if (denied === "client") f.rows.get("assignment-otherExternal").clientId = "other-client";
-    if (denied === "disabled-client") clientConfig.ui.externalRequestsClientIds = [];
+    if (denied === "disabled-client") f.rows.get("client1").externalBoardEnabled = false;
     if (denied === "internal-task") f.rows.get("task1").source = "internal";
     if (["deleted", "archived"].includes(denied)) f.rows.get("task1").convexStatus = denied;
     assert.equal(await canReceiveTaskCreation(f.ctx, "otherExternal" as any, f.rows.get("task1")), false, denied);
     await notifyExternalTaskCreated(f.ctx, "task1" as any);
     assert.equal([...f.rows.values()].filter(r => r._table === "taskCreationNotifications" && r.userId === "otherExternal").length, 0, denied);
-    clientConfig.ui.externalRequestsClientIds = ["client1"];
+    f.rows.get("client1").externalBoardEnabled = true;
   }
 });
 
@@ -668,50 +664,59 @@ test("external requests require an enabled client and matching brand permissions
   f.as("internal1"); await f.post("enabled-client");
   f.as("user1"); assert.equal((await f.unread()).length, 1);
   // Existing read and unread records disappear after changing the configured client.
-  clientConfig.ui.externalRequestsClientIds = ["client2"];
+  f.rows.get("client1").externalBoardEnabled = false;
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), false);
   assert.deepEqual(await f.unread(), []);
   assert.deepEqual((await f.call(history.list, { paginationOpts: { numItems: 5, cursor: null } })).page, []);
   assert.deepEqual(await f.call(tasks.listMyExternalRequests, {}), []);
   await assert.rejects(f.call(panel.detail, { taskId: "task1" }), /acceso/);
   assert.equal(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }), null);
-  f.as("internal1"); await assert.rejects(f.post("disabled-client"), /acceso/);
+  f.as("internal1"); await f.post("disabled-client");
   assert.equal([...f.rows.values()].filter(r => r._table === "commentNotifications" && r.userId === "user1").length, 1);
-  f.as("internal2"); assert.deepEqual(await f.unread(), []);
-  clientConfig.ui.externalRequestsClientIds = ["client1"];
+  f.as("internal2"); assert.equal((await f.unread())[0].count, 2);
+  f.rows.get("client1").externalBoardEnabled = true;
   f.rows.get("task1").clientBrandId = undefined;
   f.rows.get("task1").clientId = "client2";
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), false);
   f.rows.get("task1").clientId = "client1";
   f.rows.delete("assignment-user1");
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task1")), false);
-  clientConfig.ui.externalRequestsClientIds = [];
+  f.rows.get("client1").externalBoardEnabled = false;
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), false);
 });
 
-test("internal comments tab requires the enabled task client and existing task permissions", async () => {
-  const f = notificationFixture(); f.as("internal1");
-  assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), true);
-  await f.post("allowed");
-  f.as("wrongBrandUser");
-  assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
-  f.as("internal1"); clientConfig.ui.externalRequestsClientIds = ["client2"];
-  assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
-  assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
-  await assert.rejects(f.call(panel.detail, { taskId: "task1" }), /acceso/);
-  await assert.rejects(f.post("denied"), /acceso/);
-  // General task access and new-task notifications stay independent of comments.
-  assert.ok(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }));
-  await notifyExternalTaskCreated(f.ctx, "task1" as any);
-  assert.equal((await f.call(taskNotifications.unread, {})).length, 1);
-  clientConfig.ui.externalRequestsClientIds = [];
-  assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
+test("external board configuration never changes internal boards, comments or notifications", async () => {
+  for (const enabled of [true, false, undefined]) {
+    const f = notificationFixture(); f.as("internal1");
+    f.rows.get("client1").name = "Cliente";
+    f.rows.get("brand1").name = "Categoría A";
+    f.rows.get("brand2").name = "Categoría B";
+    const originalBoard = await f.call(listMyClientProjects, {});
+    assert.ok(originalBoard.length > 0);
+    if (enabled === undefined) delete f.rows.get("client1").externalBoardEnabled;
+    else f.rows.get("client1").externalBoardEnabled = enabled;
+    assert.deepEqual(await f.call(listMyClientProjects, {}), originalBoard);
+    assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), true);
+    await f.post("allowed");
+    assert.equal((await f.call(tasks.listInternalTaskComments, { taskId: "task1" })).length, 1);
+    assert.equal((await f.call(panel.detail, { taskId: "task1" })).comments.length, 1);
+    assert.ok(await f.call(tasks.getBoardDialogDetails, { taskId: "task1" }));
+    await notifyExternalTaskCreated(f.ctx, "task1" as any);
+    assert.equal((await f.call(taskNotifications.unread, {})).length, 1);
+    f.as("internal2"); assert.equal((await f.unread())[0].count, 1);
+    f.as("wrongBrandUser");
+    assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
+    assert.deepEqual(await f.call(tasks.listInternalTaskComments, { taskId: "task1" }), []);
+    await assert.rejects(f.call(panel.detail, { taskId: "task1" }), /acceso/);
+    await assert.rejects(f.post("denied"), /acceso/);
+    f.as("user1");
+    assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), enabled === true);
+  }
 });
 
 test("multiple enabled clients preserve per-client assignment and notification access", async () => {
   const f = notificationFixture();
-  clientConfig.ui.externalRequestsClientIds = ["client1", " client2 ", "client1", ""];
-  f.put("corClients", { _id: "client2", corClientId: 100 });
+  f.put("corClients", { _id: "client2", externalBoardEnabled: true, corClientId: 100 });
   f.put("clientUserAssignments", { _id: "internal-client2", clientId: "client2", userId: "internal1" });
   f.put("tasks", { ...f.rows.get("task1"), _id: "task2", clientBrandId: undefined, clientId: "client2", corClientId: 100 });
   f.as("user1");
@@ -729,9 +734,9 @@ test("multiple enabled clients preserve per-client assignment and notification a
   assert.deepEqual(await f.unread(), []);
   f.rows.get("task2").createdBy = "otherExternal";
   assert.equal(await canViewExternalRequest(f.ctx, "user1" as any, f.rows.get("task2")), false);
-  clientConfig.ui.externalRequestsClientIds = [];
+  f.rows.get("client1").externalBoardEnabled = false;
   assert.equal(await hasExternalRequestsAccess(f.ctx, "user1" as any), false);
-  f.as("internal1"); assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), false);
+  f.as("internal1"); assert.equal(await f.call(panel.canAccessComments, { taskId: "task1" }), true);
 });
 
 // Collaborators use client/category permissions, independently of task origin.
@@ -1128,7 +1133,7 @@ test("external board enforces client and brand access on reads, comments and fil
   await assert.rejects(f.call(panel.submit, { taskId: "task1", key: "revoked", text: "File", uploadIds: ["ready-before-revocation"] }), /acceso/);
   f.rows.get("assignment-otherExternal").clientId = "client2";
   delete f.rows.get("assignment-otherExternal").brandId;
-  clientConfig.ui.externalRequestsClientIds = ["client1", "client2"];
+  f.put("corClients", { _id: "client2", externalBoardEnabled: true, corClientId: 100 });
   await denied();
   f.rows.get("assignment-otherExternal").clientId = "client1";
   assert.equal((await f.call(tasks.listMyExternalRequests, {})).length, 1);
@@ -1180,7 +1185,7 @@ test("mention candidates are restricted to this client and brand, including inhe
   await assert.rejects(f.call(panel.submit, { ...args, key: "forged", text: "{{task-panel-mention:otherBrand}}" }));
   f.rows.delete("a-internal1");
   await assert.rejects(f.call(panel.submit, { ...args, key: "revoked" }));
-  clientConfig.ui.externalRequestsClientIds = [];
+  f.rows.get("client1").externalBoardEnabled = false;
   await assert.rejects(f.call(panel.mentionUsers, { taskId: "task1" }));
 });
 
@@ -1217,6 +1222,35 @@ test("mentions notify internal and external recipients once, with one email only
   assert.equal(await f.call(notifications.claimEmail, { id: f.mentioned("user1")._id }), null);
 });
 
+test("a disabled or unconfigured external board preserves internal mention notifications and email eligibility", async () => {
+  const env = { RESEND_API_KEY: process.env.RESEND_API_KEY, APP_URL: process.env.APP_URL };
+  process.env.RESEND_API_KEY = "test-only";
+  process.env.APP_URL = "https://app.example.com";
+  try {
+    for (const enabled of [false, undefined]) {
+      const f = notificationFixture();
+      f.rows.get("internal2").email = "internal2@example.com";
+      if (enabled === undefined) delete f.rows.get("client1").externalBoardEnabled;
+      else f.rows.get("client1").externalBoardEnabled = enabled;
+      f.as("internal1");
+      await f.call(panel.submit, { taskId: "task1", key: "disabled-mentions", text: "Revisar {{task-panel-mention:internal2}} y {{task-panel-mention:otherExternal}}", uploadIds: [] });
+      const rows = [...f.rows.values()].filter(row => row._table === "commentNotifications");
+      assert.deepEqual(rows.map(row => row.userId), ["internal2"]);
+      assert.equal(rows[0].kind, "mention");
+      f.as("internal2"); assert.equal((await f.unread())[0].count, 1);
+      const claim = await f.call(notifications.claimEmail, { id: rows[0]._id });
+      assert.ok(claim);
+      assert.deepEqual(JSON.parse(claim.payload).to, ["internal2@example.com"]);
+      f.as("otherExternal"); assert.deepEqual(await f.unread(), []);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("plain text @names and unselected email addresses never queue mention emails", async () => {
   const f = notificationFixture(); f.as("internal1");
   await f.call(panel.submit, { taskId: "task1", key: "plain", text: "@Colega correo@example.com", uploadIds: [] });
@@ -1227,7 +1261,7 @@ test("revocation, brand scope, disabled feature, hidden comments and removed men
   const cases: ((f: Awaited<ReturnType<typeof mentionNotificationFixture>>) => void)[] = [
     f => { f.rows.delete("assignment-otherExternal"); },
     f => { f.rows.get("assignment-otherExternal").brandId = "brand2"; },
-    () => { clientConfig.ui.externalRequestsClientIds = []; },
+    f => { f.rows.get("client1").externalBoardEnabled = false; },
     f => { f.rows.get(f.messageId).source = "internal"; },
     f => { f.rows.get(f.messageId).mentionedUserIds = []; },
     f => { f.rows.delete(f.messageId); },
@@ -1237,7 +1271,6 @@ test("revocation, brand scope, disabled feature, hidden comments and removed men
     f => { f.put("taskMessages", { _id: "hiddenParent", taskId: "task1", source: "internal" }); f.rows.get(f.messageId).replyTo = "hiddenParent"; },
   ];
   for (const change of cases) {
-    clientConfig.ui.externalRequestsClientIds = ["client1"];
     const f = await mentionNotificationFixture(); const row = f.mentioned("otherExternal");
     change(f); f.as("otherExternal");
     assert.deepEqual(await f.unread(), []);
