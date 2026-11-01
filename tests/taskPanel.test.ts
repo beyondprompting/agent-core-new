@@ -10,7 +10,7 @@ import * as history from "../convex/data/notificationHistory";
 import * as notifications from "../convex/data/commentNotifications";
 import * as taskNotifications from "../convex/data/taskCreationNotifications";
 import { canReceiveTaskCreation, notifyExternalTaskCreated, taskCreationEmail } from "../convex/lib/taskCreationNotifications";
-import { notifyTaskComment, mentionEmail } from "../convex/lib/commentNotifications";
+import { notifyTaskComment, commentEmail } from "../convex/lib/commentNotifications";
 import { clientConfig } from "../config/tenant.config";
 import { setInternalUserRoles } from "../convex/data/internalUserAdmin";
 import { setExternalUserRoles } from "../convex/data/externalUserAdmin";
@@ -1322,12 +1322,12 @@ test("mention emails retry idempotently with leases, route by recipient, and sto
 
 test("mention email escapes content and offers an authenticated task link", () => {
   const args = { from: "sender@example.com", to: "recipient@example.com", baseUrl: "https://app.example.com", taskId: "task1", title: "<script>bad</script>\r\nTitle", author: "Name <img>", comment: "**Revisar** [@Persona](#mention-user) <script>bad</script> [bad](javascript:alert) ![file](https://files.example/a)", quote: "<img src=x>", external: true };
-  const email = mentionEmail(args);
+  const email = commentEmail(args);
   assert.ok(!email.html.includes("<script>")); assert.ok(!email.html.includes("<img"));
   assert.ok(!email.html.includes('href="javascript:')); assert.ok(!email.html.includes("#mention-"));
   assert.match(email.html, /<strong>Revisar<\/strong>/); assert.match(email.html, /&lt;script&gt;/);
   assert.match(email.html, />Ver tarea<\/a>/); assert.ok(!/[\r\n]/.test(email.subject));
-  assert.throws(() => mentionEmail({ ...args, baseUrl: "http://app.example.com" }));
+  assert.throws(() => commentEmail({ ...args, baseUrl: "http://app.example.com" }));
 });
 
 test("mention email configuration, changed recipient and retry expiry are handled without delivery", async () => {
@@ -1363,4 +1363,159 @@ test("a mention in a reply notifies the selected recipient and does not revive h
   f.put("taskMessages", { _id: "oldMention", taskId: "task1", source: "external_panel", userId: "user1", message: "Old", mentionedUserIds: ["internal2"] });
   await notifyTaskComment(f.ctx, "oldMention" as any);
   assert.equal(f.rows.get("legacy").emailState, undefined);
+});
+
+test("external coordinators receive comments and replies without mentions while ordinary users keep their existing notifications", async () => {
+  const f = notificationFixture();
+  f.rows.get("external2").isCoordinator = true;
+  f.as("user1");
+  const parentEntry = await f.post("external-question");
+  f.as("internal1");
+  await f.post("internal-answer", f.rows.get(parentEntry).messageId);
+  for (const source of ["external_agent", "trello"]) {
+    f.put("taskMessages", { _id: source, taskId: "task1", userId: "user1", source, message: "Nuevo comentario", createdAt: Date.now() });
+    await notifyTaskComment(f.ctx, source as any);
+    await notifyTaskComment(f.ctx, source as any);
+  }
+  const rows = [...f.rows.values()].filter(row => row._table === "commentNotifications");
+  const coordinatorRows = rows.filter(row => row.userId === "otherExternal");
+  assert.equal(coordinatorRows.length, 4);
+  assert.ok(coordinatorRows.every(row => row.kind === "coordinator_comment" && row.emailState === "pending"));
+  assert.ok(rows.filter(row => row.userId !== "otherExternal").every(row => !row.kind && !row.emailState));
+  f.as("otherExternal");
+  const [group] = await f.unread();
+  assert.equal(group.count, 4);
+  const historyPage = await f.call(history.list, { paginationOpts: { numItems: 20, cursor: null } });
+  assert.equal(historyPage.page.length, 4);
+  assert.ok(historyPage.page.every((row: any) => row.kind === "comment" && row.external));
+  await f.call(notifications.markRead, { taskId: "task1", messageIds: group.messageIds });
+  assert.deepEqual(await f.unread(), []);
+  f.as("user1"); assert.equal((await f.unread())[0].count, 1);
+});
+
+test("coordinators are notified on their own tasks but never for their own comments or twice for a mention", async () => {
+  const f = notificationFixture();
+  f.rows.get("external2").isCoordinator = true;
+  f.rows.get("task1").createdBy = "otherExternal";
+  f.as("otherExternal"); await f.post("own-comment");
+  const forCoordinator = () => [...f.rows.values()].filter(row => row._table === "commentNotifications" && row.userId === "otherExternal");
+  assert.equal(forCoordinator().length, 0);
+  f.as("internal1"); await f.post("comment-on-coordinator-task");
+  assert.equal(forCoordinator()[0].kind, "coordinator_comment");
+  const args = { taskId: "task1", key: "coordinator-mention", text: "Hola {{task-panel-mention:otherExternal}}", uploadIds: [] };
+  const entry = await f.call(panel.submit, args);
+  await f.call(panel.submit, args);
+  await notifyTaskComment(f.ctx, f.rows.get(entry).messageId);
+  assert.deepEqual(forCoordinator().map(row => row.kind).sort(), ["coordinator_comment", "mention"]);
+});
+
+test("coordinator comment subscriptions respect each client, category and external board setting", async () => {
+  const f = notificationFixture();
+  f.rows.get("external2").isCoordinator = true;
+  f.rows.get("assignment-otherExternal").brandId = "brand1";
+  f.put("corClients", { _id: "client2", corClientId: 100, externalBoardEnabled: true });
+  f.put("clientUserAssignments", { _id: "coordinator-client2", clientId: "client2", userId: "otherExternal" });
+  f.put("tasks", { ...f.rows.get("task1"), _id: "task2", clientBrandId: undefined, clientId: "client2", corClientId: 100 });
+  for (const taskId of ["task1", "task2"]) {
+    const id = `comment-${taskId}`;
+    f.put("taskMessages", { _id: id, taskId, userId: "user1", source: "external_panel", message: "Hola", createdAt: Date.now() });
+    await notifyTaskComment(f.ctx, id as any);
+  }
+  f.as("otherExternal");
+  assert.deepEqual((await f.unread()).map((row: any) => row.taskId).sort(), ["task1", "task2"]);
+  f.rows.get("client1").externalBoardEnabled = false;
+  assert.deepEqual((await f.unread()).map((row: any) => row.taskId), ["task2"]);
+  f.rows.delete("coordinator-client2");
+  assert.deepEqual(await f.unread(), []);
+});
+
+test("coordinator comment notifications and queued emails stop after role or access revocation and never expose hidden comments", async () => {
+  const cases: Record<string, (f: ReturnType<typeof notificationFixture>, messageId: string) => void> = {
+    role: f => { f.rows.get("external2").isCoordinator = false; },
+    assignment: f => { f.rows.delete("assignment-otherExternal"); },
+    client: f => { f.rows.get("assignment-otherExternal").clientId = "another-client"; },
+    category: f => { f.rows.get("assignment-otherExternal").brandId = "brand2"; },
+    board: f => { f.rows.get("client1").externalBoardEnabled = false; },
+    unconfigured: f => { delete f.rows.get("client1").externalBoardEnabled; },
+    hidden: (f, id) => { f.rows.get(id).source = "internal"; },
+    cor: (f, id) => { f.rows.get(id).source = "cor"; },
+    missing: (f, id) => { f.rows.delete(id); },
+    foreignMessage: (f, id) => { f.rows.get(id).taskId = "task2"; },
+    own: (f, id) => { f.rows.get(id).userId = "otherExternal"; },
+    internalTask: f => { f.rows.get("task1").source = "internal"; },
+    deleted: f => { f.rows.get("task1").convexStatus = "deleted"; },
+    archived: f => { f.rows.get("task1").convexStatus = "archived"; },
+    hiddenParent: (f, id) => {
+      f.put("taskMessages", { _id: "hidden-parent", taskId: "task1", source: "internal" });
+      f.rows.get(id).replyTo = "hidden-parent";
+    },
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const f = notificationFixture();
+    f.rows.get("external2").isCoordinator = true;
+    f.as("internal1"); const entry = await f.post(name);
+    const messageId = f.rows.get(entry).messageId;
+    const row = [...f.rows.values()].find(row => row._table === "commentNotifications" && row.userId === "otherExternal");
+    assert.equal(row.kind, "coordinator_comment");
+    change(f, messageId);
+    f.as("otherExternal"); assert.deepEqual(await f.unread(), [], name);
+    assert.deepEqual((await f.call(history.list, { paginationOpts: { numItems: 20, cursor: null } })).page, [], name);
+    await f.call(notifications.markRead, { taskId: "task1", messageIds: [messageId] });
+    assert.equal(row.read, false, name);
+    assert.equal(await f.call(notifications.claimEmail, { id: row._id }), null, name);
+    assert.equal(row.emailState, "cancelled", name);
+    f.rows.delete(row._id);
+    await notifyTaskComment(f.ctx, messageId);
+    assert.equal([...f.rows.values()].filter(r => r._table === "commentNotifications" && r.userId === "otherExternal").length, 0, name);
+  }
+});
+
+test("coordinator comment emails use the external task link and retry once per notification without claiming a mention", async () => {
+  const env = { APP_URL: process.env.APP_URL, RESEND_API_KEY: process.env.RESEND_API_KEY };
+  const originalFetch = globalThis.fetch;
+  const calls: any[] = [];
+  try {
+    process.env.APP_URL = "https://app.example.com"; process.env.RESEND_API_KEY = "test-only";
+    globalThis.fetch = (async (_url: any, init: any) => {
+      calls.push(init);
+      return new Response(JSON.stringify(calls.length === 1 ? { name: "rate_limit_exceeded" } : { id: "coordinator-comment-email" }), { status: calls.length === 1 ? 429 : 200 });
+    }) as typeof fetch;
+    const f = notificationFixture();
+    f.rows.get("external2").isCoordinator = true;
+    f.rows.get("otherExternal").email = "coordinator@example.com";
+    f.as("user1"); await f.post("email-comment");
+    const row = [...f.rows.values()].find(row => row._table === "commentNotifications" && row.userId === "otherExternal");
+    await f.call(notifications.sweep, {});
+    assert.ok(f.scheduled.some(args => getFunctionName(args[1]) === "data/commentNotifications:sendEmail" && args[2].id === row._id));
+    await f.call(notifications.sendEmail, { id: row._id });
+    assert.equal(row.emailState, "pending");
+    row.nextAttemptAt = 0;
+    await f.call(notifications.sendEmail, { id: row._id });
+    assert.equal(row.emailState, "sent");
+    await f.call(notifications.sendEmail, { id: row._id });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].body, calls[1].body);
+    assert.equal(calls[0].headers["Idempotency-Key"], calls[1].headers["Idempotency-Key"]);
+    const payload = JSON.parse(calls[0].body);
+    assert.deepEqual(payload.to, ["coordinator@example.com"]);
+    assert.match(payload.subject, /^Nuevo comentario en:/);
+    assert.match(payload.text, /Externo agregó un comentario/);
+    assert.match(payload.text, /\/workspace\/requests\?taskId=task1&tab=comments/);
+    assert.ok(!payload.html.includes("Te mencionaron"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
+test("enabling coordinator comment subscriptions does not resend historical notifications", async () => {
+  const f = notificationFixture();
+  f.rows.get("task1").createdBy = "otherExternal";
+  f.as("internal1"); const entry = await f.post("historical-comment");
+  const row = [...f.rows.values()].find(row => row._table === "commentNotifications" && row.userId === "otherExternal");
+  assert.equal(row.kind, undefined);
+  f.rows.get("external2").isCoordinator = true;
+  await notifyTaskComment(f.ctx, f.rows.get(entry).messageId);
+  assert.equal(row.emailState, undefined);
+  assert.equal(await f.call(notifications.claimEmail, { id: row._id }), null);
 });

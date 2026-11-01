@@ -169,8 +169,8 @@ function ExternalCoordinatorEditor({
             id={id + "-coordinator-help"}
             className="mt-1 text-xs text-muted-foreground"
           >
-            Recibe notificaciones de nuevas tareas de otros usuarios externos,
-            únicamente cuando ya puede verlas.
+            Recibe notificaciones y correos de nuevas tareas y comentarios,
+            únicamente en las tareas a las que tiene acceso.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
