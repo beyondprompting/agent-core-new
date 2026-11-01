@@ -30,7 +30,7 @@ export default defineSchema({
   commentNotifications: defineTable({
     userId: v.id("users"), taskId: v.id("tasks"), messageId: v.id("taskMessages"),
     read: v.boolean(), createdAt: v.number(),
-    kind: v.optional(v.literal("mention")),
+    kind: v.optional(v.union(v.literal("mention"), v.literal("coordinator_comment"))),
     emailState: v.optional(v.union(v.literal("pending"), v.literal("sending"), v.literal("sent"), v.literal("failed"), v.literal("cancelled"))),
     attempts: v.optional(v.number()), nextAttemptAt: v.optional(v.number()), firstAttemptAt: v.optional(v.number()),
     emailPayload: v.optional(v.string()), emailError: v.optional(v.string()),
