@@ -11,6 +11,7 @@ import {
   UserCog,
   UserPlus,
   Building2,
+  ScanLine,
 } from "lucide-react";
 
 /**
@@ -72,7 +73,16 @@ export function TopNavigation() {
       icon: Building2,
       isActive: pathname === "/workspace/clients",
     },
+    {
+      label: "QA Visual",
+      href: "/workspace/qa-visual",
+      icon: ScanLine,
+      isActive: pathname === "/workspace/qa-visual",
+    },
   ].filter((tab) => {
+    if (tab.href === "/workspace/qa-visual") {
+      return process.env.NODE_ENV === "development" && accessProfile?.canAccessQaVisual === true;
+    }
     if (tab.href === "/workspace/requests") return isExternalUser && accessProfile?.canAccessExternalRequests === true;
     if (isExternalUser && tab.href === "/workspace/control-panel") return false;
     if (tab.href === "/workspace/analytics") {
