@@ -2,7 +2,7 @@ import { hasExternalRequestsAccess } from "../lib/externalRequestsAccess";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internalQuery, query } from "../_generated/server";
-import { canAdministerPlatform } from "../lib/userRoles";
+import { canAdministerPlatform, isExternalRoleTarget } from "../lib/userRoles";
 
 // Actions resolve the same database-backed authorization as queries/mutations.
 export const hasPlatformAdminAccess = internalQuery({
@@ -24,7 +24,10 @@ export const viewerAccessProfile = query({
     if (!userId) return { isAuthenticated: false, kind: "anonymous" as const };
 
     const approvedExternalUser = await getApprovedExternalUser(ctx, userId);
+    const role = await ctx.db.query("userAccessProfiles").withIndex("by_user", q => q.eq("userId", userId)).unique();
+    const canAccessQaVisual = role?.platformRole === "super_admin" && !(await isExternalRoleTarget(ctx, userId));
     return {
+      canAccessQaVisual,
       isAuthenticated: true,
       canAccessExternalRequests: Boolean(approvedExternalUser) && await hasExternalRequestsAccess(ctx, userId),
       userId,

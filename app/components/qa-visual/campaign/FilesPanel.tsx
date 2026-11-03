@@ -1,0 +1,224 @@
+import {
+  ArrowUpRight,
+  FileText,
+  MessageCircle,
+  PanelLeftClose,
+  Search,
+  X,
+} from "lucide-react";
+
+import { Artwork } from "@/app/components/qa-visual/shared/visuals";
+
+import { CompactReviewStatus } from "@/app/components/qa-visual/piece/review-status";
+import { getAiReviewState, getHumanReviewState } from "@/app/lib/qa-visual/review-state";
+import { CampaignResources } from "./CampaignResources";
+import { CampaignSummary } from "./CampaignSummary";
+import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
+
+export function FilesPanel({
+  session: {
+    pieces,
+    inventory,
+    activeId,
+    version,
+    leftTab,
+    setLeftTab,
+    comments,
+    filter,
+    query,
+    setQuery,
+    statusFilter,
+    setStatusFilter,
+    setLeftOpen,
+    statuses,
+    results,
+    approvals,
+    activePieces,
+    piece,
+    filteredPieces,
+    choosePiece,
+  },
+}: {
+  session: ReviewSession;
+}) {
+  return (
+    <aside className="files-panel" aria-label="Archivos de campaña">
+      <div className="panel-tabs left-tabs">
+        {(["Archivos", "Resumen", "Recursos"] as const).map((tab) => (
+          <button
+            className={leftTab === tab ? "active" : ""}
+            onClick={() => setLeftTab(tab)}
+            key={tab}
+          >
+            {tab}
+            {tab === "Archivos" && <span>{pieces.length}</span>}
+          </button>
+        ))}
+        <button
+          className="files-panel-close"
+          aria-label="Ocultar panel de archivos"
+          title="Ocultar panel de archivos"
+          onClick={() => setLeftOpen(false)}
+        >
+          <PanelLeftClose size={15} />
+        </button>
+      </div>
+      {leftTab === "Archivos" ? (
+        <>
+          <div className="files-controls">
+            <div className="search-field">
+              <Search size={15} />
+              <input
+                aria-label="Buscar piezas"
+                placeholder="Buscar una pieza…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {query && (
+                <button
+                  aria-label="Limpiar búsqueda"
+                  onClick={() => setQuery("")}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <div className="file-filter">
+              <span>PIEZAS DE LA CAMPAÑA</span>
+              <select
+                aria-label="Filtrar piezas por estado"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="all">Todos los estados</option>
+                <optgroup label="Revisión IA">
+                  <option value="ai:findings">IA · Con hallazgos</option>
+                  <option value="ai:validated">IA · Validada</option>
+                  <option value="ai:partial">IA · Incompleta</option>
+                  <option value="ai:analyzing">IA · Analizando</option>
+                  <option value="ai:failed">IA · Error</option>
+                </optgroup>
+                <optgroup label="Aprobación humana">
+                  <option value="Pendiente">Humana · Pendiente</option>
+                  <option value="En revisión">Humana · En revisión</option>
+                  <option value="Cambios solicitados">Humana · Cambios</option>
+                  <option value="Aprobada">Humana · Aprobada</option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
+          <div className="file-list">
+            {filteredPieces.map((p) => {
+              const fileComments = comments.filter(
+                (c) => c.pieceId === p.id && c.version === 1,
+              );
+              const ai = getAiReviewState(results[p.id]?.[1], fileComments);
+              const decision = approvals
+                .slice()
+                .reverse()
+                .find(
+                  (a) =>
+                    a.pieceId === p.id &&
+                    a.version === 1 &&
+                    a.status === (statuses[`${p.id}-1`] ?? p.status),
+                );
+              const human = getHumanReviewState(
+                statuses[`${p.id}-1`] ?? p.status,
+                decision,
+              );
+              return (
+                <button
+                  key={p.id}
+                  className={`file-card ${activeId === p.id ? "selected" : ""}`}
+                  onClick={() => choosePiece(p.id)}
+                >
+                  <div className="file-thumbnail">
+                    <Artwork piece={p} />
+                    {p.width > 0 && p.height * 9 === p.width * 16 && (
+                      <span className="thumbnail-format">9:16</span>
+                    )}
+                  </div>
+                  <div className="file-card-content">
+                    <span className="file-phase">{p.phase}</span>
+                    <strong title={p.name}>{p.name}</strong>
+                    <div className="file-meta-row">
+                      <span className="file-format">{p.format}</span>
+                      {fileComments.length > 0 && (
+                        <span
+                          className="file-comment-count"
+                          title={`${fileComments.length} comentarios`}
+                        >
+                          <MessageCircle size={11} />
+                          {fileComments.length}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <CompactReviewStatus ai={ai} human={human} />
+                </button>
+              );
+            })}
+            {!filteredPieces.length && (
+              <div className="empty-state">
+                <Search size={24} />
+                <p>No hay piezas con estos filtros.</p>
+                <button
+                  onClick={() => {
+                    setQuery("");
+                    setStatusFilter("all");
+                  }}
+                >
+                  Limpiar filtros
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="campaign-summary">
+            <div>
+              <span>Aprobación humana</span>
+              <strong>
+                {
+                  activePieces.filter(
+                    (p) => (statuses[`${p.id}-1`] ?? p.status) === "Aprobada",
+                  ).length
+                }{" "}
+                de {pieces.length} aprobadas
+              </strong>
+            </div>
+            <div className="progress-track">
+              <span
+                style={{
+                  width: `${(activePieces.filter((p) => (statuses[`${p.id}-1`] ?? p.status) === "Aprobada").length / pieces.length) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        </>
+      ) : leftTab === "Resumen" ? (
+        <CampaignSummary
+          items={activePieces}
+          results={results}
+          campaignName={inventory.campaignName}
+          comments={comments}
+          statuses={statuses}
+          onSelectPiece={(id) => {
+            choosePiece(id);
+            setLeftTab("Archivos");
+          }}
+        />
+      ) : (
+        <CampaignResources inventory={inventory} />
+      )}
+      <div className="files-footer">
+        <FileText size={14} />
+        <span>Recursos de la campaña</span>
+        <button
+          title="Ver recursos de toda la campaña"
+          onClick={() => setLeftTab("Recursos")}
+        >
+          <ArrowUpRight size={14} />
+        </button>
+      </div>
+    </aside>
+  );
+}
