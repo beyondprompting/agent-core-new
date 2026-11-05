@@ -8,7 +8,7 @@ import {
 } from "../convex/analytics/maintenance";
 import { failure, nightly, nightlyBatch, process, processPage, record } from "../convex/analytics/jobs";
 import { notifyAnalytics } from "../convex/analytics/notify";
-import { getPeriodDashboard } from "../convex/data/analytics";
+import { getDashboard, getPeriodDashboard } from "../convex/data/analytics";
 import { attachProjectToExistingCORProject } from "../convex/data/projects";
 import { projectDeliverableShard } from "../convex/lib/deliverableAnalytics";
 import { clientConfig } from "../config/tenant.config";
@@ -90,8 +90,8 @@ function fixture() {
           .filter((row) => row._table === table && filters.every((predicate) => predicate(row)))
           .sort((a, b) => (descending ? -1 : 1) * compare(get(a, indexKey), get(b, indexKey)));
         const query: any = {
-          withIndex: (index: string, apply: (builder: typeof range) => void) => {
-            apply(range);
+          withIndex: (index: string, apply?: (builder: typeof range) => void) => {
+            apply?.(range);
             indexKey = indexedOrder[index] ?? "_creationTime";
             return query;
           },
@@ -163,6 +163,36 @@ test("analytics calendar follows Ecuador midnight and handles period boundaries"
   assert.deepEqual(analyticsPeriod("week", "2026-01-01"), { periodType: "week", periodKey: "2025-12-29" });
   assert.equal(shiftAnalyticsPeriod(analyticsPeriod("month", "2026-12-31"), 1), "2027-01-01");
   assert.equal(analyticsTrendPeriods(analyticsPeriod("month", "2024-02-15"), "2026-11-05").length, 29);
+});
+
+test("the creation trend preserves totals and splits task sources in every period", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-05T14:00:00Z") });
+  const f = fixture();
+  f.put("tasks", { _id: "internal", _creationTime: november, title: "Interna", status: "nueva" });
+  f.put("tasks", { _id: "external", _creationTime: november, title: "Externa", status: "nueva", source: "external" });
+  const legacy = await f.call(getDashboard);
+  const nonEmptyLegacyBuckets = legacy.weeklyTrend.filter((point: { count: number }) => point.count);
+  assert.equal(nonEmptyLegacyBuckets.length, 1);
+  assert.equal(nonEmptyLegacyBuckets[0].count, 2);
+  assert.equal(nonEmptyLegacyBuckets[0].internal, 1);
+  assert.equal(nonEmptyLegacyBuckets[0].external, 1);
+
+  await f.call(backfill, { dryRun: false });
+  for (const [periodType, periodKey, bucket] of [
+    ["day", "2026-11-04", "2026-11-04"],
+    ["week", "2026-11-02", "2026-11-04"],
+    ["month", "2026-11-01", "2026-11-04"],
+    ["year", "2026-01-01", "2026-11-01"],
+    ["all", "all", "2026-11-02"],
+  ]) {
+    const dashboard = await f.readDashboard(periodType, periodKey);
+    assert.deepEqual(dashboard.weeklyTrend.filter((point: { count: number }) => point.count), [
+      { week: bucket, count: 2, internal: 1, external: 1 },
+    ]);
+    assert.ok(dashboard.weeklyTrend.every(
+      (point: { count: number; internal: number; external: number }) => point.count === point.internal + point.external,
+    ));
+  }
 });
 
 test("backfill previews without writes, publishes when finished and reconciles edits without duplicates", async (t) => {
