@@ -3,7 +3,10 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+import { qaVisualTables } from "./qaVisual/tables";
+
 export default defineSchema({
+  ...qaVisualTables,
   ...authTables,
 
   // Niveles de administración. No conceden acceso a clientes, categorías o tareas.

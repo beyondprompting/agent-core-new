@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   CircleHelp,
   ImageIcon,
@@ -33,6 +34,16 @@ export function ReviewCanvas({
 }: {
   session: ReviewSession;
 }) {
+  const [imageSize, setImageSize] = useState<{
+    src: string;
+    width: number;
+    height: number;
+  }>();
+  const dimensions = imageSize?.src === piece.image ? imageSize : piece;
+  const ratio =
+    dimensions.width && dimensions.height
+      ? dimensions.width / dimensions.height
+      : 1;
   const region = pieceComments.find(
     (c) => c.id === selected && !c.resolved,
   )?.region;
@@ -53,10 +64,8 @@ export function ReviewCanvas({
             ref={artboardRef}
             className={`artboard ${piece.height > piece.width ? "portrait" : ""} tool-${tool}`}
             style={{
-              aspectRatio:
-                piece.width && piece.height
-                  ? `${piece.width} / ${piece.height}`
-                  : undefined,
+              aspectRatio: ratio,
+              width: `min(100cqw, calc(100cqh * ${ratio}))`,
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`,
             }}
             onPointerDown={onPointerDown}
@@ -64,7 +73,14 @@ export function ReviewCanvas({
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
           >
-            <Artwork piece={piece} eager />
+            <Artwork
+              key={piece.image}
+              piece={piece}
+              eager
+              onDimensions={(width, height) =>
+                setImageSize({ src: piece.image, width, height })
+              }
+            />
             <svg
               className="annotation-layer"
               viewBox="0 0 100 100"
@@ -103,7 +119,7 @@ export function ReviewCanvas({
                 .filter((c) => c.pin && !c.resolved)
                 .map((c) => (
                   <button
-                    key={c.id}
+                    key={c.marker ?? c.id}
                     className={`image-pin ${c.kind} ${selected === c.id ? "selected" : ""}`}
                     style={{
                       left: `${c.pin!.x}%`,
@@ -113,7 +129,7 @@ export function ReviewCanvas({
                     onClick={() => selectComment(c.id)}
                   >
                     {c.kind === "agent" ? <Sparkles size={12} /> : null}
-                    {c.id}
+                    {c.marker ?? c.id}
                   </button>
                 ))}
             {showPins && region && (

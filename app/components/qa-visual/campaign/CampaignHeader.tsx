@@ -1,12 +1,16 @@
-import { ArrowLeft, Users } from "lucide-react";
+import { ArrowLeft, ScanLine, Users } from "lucide-react";
 
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
 export function CampaignHeader({
   session: { setModal, inventory, reviewer },
+  onAnalyze,
+  analyzing,
 }: {
   session: ReviewSession;
+  onAnalyze?: () => void;
+  analyzing: boolean;
 }) {
   return (
     <section className="campaign-header">
@@ -33,6 +37,17 @@ export function CampaignHeader({
           <Users size={15} />
           Compartir
         </button>
+        {onAnalyze && (
+          <button
+            type="button"
+            className="button primary"
+            disabled={analyzing}
+            onClick={onAnalyze}
+          >
+            <ScanLine size={15} />
+            Analizar piezas
+          </button>
+        )}
       </div>
     </section>
   );

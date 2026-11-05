@@ -85,7 +85,7 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
       <div className="comment-composer">
         {replyTo && (
           <div className="composer-context">
-            <span>{`Respuesta a comentario ${replyTo}`}</span>
+            <span>{"Respuesta a un comentario"}</span>
             <button
               aria-label="Cancelar respuesta"
               onClick={() => setReplyTo(null)}

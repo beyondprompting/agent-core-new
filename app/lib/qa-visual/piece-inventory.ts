@@ -8,7 +8,11 @@ const label = (value: string) =>
     .replace(/^./u, (char) => char.toLocaleUpperCase("es"));
 const display = (value?: string) => (value ? label(value) : "—");
 
-export function toReviewPieces({ pieces, production }: QaInventory): Piece[] {
+export function toReviewPieces({
+  pieces,
+  production,
+  clientRequirements,
+}: QaInventory): Piece[] {
   return pieces.map((file) => {
     const stem = file.name.replace(/\.[^.]+$/, "");
     const record = production?.[stem.normalize("NFC").toLowerCase()];
@@ -58,6 +62,7 @@ export function toReviewPieces({ pieces, production }: QaInventory): Piece[] {
       price: record?.price || "—",
       validity: record?.dateAsset || "—",
       cta: record?.ctaAsset || "—",
+      clientRequirements: clientRequirements?.[file.name],
       productionLinked: Boolean(record),
     };
   });
