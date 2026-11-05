@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useId, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { Group } from "@visx/group";
@@ -52,26 +52,46 @@ function AnalyticsDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [today, setToday] = useState(() => analyticsDay(Date.now()));
-  const periodType = analyticsPeriodTypes.find((type) => type === searchParams.get("period")) ?? "all";
+  const periodType =
+    analyticsPeriodTypes.find((type) => type === searchParams.get("period")) ??
+    "all";
   const date = searchParams.get("date");
-  const selectedDay = date && isAnalyticsDay(date) && date <= today ? date : today;
-  const anchor = selectedDay < analyticsFirstDay ? analyticsFirstDay : selectedDay;
+  const selectedDay =
+    date && isAnalyticsDay(date) && date <= today ? date : today;
+  const anchor =
+    selectedDay < analyticsFirstDay ? analyticsFirstDay : selectedDay;
   const period = analyticsPeriod(periodType, anchor);
   const analyticsAccess = useQuery(api.data.analytics.viewerCanAccessAnalytics);
-  const viewerId = analyticsAccess?.canAccess ? analyticsAccess.userId : undefined;
-  const periodAnalytics = useQuery(api.data.analytics.getPeriodDashboard,
-    analyticsAccess?.canAccess ? { ...period, today } : "skip");
-  const loadingBackfill = periodAnalytics?.canAccess === true && !periodAnalytics.ready;
-  const legacyAnalytics = useQuery(api.data.analytics.getDashboard, loadingBackfill ? {} : "skip");
-  const currentAnalytics = periodAnalytics?.canAccess && periodAnalytics.ready ? periodAnalytics : undefined;
+  const viewerId = analyticsAccess?.canAccess
+    ? analyticsAccess.userId
+    : undefined;
+  const periodAnalytics = useQuery(
+    api.data.analytics.getPeriodDashboard,
+    analyticsAccess?.canAccess ? { ...period, today } : "skip",
+  );
+  const loadingBackfill =
+    periodAnalytics?.canAccess === true && !periodAnalytics.ready;
+  const legacyAnalytics = useQuery(
+    api.data.analytics.getDashboard,
+    loadingBackfill ? {} : "skip",
+  );
+  const currentAnalytics =
+    periodAnalytics?.canAccess && periodAnalytics.ready
+      ? periodAnalytics
+      : undefined;
   const [lastPeriod, setLastPeriod] = useState<{
     analytics: NonNullable<typeof currentAnalytics>;
     periodType: AnalyticsPeriodType;
     viewerId: string;
   }>();
-  const previousPeriod = periodAnalytics === undefined && viewerId && lastPeriod?.viewerId === viewerId
-    ? lastPeriod : undefined;
-  const analytics = currentAnalytics ?? previousPeriod?.analytics ?? legacyAnalytics;
+  const previousPeriod =
+    periodAnalytics === undefined &&
+    viewerId &&
+    lastPeriod?.viewerId === viewerId
+      ? lastPeriod
+      : undefined;
+  const analytics =
+    currentAnalytics ?? previousPeriod?.analytics ?? legacyAnalytics;
   const displayedPeriodType = previousPeriod?.periodType ?? periodType;
   const {
     results: threads,
@@ -156,8 +176,13 @@ function AnalyticsDashboard() {
         <div className="p-6 space-y-6 max-w-7xl">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0 grow basis-64">
-              <h1 className="text-2xl font-semibold text-foreground">Analytics</h1>
-              <p className="mt-1 truncate text-sm text-muted-foreground" role="status">
+              <h1 className="text-2xl font-semibold text-foreground">
+                Analytics
+              </h1>
+              <p
+                className="mt-1 truncate text-sm text-muted-foreground"
+                role="status"
+              >
                 {previousPeriod
                   ? "Actualizando periodo…"
                   : "Vista operativa de proyectos, tasks, COR y evaluaciones."}
@@ -172,8 +197,12 @@ function AnalyticsDashboard() {
             />
           </div>
           {loadingBackfill && (
-            <p id="analytics-period-status" className="text-xs text-muted-foreground">
-              Estás viendo Histórico. La carga inicial de analíticas habilitará los demás periodos.
+            <p
+              id="analytics-period-status"
+              className="text-xs text-muted-foreground"
+            >
+              Estás viendo Histórico. La carga inicial de analíticas habilitará
+              los demás periodos.
             </p>
           )}
 
@@ -187,7 +216,11 @@ function AnalyticsDashboard() {
             <MetricCard
               title="Proyectos"
               value={analytics.summary.projects}
-              detail={loadingBackfill ? "Creados recientemente" : "Creados en el periodo"}
+              detail={
+                loadingBackfill
+                  ? "Creados recientemente"
+                  : "Creados en el periodo"
+              }
               icon={FolderKanban}
             />
             <MetricCard
@@ -306,13 +339,22 @@ function AnalyticsDashboard() {
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <AnalyticsPanel
-              title={loadingBackfill || displayedPeriodType === "all" ? "Creación Semanal"
-                : displayedPeriodType === "year" ? "Creación Mensual" : "Creación Diaria"}
+              title={
+                loadingBackfill || displayedPeriodType === "all"
+                  ? "Creación Semanal de tareas"
+                  : displayedPeriodType === "year"
+                    ? "Creación Mensual de tareas"
+                    : "Creación Diaria de tareas"
+              }
               className="xl:col-span-2"
             >
               <TrendBars
                 items={analytics.weeklyTrend}
-                formatLabel={!loadingBackfill && displayedPeriodType === "year" ? formatShortMonth : formatShortDate}
+                formatLabel={
+                  !loadingBackfill && displayedPeriodType === "year"
+                    ? formatShortMonth
+                    : formatShortDate
+                }
               />
             </AnalyticsPanel>
 
@@ -351,7 +393,7 @@ function AnalyticsDashboard() {
           <p className="text-xs text-muted-foreground">
             {"limits" in analytics
               ? `Métricas calculadas sobre ${analytics.limits.taskSampleSize} tasks y ${analytics.limits.evaluationSampleSize} evaluaciones recientes.`
-              : "Periodos por fecha de creación (hora de Ecuador). Los estados y vencimientos reflejan la situación actual."}
+              : "Periodos por fecha de creación."}
           </p>
         </div>
       </div>
@@ -360,18 +402,31 @@ function AnalyticsDashboard() {
 }
 
 const periodLabels: Record<AnalyticsPeriodType, string> = {
-  day: "Día", week: "Semana", month: "Mes", year: "Año", all: "Histórico",
+  day: "Día",
+  week: "Semana",
+  month: "Mes",
+  year: "Año",
+  all: "Histórico",
 };
 
 const shortPeriodDate = new Intl.DateTimeFormat("es-EC", {
-  day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
 });
 const longPeriodMonth = new Intl.DateTimeFormat("es-EC", {
-  month: "long", year: "numeric", timeZone: "UTC",
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
 });
 
 function AnalyticsPeriodPicker({
-  period, anchor, today, disabled, onSelect,
+  period,
+  anchor,
+  today,
+  disabled,
+  onSelect,
 }: {
   period: AnalyticsPeriod;
   anchor: string;
@@ -383,50 +438,93 @@ function AnalyticsPeriodPicker({
   const canNavigate = !disabled && periodType !== "all";
   const previous = shiftAnalyticsPeriod(period, -1);
   const next = shiftAnalyticsPeriod(period, 1);
-  const firstPeriodKey = analyticsPeriod(periodType, analyticsFirstDay).periodKey;
-  const visibleStart = periodKey < analyticsFirstDay ? analyticsFirstDay : periodKey;
+  const firstPeriodKey = analyticsPeriod(
+    periodType,
+    analyticsFirstDay,
+  ).periodKey;
+  const visibleStart =
+    periodKey < analyticsFirstDay ? analyticsFirstDay : periodKey;
   const firstDay = new Date(`${visibleStart}T00:00:00Z`);
-  const dateLabel = periodType === "all" ? "Todos los periodos"
-    : periodType === "year" ? periodKey.slice(0, 4)
-    : periodType === "month" ? longPeriodMonth.format(firstDay)
-    : periodType === "week" ? `${shortPeriodDate.format(firstDay)} – ${shortPeriodDate.format(
-        new Date(`${addAnalyticsDays(periodKey, 6)}T00:00:00Z`))}`
-    : shortPeriodDate.format(firstDay);
+  const dateLabel =
+    periodType === "all"
+      ? "Todos los periodos"
+      : periodType === "year"
+        ? periodKey.slice(0, 4)
+        : periodType === "month"
+          ? longPeriodMonth.format(firstDay)
+          : periodType === "week"
+            ? `${shortPeriodDate.format(firstDay)} – ${shortPeriodDate.format(
+                new Date(`${addAnalyticsDays(periodKey, 6)}T00:00:00Z`),
+              )}`
+            : shortPeriodDate.format(firstDay);
 
   return (
-    <div aria-label="Periodo de analíticas" aria-describedby={disabled ? "analytics-period-status" : undefined}
-      className="flex min-w-0 max-w-full flex-wrap items-center gap-2" role="group">
+    <div
+      aria-label="Periodo de analíticas"
+      aria-describedby={disabled ? "analytics-period-status" : undefined}
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2"
+      role="group"
+    >
       <div className="flex flex-wrap items-center gap-2">
-        <CalendarDays aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        <CalendarDays
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground"
+        />
         {analyticsPeriodTypes.map((type) => (
-          <button key={type} type="button" aria-pressed={periodType === type}
+          <button
+            key={type}
+            type="button"
+            aria-pressed={periodType === type}
             disabled={disabled && type !== "all"}
             onClick={() => onSelect(type, anchor)}
-            className={`h-8 shrink-0 rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${periodType === type
-              ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground enabled:hover:text-foreground"}`}
+            className={`h-8 shrink-0 rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              periodType === type
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground enabled:hover:text-foreground"
+            }`}
           >
             {periodLabels[type]}
           </button>
         ))}
       </div>
       <div className="grid w-80 max-w-full grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2">
-        <button type="button" aria-label="Periodo anterior" disabled={!canNavigate || previous < firstPeriodKey}
-          onClick={() => onSelect(periodType, previous < analyticsFirstDay ? analyticsFirstDay : previous)}
-          className="grid size-8 place-items-center rounded-lg bg-muted text-foreground disabled:opacity-40">
+        <button
+          type="button"
+          aria-label="Periodo anterior"
+          disabled={!canNavigate || previous < firstPeriodKey}
+          onClick={() =>
+            onSelect(
+              periodType,
+              previous < analyticsFirstDay ? analyticsFirstDay : previous,
+            )
+          }
+          className="grid size-8 place-items-center rounded-lg bg-muted text-foreground disabled:opacity-40"
+        >
           <ChevronLeft aria-hidden="true" className="size-4" />
         </button>
         <div className="relative flex h-8 min-w-0 items-center justify-center rounded-lg border border-border px-3 text-sm text-foreground focus-within:ring-2 focus-within:ring-primary">
-          <span className="truncate" aria-hidden={canNavigate}>{dateLabel}</span>
+          <span className="truncate" aria-hidden={canNavigate}>
+            {dateLabel}
+          </span>
           {canNavigate && (
-            <input type="date" aria-label="Elegir fecha del periodo" value={anchor} min={analyticsFirstDay} max={today}
+            <input
+              type="date"
+              aria-label="Elegir fecha del periodo"
+              value={anchor}
+              min={analyticsFirstDay}
+              max={today}
               onChange={(event) => onSelect(periodType, event.target.value)}
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full"
             />
           )}
         </div>
-        <button type="button" aria-label="Periodo siguiente" disabled={!canNavigate || !isAnalyticsDay(next) || next > today}
+        <button
+          type="button"
+          aria-label="Periodo siguiente"
+          disabled={!canNavigate || !isAnalyticsDay(next) || next > today}
           onClick={() => onSelect(periodType, next)}
-          className="grid size-8 place-items-center rounded-lg bg-muted text-foreground disabled:opacity-40">
+          className="grid size-8 place-items-center rounded-lg bg-muted text-foreground disabled:opacity-40"
+        >
           <ChevronRight aria-hidden="true" className="size-4" />
         </button>
       </div>
@@ -612,12 +710,24 @@ function DeliverablesBreakdown({
   );
 }
 
+type TaskTrendPoint = {
+  week: string;
+  count: number;
+  internal: number;
+  external: number;
+};
+
+const trendSources = [
+  { key: "internal", label: "Internas", color: "hsl(var(--primary))" },
+  { key: "external", label: "Clientes externos", color: "hsl(36 92% 46%)" },
+] as const;
+
 function TrendBars({
   formatLabel,
   items,
 }: {
   formatLabel: (value: string) => string;
-  items: Array<{ week: string; count: number }>;
+  items: TaskTrendPoint[];
 }) {
   const {
     tooltipData,
@@ -626,44 +736,63 @@ function TrendBars({
     tooltipTop = 0,
     showTooltip,
     hideTooltip,
-  } = useTooltip<{ week: string; count: number }>();
+  } = useTooltip<TaskTrendPoint>();
 
   return (
-    <div className="relative h-56">
-      <ParentSize>
-        {({ width }) =>
-          width > 0 ? (
-            <WeeklyTrendChart
-              formatLabel={formatLabel}
-              height={224}
-              items={items}
-              width={width}
-              onTooltip={({ datum, left, top }) =>
-                showTooltip({
-                  tooltipData: datum,
-                  tooltipLeft: left,
-                  tooltipTop: top,
-                })
-              }
-              onTooltipHide={hideTooltip}
-            />
-          ) : null
-        }
-      </ParentSize>
+    <>
+      <div className="relative h-56">
+        <ParentSize>
+          {({ width }) =>
+            width > 0 ? (
+              <WeeklyTrendChart
+                formatLabel={formatLabel}
+                height={224}
+                items={items}
+                width={width}
+                onTooltip={({ datum, left, top }) =>
+                  showTooltip({
+                    tooltipData: datum,
+                    tooltipLeft: left,
+                    tooltipTop: top,
+                  })
+                }
+                onTooltipHide={hideTooltip}
+              />
+            ) : null
+          }
+        </ParentSize>
 
-      {tooltipOpen && tooltipData && (
-        <TooltipWithBounds
-          left={tooltipLeft}
-          top={tooltipTop}
-          className="rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg"
-        >
-          <div className="font-medium">{formatLabel(tooltipData.week)}</div>
-          <div className="text-muted-foreground">
-            {tooltipData.count} task{tooltipData.count !== 1 ? "s" : ""}
-          </div>
-        </TooltipWithBounds>
-      )}
-    </div>
+        {tooltipOpen && tooltipData && (
+          <TooltipWithBounds
+            left={tooltipLeft}
+            top={tooltipTop}
+            className="rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg"
+          >
+            <div className="font-medium">{formatLabel(tooltipData.week)}</div>
+            {trendSources.map(({ key, label }) => (
+              <div key={key} className="text-muted-foreground">
+                {label}: {formatNumber(tooltipData[key])}
+              </div>
+            ))}
+            <div className="mt-1 font-medium">
+              Total: {formatNumber(tooltipData.count)}
+            </div>
+          </TooltipWithBounds>
+        )}
+      </div>
+      <ul className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {trendSources.map(({ key, label, color }) => (
+          <li key={key} className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-2.5 rounded-sm"
+              style={{ backgroundColor: color }}
+            />
+            {label}
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -677,15 +806,16 @@ function WeeklyTrendChart({
 }: {
   formatLabel: (value: string) => string;
   height: number;
-  items: Array<{ week: string; count: number }>;
+  items: TaskTrendPoint[];
   onTooltip: (args: {
-    datum: { week: string; count: number };
+    datum: TaskTrendPoint;
     left: number;
     top: number;
   }) => void;
   onTooltipHide: () => void;
   width: number;
 }) {
+  const clipPrefix = useId();
   const margin = { top: 12, right: 12, bottom: 32, left: 42 };
   const innerWidth = Math.max(width - margin.left - margin.right, 0);
   const innerHeight = Math.max(height - margin.top - margin.bottom, 0);
@@ -764,37 +894,56 @@ function WeeklyTrendChart({
           const barY = yScale(item.count);
           const barWidth = xScale.bandwidth();
           const barHeight = innerHeight - barY;
-          const minVisibleHeight = item.count > 0 ? Math.max(barHeight, 3) : 0;
+          const visibleHeight = item.count > 0 ? Math.max(barHeight, 3) : 0;
+          const barTop = innerHeight - visibleHeight;
+          const internalHeight =
+            item.count > 0 ? visibleHeight * (item.internal / item.count) : 0;
+          const externalHeight = visibleHeight - internalHeight;
+          const clipId = `${clipPrefix}-${item.week}`;
+          const showBarTooltip = () =>
+            onTooltip({
+              datum: item,
+              left: margin.left + barX + barWidth / 2,
+              top: margin.top + Math.max(barY - 8, 0),
+            });
 
           return (
-            <Bar
+            <g
               key={item.week}
-              x={barX}
-              y={item.count > 0 ? innerHeight - minVisibleHeight : innerHeight}
-              width={barWidth}
-              height={minVisibleHeight}
-              rx={6}
-              fill="hsl(var(--primary))"
               tabIndex={0}
               role="img"
-              aria-label={`${formatLabel(item.week)}: ${item.count} tasks`}
+              aria-label={`${formatLabel(item.week)}: ${item.internal} internas, ${item.external} externas, ${item.count} en total`}
               onBlur={onTooltipHide}
-              onFocus={() =>
-                onTooltip({
-                  datum: item,
-                  left: margin.left + barX + barWidth / 2,
-                  top: margin.top + Math.max(barY - 8, 0),
-                })
-              }
+              onFocus={showBarTooltip}
               onMouseLeave={onTooltipHide}
-              onMouseMove={() =>
-                onTooltip({
-                  datum: item,
-                  left: margin.left + barX + barWidth / 2,
-                  top: margin.top + Math.max(barY - 8, 0),
-                })
-              }
-            />
+              onMouseMove={showBarTooltip}
+            >
+              <clipPath id={clipId}>
+                <rect
+                  x={barX}
+                  y={barTop}
+                  width={barWidth}
+                  height={visibleHeight}
+                  rx={6}
+                />
+              </clipPath>
+              <g clipPath={`url(#${clipId})`}>
+                <Bar
+                  x={barX}
+                  y={barTop}
+                  width={barWidth}
+                  height={externalHeight}
+                  fill={trendSources[1].color}
+                />
+                <Bar
+                  x={barX}
+                  y={innerHeight - internalHeight}
+                  width={barWidth}
+                  height={internalHeight}
+                  fill={trendSources[0].color}
+                />
+              </g>
+            </g>
           );
         })}
       </Group>
@@ -878,8 +1027,23 @@ function formatShortDate(value: string) {
   return `${day}/${month}`;
 }
 
-const shortMonthLabels = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const shortMonthLabels = [
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
+];
 
 function formatShortMonth(value: string) {
-  return shortMonthLabels[Number(value.slice(5, 7)) - 1] ?? formatShortDate(value);
+  return (
+    shortMonthLabels[Number(value.slice(5, 7)) - 1] ?? formatShortDate(value)
+  );
 }

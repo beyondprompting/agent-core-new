@@ -372,10 +372,15 @@ export const getPeriodDashboard = query({
       rankedAnalytics(ctx, period, "tasksByUser", "users", 10),
       rankedAnalytics(ctx, period, "evaluationsByUser", "users", 10),
       readPeriodDeliverables(ctx, period, datedDeliverables),
-      Promise.all(trendPeriods.map(async (bucket) => ({
-        week: bucket.periodKey < analyticsFirstDay ? analyticsFirstDay : bucket.periodKey,
-        count: (await readPeriodCounts(ctx, bucket)).tasks ?? 0,
-      }))),
+      Promise.all(trendPeriods.map(async (bucket) => {
+        const counts = await readPeriodCounts(ctx, bucket);
+        return {
+          week: bucket.periodKey < analyticsFirstDay ? analyticsFirstDay : bucket.periodKey,
+          count: counts.tasks ?? 0,
+          internal: counts.source_internal ?? 0,
+          external: counts.source_external ?? 0,
+        };
+      })),
       periodAttention(ctx, period, "overdue"),
       periodAttention(ctx, period, "dueSoon"),
     ]);
@@ -635,10 +640,10 @@ function startOfToday(now: number) {
 }
 
 function buildWeeklyTrend(
-  tasks: Array<{ _creationTime: number }>,
+  tasks: Array<{ _creationTime: number; source?: "internal" | "external" }>,
   weeks: number,
 ) {
-  const buckets = new Map<string, number>();
+  const buckets = new Map<string, { internal: number; external: number }>();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -646,7 +651,7 @@ function buildWeeklyTrend(
     const start = new Date(today);
     start.setDate(start.getDate() - index * 7);
     const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-    buckets.set(key, 0);
+    buckets.set(key, { internal: 0, external: 0 });
   }
 
   const bucketKeys = Array.from(buckets.keys());
@@ -656,11 +661,13 @@ function buildWeeklyTrend(
     const diffWeeks = Math.floor(
       (task._creationTime - firstBucketTime) / (7 * 24 * 60 * 60 * 1000),
     );
-    const key = bucketKeys[Math.min(diffWeeks, bucketKeys.length - 1)];
-    if (key) buckets.set(key, (buckets.get(key) ?? 0) + 1);
+    const bucket = buckets.get(bucketKeys[Math.min(diffWeeks, bucketKeys.length - 1)]);
+    if (bucket) bucket[task.source ?? "internal"]++;
   }
 
-  return bucketKeys.map((key) => ({ week: key, count: buckets.get(key) ?? 0 }));
+  return Array.from(buckets, ([week, { internal, external }]) => ({
+    week, count: internal + external, internal, external,
+  }));
 }
 
 function formatTaskListItem(task: any) {
