@@ -36,6 +36,7 @@ import {
   MAX_RETRY_ATTEMPTS,
 } from "../lib/corRetry";
 import { notifyAnalytics } from "../analytics/notify";
+import { positiveDeliverables } from "../lib/deliverableAnalytics";
 import type { SourceId } from "../analytics/projection";
 import { formatTrelloCommentForCOR } from "../lib/trelloCommentFormat";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
@@ -1715,6 +1716,13 @@ export const updateTaskFields = mutation({
       `[Tasks.updateTaskFields] Actualizando task ${args.taskId}:`,
       Object.keys(updateData),
     );
+    // Freeze the legacy amount included in the project before changing the task quantity.
+    if (updateData.deliverablesCount !== undefined && !task.projectDeliverableAllocation) {
+      updateData.projectDeliverableAllocation = {
+        amount: positiveDeliverables(task.deliverablesCount),
+        trackedOnProject: false,
+      };
+    }
     await patchTaskWithStatusNotification(ctx, args.taskId, updateData as any, "platform");
 
     // Programar sync a COR si corresponde (via internalMutation)
@@ -2891,6 +2899,9 @@ export const createProjectAndTask = internalMutation({
     });
 
     // 1. Crear o reutilizar proyecto
+    const coveredDeliverables = args.existingProjectId ? 0 : Math.min(
+      positiveDeliverables(args.projectDeliverables), positiveDeliverables(args.taskDeliverablesCount),
+    );
     let projectId: string;
     if (args.existingProjectId) {
       projectId = args.existingProjectId;
@@ -2906,6 +2917,7 @@ export const createProjectAndTask = internalMutation({
         convexStatus: "active",
         pmId: args.projectPmId,
         deliverables: args.projectDeliverables,
+        deliverablesCoveredByTasks: coveredDeliverables,
         estimatedTime: args.projectEstimatedTime,
         createdBy: args.projectCreatedBy,
         threadId: args.threadId,
@@ -2945,6 +2957,7 @@ export const createProjectAndTask = internalMutation({
       description: args.taskDescription,
       deadline: args.taskDeadline,
       deliverablesCount: args.taskDeliverablesCount,
+      projectDeliverableAllocation: { amount: coveredDeliverables, trackedOnProject: true },
       priority: args.taskPriority ?? 1,
       threadId: args.threadId,
       taskDraftId: draft._id,
@@ -3204,7 +3217,7 @@ export const backfillTaskDeliverablesCount = internalMutation({
     }
 
     if (!args.dryRun) {
-      await ctx.db.patch(task._id, { deliverablesCount });
+      await ctx.db.patch(task._id, { deliverablesCount, updatedAt: Date.now() });
     }
 
     return {
@@ -5766,11 +5779,12 @@ export const publishTaskToExternalAction = internalAction({
             endDate: existingProjectEndDate,
             status: optionalStringFromExternal(existingProject.status),
             deliverables: localProjectDeliverables,
+            taskDeliverablesIncluded: taskDeliverablesCount ?? 0,
             estimatedTime: localProjectEstimatedTime,
           },
         );
         changedSources.add(attachment.projectId);
-        if (attachment.deletedUnusedProject && projectId) changedSources.add(projectId as Id<"projects">);
+        if (projectId) changedSources.add(projectId as Id<"projects">);
       } else if (projectId) {
         // Leer el proyecto local
         const localProject = await ctx.runQuery(

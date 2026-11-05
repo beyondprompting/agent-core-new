@@ -310,7 +310,10 @@ function AnalyticsDashboard() {
                 : displayedPeriodType === "year" ? "Creación Mensual" : "Creación Diaria"}
               className="xl:col-span-2"
             >
-              <TrendBars items={analytics.weeklyTrend} />
+              <TrendBars
+                items={analytics.weeklyTrend}
+                formatLabel={!loadingBackfill && displayedPeriodType === "year" ? formatShortMonth : formatShortDate}
+              />
             </AnalyticsPanel>
 
             <AnalyticsPanel title="Evaluaciones">
@@ -610,8 +613,10 @@ function DeliverablesBreakdown({
 }
 
 function TrendBars({
+  formatLabel,
   items,
 }: {
+  formatLabel: (value: string) => string;
   items: Array<{ week: string; count: number }>;
 }) {
   const {
@@ -629,6 +634,7 @@ function TrendBars({
         {({ width }) =>
           width > 0 ? (
             <WeeklyTrendChart
+              formatLabel={formatLabel}
               height={224}
               items={items}
               width={width}
@@ -651,7 +657,7 @@ function TrendBars({
           top={tooltipTop}
           className="rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg"
         >
-          <div className="font-medium">{formatShortDate(tooltipData.week)}</div>
+          <div className="font-medium">{formatLabel(tooltipData.week)}</div>
           <div className="text-muted-foreground">
             {tooltipData.count} task{tooltipData.count !== 1 ? "s" : ""}
           </div>
@@ -662,12 +668,14 @@ function TrendBars({
 }
 
 function WeeklyTrendChart({
+  formatLabel,
   height,
   items,
   onTooltip,
   onTooltipHide,
   width,
 }: {
+  formatLabel: (value: string) => string;
   height: number;
   items: Array<{ week: string; count: number }>;
   onTooltip: (args: {
@@ -742,7 +750,7 @@ function WeeklyTrendChart({
           hideTicks
           scale={xScale}
           top={innerHeight}
-          tickFormat={(value) => formatShortDate(String(value))}
+          tickFormat={formatLabel}
           tickLabelProps={() => ({
             fill: "hsl(var(--muted-foreground))",
             fontSize: 11,
@@ -769,7 +777,7 @@ function WeeklyTrendChart({
               fill="hsl(var(--primary))"
               tabIndex={0}
               role="img"
-              aria-label={`${formatShortDate(item.week)}: ${item.count} tasks`}
+              aria-label={`${formatLabel(item.week)}: ${item.count} tasks`}
               onBlur={onTooltipHide}
               onFocus={() =>
                 onTooltip({
@@ -868,4 +876,10 @@ function formatShortDate(value: string) {
   const [, month, day] = value.split("-");
   if (!month || !day) return value;
   return `${day}/${month}`;
+}
+
+const shortMonthLabels = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+function formatShortMonth(value: string) {
+  return shortMonthLabels[Number(value.slice(5, 7)) - 1] ?? formatShortDate(value);
 }

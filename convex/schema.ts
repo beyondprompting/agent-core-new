@@ -205,6 +205,10 @@ export default defineSchema({
     description: v.optional(v.string()), // Contiene todos los datos del brief formateados
     deadline: v.optional(v.string()),
     deliverablesCount: v.optional(v.number()), // Entregables propios de la task (local; no existe en COR)
+    projectDeliverableAllocation: v.optional(v.object({
+      amount: v.number(),
+      trackedOnProject: v.boolean(),
+    })),
     priority: v.optional(v.number()), // 0=Low, 1=Medium, 2=High, 3=Urgent
     strategicPriority: v.optional(
       v.union(
@@ -792,6 +796,7 @@ export default defineSchema({
     billable: v.optional(v.boolean()),
     incomeType: v.optional(v.string()), // "fee" | "one_time" | "hourly_rate" | "contract"
     deliverables: v.optional(v.number()), // Cantidad de entregables
+    deliverablesCoveredByTasks: v.optional(v.number()),
     pmId: v.optional(v.number()), // PM en COR (opcional)
     brandId: v.optional(v.number()), // Marca en COR (opcional)
     productId: v.optional(v.number()), // Producto en COR (opcional)

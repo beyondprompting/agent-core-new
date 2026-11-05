@@ -13,6 +13,10 @@ export const sourceIdValidator = v.union(v.id("tasks"), v.id("projects"), v.id("
 export const attentionKindValidator = v.union(v.literal("overdue"), v.literal("dueSoon"));
 
 const periodFields = { periodType: periodTypeValidator, periodKey: v.string() };
+export const taskShareValidator = v.object({
+  projectId: v.id("projects"),
+  amount: v.number(),
+});
 const attentionTask = v.object({
   taskId: v.id("tasks"),
   createdAt: v.number(),
@@ -32,6 +36,9 @@ export const projectionValidator = v.union(
     corStatus: v.optional(v.string()),
     clientId: v.optional(v.id("corClients")),
     brandId: v.optional(v.id("clientBrands")),
+    subBrandId: v.optional(v.id("subBrands")),
+    deliverables: v.optional(v.number()),
+    deliverableProjectId: v.optional(v.id("projects")),
     userId: v.optional(v.string()),
     attentionTask: v.optional(attentionTask),
     attention: v.optional(attentionKindValidator),
@@ -42,6 +49,8 @@ export const projectionValidator = v.union(
     day: v.string(),
     status: v.string(),
     deliverables: v.number(),
+    coveredDeliverables: v.optional(v.number()),
+    deliverableRemainder: v.optional(v.number()),
     clientId: v.optional(v.id("corClients")),
     brandId: v.optional(v.id("clientBrands")),
     subBrandId: v.optional(v.id("subBrands")),
@@ -88,11 +97,22 @@ export const analyticsTables = {
 
   analyticsContributions: defineTable({
     sourceId: sourceIdValidator,
-    projection: projectionValidator,
+    projection: v.union(projectionValidator, v.null()),
+    taskShare: v.optional(taskShareValidator),
     nextAttentionDay: v.optional(v.string()),
   })
     .index("by_source", ["sourceId"])
     .index("by_next_attention_day", ["nextAttentionDay"]),
+
+  analyticsLegacyDeliverableShares: defineTable(taskShareValidator)
+    .index("by_project", ["projectId"]),
+
+  analyticsDeliverableProjectPeriods: defineTable({
+    ...periodFields,
+    projectId: v.id("projects"),
+    dimension: v.string(),
+    sources: v.number(),
+  }).index("by_period_project_dimension", ["periodType", "periodKey", "projectId", "dimension"]),
 
   analyticsEvaluatedTasks: defineTable({
     ...periodFields,
@@ -115,8 +135,10 @@ export const analyticsTables = {
       cursor: v.union(v.string(), v.null()),
       stats: scanStats,
       lastCompletedAt: v.optional(v.number()),
+      deliverablesVersion: v.optional(v.literal(1)),
     }),
     v.object({ key: v.literal("published"), publishedAt: v.number() }),
+    v.object({ key: v.literal("datedDeliverables"), publishedAt: v.number() }),
     v.object({
       key: v.literal("scheduledNightly"),
       through: v.number(),

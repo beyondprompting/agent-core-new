@@ -1,5 +1,5 @@
 import { convexToJson, type Infer } from "convex/values";
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { positiveDeliverables } from "../lib/deliverableAnalytics";
 import { isExcludedUserId } from "../lib/excludedUsers";
@@ -7,6 +7,10 @@ import {
   addAnalyticsDays, analyticsDay, analyticsPeriod, analyticsPeriodTypes, isAnalyticsDay,
   type AnalyticsPeriod,
 } from "./calendar";
+import {
+  changeDeliverableMembership, changeLegacyShares, datedDeliverableMetrics, legacyTaskShare,
+  projectDeliverableRemainder, readLegacyShares, type TaskShare,
+} from "./deliverables";
 import type { projectionValidator, sourceIdValidator } from "./tables";
 
 export const taskStatuses = ["nueva", "en_proceso", "en_revision", "en_diseno", "estancada", "finalizada"] as const;
@@ -27,9 +31,12 @@ const linkedTaskExclusions = {
 } as const satisfies Record<RecordExclusion, string>;
 export type ExclusionReason = RecordExclusion | "excludedRequester" | "missingTask"
   | (typeof linkedTaskExclusions)[RecordExclusion];
-export type ProjectionChange =
-  | { sourceId: SourceId; projection: Projection }
-  | { sourceId: SourceId; projection: null; exclusionReasons?: ExclusionReason[] };
+export type ProjectionChange = {
+  sourceId: SourceId;
+  projection: Projection | null;
+  exclusionReasons?: ExclusionReason[];
+  taskShare?: TaskShare | null;
+};
 
 export function classifyAttention(projection: TaskProjection, today: string): TaskProjection {
   const deadline = projection.attentionTask?.deadline;
@@ -76,15 +83,17 @@ export async function projectSource(
       userId: doc.requestedBy,
     } };
   }
+  const taskShare = "name" in doc ? undefined : legacyTaskShare(doc);
   const exclusionReasons = recordExclusions(doc);
   if (exclusionReasons.length) {
-    return { sourceId, projection: null, exclusionReasons };
+    return { sourceId, projection: null, exclusionReasons, taskShare };
   }
   const day = analyticsDay(doc._creationTime);
   if ("name" in doc) {
     const deliverables = positiveDeliverables(doc.deliverables);
     return { sourceId, projection: {
       kind: "project", day, status: doc.status, deliverables,
+      coveredDeliverables: positiveDeliverables(doc.deliverablesCoveredByTasks) || undefined,
       clientId: doc.clientId, brandId: doc.clientBrandId, subBrandId: doc.subBrandId,
     } };
   }
@@ -94,9 +103,13 @@ export async function projectSource(
     ? { taskId: doc._id, createdAt: doc._creationTime, title: doc.title.slice(0, 1000).replace(/[\uD800-\uDBFF]$/, ""),
         deadline, status: doc.status, source }
     : undefined;
-  return { sourceId, projection: classifyAttention({
+  const deliverables = positiveDeliverables(doc.deliverablesCount) || undefined;
+  const project = deliverables && doc.projectId ? await ctx.db.get(doc.projectId) : null;
+  return { sourceId, taskShare, projection: classifyAttention({
     kind: "task", day, status: doc.status, source, priority: doc.strategicPriority,
     corStatus: doc.corSyncStatus, clientId: doc.clientId, brandId: doc.clientBrandId,
+    subBrandId: deliverables ? doc.subBrandId : undefined,
+    deliverables, deliverableProjectId: project && !recordExclusions(project).length ? project._id : undefined,
     userId: doc.createdBy, attentionTask,
   }, today) };
 }
@@ -157,8 +170,12 @@ function sameValue(before: Projection | null | object, after: Projection | null 
 export async function applyProjectionBatch(ctx: MutationCtx, changes: ProjectionChange[]) {
   const totals = new Map<string, CountDelta>();
   const breakdowns = new Map<string, BreakdownDelta>();
+  const memberships = new Map<string, {
+    period: AnalyticsPeriod; projectId: Id<"projects">; dimension: string;
+    delta: number; target: CountDelta | BreakdownDelta;
+  }>();
 
-  async function add(projection: Projection, sign: 1 | -1) {
+  async function add(projection: Projection, sign: 1 | -1, sourceId: SourceId) {
     for (const periodType of analyticsPeriodTypes) {
       const period = analyticsPeriod(periodType, projection.day);
       const key = JSON.stringify([periodType, period.periodKey]);
@@ -180,7 +197,34 @@ export async function applyProjectionBatch(ctx: MutationCtx, changes: Projection
         }
         delta.count += amount * sign;
         delta.projectCount += projects * sign;
+        return delta;
       };
+
+      function recordMembership(projectId: Id<"projects"> | undefined, dimension: string, target: CountDelta | BreakdownDelta) {
+        if (!projectId) return;
+        const membershipKey = JSON.stringify([key, projectId, dimension]);
+        const prior = memberships.get(membershipKey);
+        if (prior) prior.delta += sign;
+        else memberships.set(membershipKey, { period, projectId, dimension, delta: sign, target });
+      }
+
+      function addDatedDeliverables(
+        amount: number, projectId: Id<"projects"> | undefined,
+        clientId: string | undefined, brandId: string | undefined, subBrandId: string | undefined,
+      ) {
+        if (amount <= 0 || !total) return;
+        const metrics = datedDeliverableMetrics;
+        count(metrics.total, amount);
+        recordMembership(projectId, metrics.total, total);
+        if (!clientId) return;
+        const client = breakdown(metrics.client, clientId, "", amount);
+        if (client) recordMembership(projectId, JSON.stringify([metrics.client, clientId]), client);
+        if (!brandId) return;
+        const brand = breakdown(metrics.brand, brandId, clientId, amount);
+        if (brand) recordMembership(projectId, JSON.stringify([metrics.brand, clientId, brandId]), brand);
+        const subBrand = breakdown(metrics.subBrand, subBrandId, analyticsParentKey(clientId, brandId), amount);
+        if (subBrand) recordMembership(projectId, JSON.stringify([metrics.subBrand, clientId, brandId, subBrandId]), subBrand);
+      }
 
       switch (projection.kind) {
         case "task":
@@ -195,6 +239,8 @@ export async function applyProjectionBatch(ctx: MutationCtx, changes: Projection
           breakdown("tasksByClient", projection.clientId);
           breakdown("tasksByBrand", projection.brandId);
           breakdown("tasksByUser", projection.userId);
+          addDatedDeliverables(projection.deliverables ?? 0, projection.deliverableProjectId,
+            projection.clientId, projection.brandId, projection.subBrandId);
           break;
         case "project":
           count("projects");
@@ -209,6 +255,8 @@ export async function applyProjectionBatch(ctx: MutationCtx, changes: Projection
               breakdown("deliverablesBySubBrand", subBrandId, analyticsParentKey(clientId, brandId), deliverables, 1);
             }
           }
+          addDatedDeliverables(projection.deliverableRemainder ?? 0, sourceId as Id<"projects">,
+            projection.clientId, projection.brandId, projection.subBrandId);
           break;
         case "evaluation":
           count("evaluations");
@@ -223,22 +271,74 @@ export async function applyProjectionBatch(ctx: MutationCtx, changes: Projection
     }
   }
 
-  let changed = 0;
-  for (const { sourceId, projection } of changes) {
-    const existing = await ctx.db.query("analyticsContributions")
+  function contribution(sourceId: SourceId) {
+    return ctx.db.query("analyticsContributions")
       .withIndex("by_source", (q) => q.eq("sourceId", sourceId)).unique();
-    const before = existing?.projection ?? null;
-    if (sameValue(before, projection)) continue;
-    if (before) await add(before, -1);
-    if (projection) await add(projection, 1);
-    await projectAttention(ctx, before, projection);
+  }
+  const work = new Map<SourceId, ProjectionChange>(changes.map(change => [change.sourceId, change]));
+  const previous = new Map<SourceId, Doc<"analyticsContributions"> | null>();
+  const shares = new Map<Id<"projects">, number>();
+  function addShare(share: TaskShare | undefined | null, sign: number) {
+    if (share) shares.set(share.projectId, (shares.get(share.projectId) ?? 0) + share.amount * sign);
+  }
+  for (const [sourceId, change] of work) {
+    const before = await contribution(sourceId);
+    previous.set(sourceId, before);
+    if (change.taskShare === undefined && change.projection?.kind === "task") {
+      // Deadline refreshes reuse the stored task projection.
+      change.taskShare = before?.taskShare;
+    }
+    addShare(before?.taskShare, -1);
+    addShare(change.taskShare, 1);
+  }
+  for (const [projectId, delta] of shares) {
+    if (!delta) continue;
+    await changeLegacyShares(ctx, projectId, delta);
+    if (!work.has(projectId)) {
+      const doc = await ctx.db.get(projectId);
+      work.set(projectId, doc ? await projectSource(ctx, doc, analyticsDay(Date.now())) : {
+        sourceId: projectId, projection: null,
+      });
+      previous.set(projectId, await contribution(projectId));
+    }
+  }
 
-    if (projection) {
-      const nextAttentionDay = projection.kind === "task" ? projection.nextAttentionDay : undefined;
-      if (existing) await ctx.db.patch(existing._id, { projection, nextAttentionDay });
-      else await ctx.db.insert("analyticsContributions", { sourceId, projection, nextAttentionDay });
+  let changed = 0;
+  for (const { sourceId, projection: sourceProjection, taskShare } of work.values()) {
+    const existing = previous.get(sourceId);
+    const before = existing?.projection ?? null;
+    let projection = sourceProjection;
+    if (projection?.kind === "project") {
+      const legacy = await readLegacyShares(ctx, sourceId as Id<"projects">);
+      projection = { ...projection, deliverableRemainder: projectDeliverableRemainder(
+        projection.deliverables, projection.coveredDeliverables ?? 0, legacy?.amount ?? 0,
+      ) };
+    }
+    const projectionChanged = !sameValue(before, projection);
+    if (!projectionChanged && sameValue(existing?.taskShare ?? null, taskShare ?? null)) continue;
+    if (projectionChanged) {
+      if (before) await add(before, -1, sourceId);
+      if (projection) await add(projection, 1, sourceId);
+      await projectAttention(ctx, before, projection);
+    }
+
+    if (projection || taskShare) {
+      const nextAttentionDay = projection?.kind === "task" ? projection.nextAttentionDay : undefined;
+      const value = { projection, taskShare: taskShare ?? undefined, nextAttentionDay };
+      if (existing) await ctx.db.patch(existing._id, value);
+      else await ctx.db.insert("analyticsContributions", { sourceId, ...value });
     } else if (existing) await ctx.db.delete(existing._id);
     changed++;
+  }
+
+  for (const { period, projectId, dimension, delta, target } of memberships.values()) {
+    const change = await changeDeliverableMembership(ctx, period, projectId, dimension, delta);
+    if (!change) continue;
+    if ("projectCount" in target) target.projectCount += change;
+    else {
+      const metric = datedDeliverableMetrics.projects;
+      target.counts[metric] = (target.counts[metric] ?? 0) + change;
+    }
   }
 
   for (const { period, counts } of totals.values()) {

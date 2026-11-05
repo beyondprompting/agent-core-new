@@ -19,6 +19,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { getProjectManagementProvider } from "../integrations/registry";
 import { shouldRetry, getRetryDelay, formatRetryError, isClientError, MAX_RETRY_ATTEMPTS } from "../lib/corRetry";
 import { isInternalUserActive } from "../lib/internalUserStatus";
+import { positiveDeliverables } from "../lib/deliverableAnalytics";
 
 async function isExternalUser(ctx: any, userId: any) {
   const approvedExternalUser = await ctx.db
@@ -749,6 +750,7 @@ export const attachProjectToExistingCORProject = internalMutation({
     endDate: v.optional(v.string()),
     status: v.optional(v.string()),
     deliverables: v.optional(v.number()),
+    taskDeliverablesIncluded: v.optional(v.number()),
     estimatedTime: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -766,6 +768,9 @@ export const attachProjectToExistingCORProject = internalMutation({
           project._id !== args.projectId && project.convexStatus !== "deleted",
       )
       .sort((a, b) => a._creationTime - b._creationTime)[0];
+    const destination = canonicalProject ?? previousProject;
+    const task = args.taskId ? await ctx.db.get(args.taskId) : null;
+    const included = args.taskDeliverablesIncluded;
 
     const updates: Record<string, unknown> = {
       updatedAt: Date.now(),
@@ -786,6 +791,18 @@ export const attachProjectToExistingCORProject = internalMutation({
     if (args.estimatedTime !== undefined) {
       updates.estimatedTime = args.estimatedTime;
     }
+    if (destination && task && included !== undefined) {
+      const allocation = task.projectDeliverableAllocation;
+      const alreadyCovered = task.projectId === destination._id && allocation?.trackedOnProject
+        ? allocation.amount : 0;
+      updates.deliverablesCoveredByTasks = Math.max(
+        0, positiveDeliverables(destination.deliverablesCoveredByTasks) - alreadyCovered,
+      ) + positiveDeliverables(included);
+    }
+    const taskAllocation = task && included !== undefined ? {
+      updatedAt: Date.now(),
+      projectDeliverableAllocation: { amount: positiveDeliverables(included), trackedOnProject: true },
+    } : {};
 
     if (canonicalProject) {
       await ctx.db.patch(canonicalProject._id, updates);
@@ -793,6 +810,7 @@ export const attachProjectToExistingCORProject = internalMutation({
       if (args.taskId) {
         await ctx.db.patch(args.taskId, {
           projectId: canonicalProject._id,
+          ...taskAllocation,
         });
       }
 
@@ -817,6 +835,13 @@ export const attachProjectToExistingCORProject = internalMutation({
             });
           }
           deletedUnusedProject = true;
+        } else if (task && included !== undefined && !task.projectDeliverableAllocation?.trackedOnProject) {
+          // The old project's stored total still includes this amount.
+          const covered = task.projectDeliverableAllocation?.amount ?? positiveDeliverables(task.deliverablesCount);
+          if (covered > 0) await ctx.db.patch(previousProject._id, {
+            updatedAt: Date.now(),
+            deliverablesCoveredByTasks: positiveDeliverables(previousProject.deliverablesCoveredByTasks) + covered,
+          });
         }
       }
 
@@ -836,6 +861,7 @@ export const attachProjectToExistingCORProject = internalMutation({
     if (args.taskId) {
       await ctx.db.patch(args.taskId, {
         projectId: args.projectId,
+        ...taskAllocation,
       });
     }
 

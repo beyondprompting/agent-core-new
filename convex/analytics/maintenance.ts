@@ -1,10 +1,12 @@
 import { v, type Infer } from "convex/values";
 import { internal } from "../_generated/api";
+import type { Id } from "../_generated/dataModel";
 import {
   internalAction, internalMutation, internalQuery, type ActionCtx, type MutationCtx, type QueryCtx,
 } from "../_generated/server";
 import { positiveDeliverables, projectDeliverableShard } from "../lib/deliverableAnalytics";
 import { analyticsDay } from "./calendar";
+import { legacyTaskShare, projectDeliverableRemainder } from "./deliverables";
 import {
   applyProjectionBatch, classifyAttention, projectSource, type ExclusionReason, type ProjectionChange,
 } from "./projection";
@@ -21,7 +23,8 @@ function scanState(ctx: QueryCtx) {
 
 // Convex documents can be up to 1 MiB. Evaluation batches also load up to six linked tasks.
 function sourceBatchSize(table: SourceTable) {
-  return table === "taskEvaluations" ? 6 : 10;
+  // Each task can also refresh its previous and current project.
+  return table === "tasks" ? 3 : table === "taskEvaluations" ? 6 : 10;
 }
 
 async function readPage(ctx: QueryCtx, table: SourceTable, cursor: string | null, explainExclusions = false) {
@@ -39,14 +42,14 @@ export const beginScan = internalMutation({
     if (state?.key !== "scan") {
       if (!manual) return { active: false, published: false };
       await ctx.db.insert("analyticsState", {
-        key: "scan", phase: "tasks", cursor: null, stats: emptyStats(),
+        key: "scan", phase: "tasks", cursor: null, stats: emptyStats(), deliverablesVersion: 1,
       });
       return { active: true, published: false };
     }
     const published = state.lastCompletedAt !== undefined;
-    if (state.phase) return { active: true, published };
-    if (!manual) return { active: false, published };
-    await ctx.db.patch(state._id, { phase: "tasks", cursor: null, stats: emptyStats() });
+    if (state.phase && state.deliverablesVersion === 1) return { active: true, published };
+    if (!state.phase && !manual) return { active: false, published };
+    await ctx.db.patch(state._id, { phase: "tasks", cursor: null, stats: emptyStats(), deliverablesVersion: 1 });
     return { active: true, published };
   },
 });
@@ -55,7 +58,7 @@ export const reconcilePage = internalMutation({
   args: {},
   handler: async (ctx) => {
     const state = await scanState(ctx);
-    if (state?.key !== "scan" || !state.phase) return { active: false };
+    if (state?.key !== "scan" || !state.phase || state.deliverablesVersion !== 1) return { active: false };
     const { phase } = state;
     let changes: ProjectionChange[];
     let cursor: string | null;
@@ -64,7 +67,7 @@ export const reconcilePage = internalMutation({
     if (phase === "cleanup") {
       // This pass also catches physical deletes without requiring hooks in source mutations.
       const page = await ctx.db.query("analyticsContributions")
-        .paginate({ cursor: state.cursor, numItems: 8 });
+        .paginate({ cursor: state.cursor, numItems: 4 });
       if (page.pageStatus === "SplitRequired") throw new Error("An analytics cleanup page exceeded its read budget");
       const sources = await Promise.all(page.page.map((row) => ctx.db.get(row.sourceId)));
       changes = page.page.flatMap((row, i) => sources[i] ? [] : [{ sourceId: row.sourceId, projection: null }]);
@@ -88,6 +91,9 @@ export const reconcilePage = internalMutation({
       if (state.lastCompletedAt === undefined) {
         await ctx.db.insert("analyticsState", { key: "published", publishedAt: completedAt });
       }
+      const dated = await ctx.db.query("analyticsState")
+        .withIndex("by_key", q => q.eq("key", "datedDeliverables")).unique();
+      if (!dated) await ctx.db.insert("analyticsState", { key: "datedDeliverables", publishedAt: completedAt });
       await ctx.db.patch(state._id, { phase: null, cursor: null, stats, lastCompletedAt: completedAt });
     } else {
       await ctx.db.patch(state._id, { phase: nextPhase, cursor, stats });
@@ -101,7 +107,7 @@ export async function refreshAttentionBatch(ctx: MutationCtx) {
   const due = await ctx.db.query("analyticsContributions")
     .withIndex("by_next_attention_day", (q) => q.gt("nextAttentionDay", undefined).lte("nextAttentionDay", today))
     .take(16);
-  await applyProjectionBatch(ctx, due.flatMap(({ sourceId, projection }) => projection.kind === "task"
+  await applyProjectionBatch(ctx, due.flatMap(({ sourceId, projection }) => projection?.kind === "task"
     ? [{ sourceId, projection: classifyAttention(projection, today) }] : []));
   return due.length === 16;
 }
@@ -141,6 +147,8 @@ export const backfillStatus = internalQuery({
     return {
       status: state.phase ? "running" as const : "complete" as const,
       published: state.lastCompletedAt !== undefined,
+      datedDeliverablesReady: Boolean(await ctx.db.query("analyticsState")
+        .withIndex("by_key", q => q.eq("key", "datedDeliverables")).unique()),
       phase: state.phase,
       scanned: state.stats,
       lastCompletedAt: state.lastCompletedAt,
@@ -159,7 +167,8 @@ type ExclusionExample = {
   requestedBy?: string;
 };
 type DeliverableSample = {
-  projectId: string; shard: number; recorded: number; counted: number; reason?: ExclusionReason;
+  projectId: Id<"projects">; shard: number; recorded: number; counted: number;
+  covered: number; day?: string; reason?: ExclusionReason;
 };
 type DeliverableTotals = { projects: number; deliverables: number };
 
@@ -182,6 +191,7 @@ export const previewPage = internalQuery({
     const page = await readPage(ctx, table, cursor, true);
     let eligible = 0;
     let deliverables = 0;
+    let deliverablesWithoutEligibleProject = 0;
     let oldestDay: string | undefined;
     let newestDay: string | undefined;
     const exclusions: ExclusionExample[] = [];
@@ -196,20 +206,37 @@ export const previewPage = internalQuery({
           : { id: doc._id, reasons, status: doc.status, convexStatus: doc.convexStatus, creatorId: doc.createdBy });
       } else {
         eligible++;
-        if (projection.kind === "project") deliverables += projection.deliverables;
+        if (projection.kind === "task") {
+          const amount = projection.deliverables ?? 0;
+          deliverables += amount;
+          if (!projection.deliverableProjectId) deliverablesWithoutEligibleProject += amount;
+        }
         if (!oldestDay || projection.day < oldestDay) oldestDay = projection.day;
         if (!newestDay || projection.day > newestDay) newestDay = projection.day;
       }
       if ("name" in doc) {
         const recorded = positiveDeliverables(doc.deliverables);
-        if (!recorded) continue;
         const counted = projection?.kind === "project" ? projection.deliverables : 0;
         const reason = projection === null ? change.exclusionReasons?.[0] : undefined;
-        projectDeliverables.push({ projectId: doc._id, shard: projectDeliverableShard(doc._id), recorded, counted, reason });
+        projectDeliverables.push({ projectId: doc._id, shard: projectDeliverableShard(doc._id),
+          recorded, counted, covered: positiveDeliverables(doc.deliverablesCoveredByTasks), day: projection?.day, reason });
       }
     }
-    return { cursor: page.cursor, scanned: page.changes.length, eligible, deliverables, oldestDay,
-      newestDay, exclusions, projectDeliverables };
+    return { cursor: page.cursor, scanned: page.changes.length, eligible, deliverables,
+      deliverablesWithoutEligibleProject, oldestDay, newestDay, exclusions, projectDeliverables };
+  },
+});
+
+// Read-only previews derive the shares from operational data, even before backfill.
+export const previewProjectShares = internalQuery({
+  args: { projectId: v.id("projects"), cursor: cursorValidator },
+  handler: async (ctx, { projectId, cursor }) => {
+    const page = await ctx.db.query("tasks").withIndex("by_projectId", q => q.eq("projectId", projectId))
+      .paginate({ cursor, numItems: 10 });
+    return {
+      amount: page.page.reduce((sum, task) => sum + (legacyTaskShare(task)?.amount ?? 0), 0),
+      cursor: page.isDone ? null : page.continueCursor,
+    };
   },
 });
 
@@ -266,7 +293,13 @@ export const backfill = internalAction({
     const ignoredExamples: DeliverableSample[] = [];
     let tableIndex = resume ? sourceTables.indexOf(resume.table) : 0;
     let cursor = resume?.cursor ?? null;
-    let deliverables = 0;
+    let taskDeliverables = 0;
+    let taskDeliverablesWithoutEligibleProject = 0;
+    let projectRemainder = 0;
+    let projectsWithRemainder = 0;
+    const remainderExamples: { projectId: Id<"projects">; day: string; deliverables: number }[] = [];
+    let projectsWithExcessShares = 0;
+    const excessExamples: { projectId: Id<"projects">; recorded: number; covered: number; legacyShares: number }[] = [];
     let oldestDay: string | undefined;
     let newestDay: string | undefined;
     const endBy = Date.now() + 25_000;
@@ -275,7 +308,8 @@ export const backfill = internalAction({
       const page = await ctx.runQuery(jobs.previewPage, { table, cursor });
       stats[table].scanned += page.scanned;
       stats[table].eligible += page.eligible;
-      deliverables += page.deliverables;
+      taskDeliverables += page.deliverables;
+      taskDeliverablesWithoutEligibleProject += page.deliverablesWithoutEligibleProject;
       for (const item of page.exclusions) {
         const detail = exclusions[table];
         detail.total++;
@@ -283,7 +317,37 @@ export const backfill = internalAction({
         if (primary) detail.byPrimaryReason[primary] = (detail.byPrimaryReason[primary] ?? 0) + 1;
         if (detail.examples.length < diagnosticExampleLimit) detail.examples.push(item);
       }
-      for (const item of page.projectDeliverables) {
+      const allocations = await Promise.all(page.projectDeliverables.map(async (item: DeliverableSample) => {
+        let legacyShares = 0;
+        if (!item.reason) {
+          let taskCursor: string | null = null;
+          do {
+            const taskPage: { amount: number; cursor: string | null } =
+              await ctx.runQuery(jobs.previewProjectShares, { projectId: item.projectId, cursor: taskCursor });
+            legacyShares += taskPage.amount;
+            taskCursor = taskPage.cursor;
+          } while (taskCursor !== null);
+        }
+        return { item, legacyShares };
+      }));
+      for (const { item, legacyShares } of allocations) {
+        if (item.day) {
+          const remainder = projectDeliverableRemainder(item.recorded, item.covered, legacyShares);
+          projectRemainder += remainder;
+          if (remainder > 0) {
+            projectsWithRemainder++;
+            if (remainderExamples.length < diagnosticExampleLimit) {
+              remainderExamples.push({ projectId: item.projectId, day: item.day, deliverables: remainder });
+            }
+          }
+          if (item.covered + legacyShares > item.recorded) {
+            projectsWithExcessShares++;
+            if (excessExamples.length < diagnosticExampleLimit) {
+              excessExamples.push({ projectId: item.projectId, recorded: item.recorded, covered: item.covered, legacyShares });
+            }
+          }
+        }
+        if (item.recorded === 0) continue;
         addDeliverables(recorded, item.recorded);
         if (item.counted > 0) {
           addDeliverables(projected, item.counted);
@@ -334,9 +398,14 @@ export const backfill = internalAction({
       }
     }
     return {
-      dryRun: true, complete, stats, deliverables, oldestDay, newestDay,
+      dryRun: true, complete, stats, deliverables: taskDeliverables + projectRemainder, oldestDay, newestDay,
       diagnostics: { exclusions, exampleLimit: diagnosticExampleLimit, deliverables: {
         recorded, projected, ignoredByReason, ignoredExamples, comparison,
+        attribution: {
+          taskDeliverables, taskDeliverablesWithoutEligibleProject,
+          projectRemainder, projectsWithRemainder, remainderExamples,
+          projectsWithExcessShares, excessExamples,
+        },
       } },
       resume: complete ? null : { table: sourceTables[tableIndex], cursor },
     };

@@ -61,15 +61,15 @@ export const processPage = internalMutation({
     const change = source ? await projectSource(ctx, source, today) : { sourceId, projection: null };
     const taskId = ctx.db.normalizeId("tasks", sourceId);
     const projectId = ctx.db.normalizeId("projects", sourceId);
-    const previous = taskId ? await ctx.db.query("analyticsContributions")
-      .withIndex("by_source", q => q.eq("sourceId", taskId)).unique() : null;
+    const previous = taskId || projectId ? await ctx.db.query("analyticsContributions")
+      .withIndex("by_source", q => q.eq("sourceId", sourceId)).unique() : null;
     await applyProjectionBatch(ctx, [change]);
 
-    if (taskId && (!source || Boolean(previous) !== Boolean(change.projection)
+    const eligibilityChanged = (previous?.projection?.kind === "task") !== (change.projection?.kind === "task");
+    if (taskId && (!source || eligibilityChanged
         || pending.relatedCursor !== undefined)) {
-      const eligibilityChanged = Boolean(previous) !== Boolean(change.projection);
       const page = await ctx.db.query("taskEvaluations").withIndex("by_task", q => q.eq("taskId", taskId))
-        .paginate({ cursor: eligibilityChanged ? null : pending.relatedCursor ?? null, numItems: batchSize });
+        .paginate({ cursor: eligibilityChanged ? null : pending.relatedCursor ?? null, numItems: 4 });
       const changes = await Promise.all(page.page.map(evaluation => projectSource(ctx, evaluation, today)));
       await applyProjectionBatch(ctx, changes);
       if (!page.isDone) {
@@ -77,11 +77,12 @@ export const processPage = internalMutation({
         return true;
       }
     }
-    // The project delete operation also soft-deletes its tasks. Schedule them
-    // separately so a large project never expands one analytics transaction.
-    if (projectId && source && "name" in source && source.convexStatus === "deleted") {
+    // Recheck linked tasks when a project enters or leaves analytics.
+    const projectEligibilityChanged = (previous?.projection?.kind === "project") !== (change.projection?.kind === "project");
+    if (projectId && (projectEligibilityChanged || pending.relatedCursor !== undefined
+        || !source || ("name" in source && (source.convexStatus === "deleted" || source.convexStatus === "archived")))) {
       const page = await ctx.db.query("tasks")
-        .withIndex("by_projectId_convexStatus", q => q.eq("projectId", projectId).eq("convexStatus", "deleted"))
+        .withIndex("by_projectId", q => q.eq("projectId", projectId))
         .paginate({ cursor: pending.relatedCursor ?? null, numItems: batchSize });
       for (const task of page.page) await scheduleSource(ctx, task._id);
       if (!page.isDone) {

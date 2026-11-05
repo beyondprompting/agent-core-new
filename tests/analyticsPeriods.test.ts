@@ -3,12 +3,13 @@ import test from "node:test";
 import { getFunctionName } from "convex/server";
 import { analyticsDay, analyticsPeriod, analyticsTrendPeriods, shiftAnalyticsPeriod } from "../convex/analytics/calendar";
 import {
-  backfill, backfillStatus, beginScan, previewLegacyDeliverables, previewPage,
+  backfill, backfillStatus, beginScan, previewLegacyDeliverables, previewPage, previewProjectShares,
   reconcilePage, refreshAttention,
 } from "../convex/analytics/maintenance";
 import { failure, nightly, nightlyBatch, process, processPage, record } from "../convex/analytics/jobs";
 import { notifyAnalytics } from "../convex/analytics/notify";
 import { getPeriodDashboard } from "../convex/data/analytics";
+import { attachProjectToExistingCORProject } from "../convex/data/projects";
 import { projectDeliverableShard } from "../convex/lib/deliverableAnalytics";
 import { clientConfig } from "../config/tenant.config";
 
@@ -20,6 +21,7 @@ function fixture() {
   let sequence = 0;
   let user = "admin";
   let writes = 0;
+  let allowOperationalWrites = false;
   const put = (table: string, doc: any) => {
     tableById.set(doc._id, table);
     rows.set(doc._id, { _creationTime: ++sequence, ...doc, _table: table });
@@ -51,7 +53,7 @@ function fixture() {
         return id;
       },
       patch: async (id: string, value: any) => {
-        assert.ok(rows.get(id)?._table.startsWith("analytics"));
+        assert.ok(allowOperationalWrites || rows.get(id)?._table.startsWith("analytics"));
         writes++;
         Object.assign(rows.get(id), value);
       },
@@ -62,7 +64,7 @@ function fixture() {
         rows.set(id, { ...value, _id: id, _creationTime, _table });
       },
       delete: async (id: string) => {
-        assert.ok(rows.get(id)?._table.startsWith("analytics"));
+        assert.ok(allowOperationalWrites || rows.get(id)?._table.startsWith("analytics"));
         writes++;
         rows.delete(id);
       },
@@ -100,6 +102,7 @@ function fixture() {
             return matches[0] ?? null;
           },
           first: async () => selected()[0] ?? null,
+          collect: async () => selected(),
           take: async (limit: number) => selected().slice(0, limit),
           paginate: async ({ cursor, numItems }: { cursor: string | null; numItems: number }) => {
             const remaining = selected().filter((row) => !cursor || row._creationTime > Number(cursor));
@@ -115,9 +118,14 @@ function fixture() {
       },
     },
   };
-  const functions = { beginScan, reconcilePage, previewPage, previewLegacyDeliverables,
+  const functions = { beginScan, reconcilePage, previewPage, previewLegacyDeliverables, previewProjectShares,
     backfillStatus, refreshAttention, failure, nightlyBatch, process, processPage, record };
   const call = (fn: any, args: any = {}) => fn._handler(ctx, args);
+  const callOperational = async (fn: any, args: any) => {
+    allowOperationalWrites = true;
+    try { return await call(fn, args); }
+    finally { allowOperationalWrites = false; }
+  };
   const run = (ref: Parameters<typeof getFunctionName>[0], args: any) => {
     const name = getFunctionName(ref).split(":").at(-1) as keyof typeof functions;
     return call(functions[name], args);
@@ -143,7 +151,7 @@ function fixture() {
       ctx.db.query = query;
     }
   };
-  return { ctx, put, rows, call, drain, readDashboard, writes: () => writes, as: (id: string) => { user = id; } };
+  return { ctx, put, rows, call, callOperational, drain, readDashboard, writes: () => writes, as: (id: string) => { user = id; } };
 }
 
 const october = Date.parse("2026-10-15T13:00:00Z");
@@ -357,4 +365,129 @@ test("nightly recovers missed notifications, failed scheduling and archived task
   assert.equal(dashboard.summary.projects, 1);
   assert.equal(dashboard.summary.deliverables, 8);
   assert.equal([...f.rows.values()].filter(row => row._table === "analyticsPending").length, 0);
+});
+
+test("publishing a new task into an older project keeps its dated deliverables and removes the draft", async () => {
+  const f = fixture();
+  const taxonomy = { clientId: "client", clientBrandId: "brand", subBrandId: "subBrand" };
+  f.put("projects", { _id: "original", _creationTime: october, name: "Proyecto anterior", status: "active",
+    corProjectId: 101, deliverables: 5, ...taxonomy });
+  f.put("projects", { _id: "draft", _creationTime: november, name: "Borrador", status: "active",
+    deliverables: 2, deliverablesCoveredByTasks: 2, ...taxonomy });
+  f.put("tasks", { _id: "new-task", _creationTime: november, title: "Tarea nueva", status: "nueva",
+    projectId: "draft", deliverablesCount: 2, projectDeliverableAllocation: { amount: 2, trackedOnProject: true },
+    ...taxonomy });
+  await f.call(backfill, { dryRun: false });
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 7);
+  assert.equal((await f.readDashboard("month", "2026-11-01")).summary.deliverables, 2);
+
+  await f.callOperational(attachProjectToExistingCORProject, {
+    projectId: "draft", taskId: "new-task", corProjectId: 101, deliverables: 7, taskDeliverablesIncluded: 2,
+  });
+  assert.equal(f.rows.get("new-task").projectId, "original");
+  assert.equal(f.rows.get("original").deliverablesCoveredByTasks, 2);
+  assert.equal(f.rows.has("draft"), false);
+
+  // Process the older project first, as independent jobs can run out of order.
+  for (const sourceId of ["original", "draft", "new-task", "original", "new-task"]) {
+    await notifyAnalytics(f.ctx, [sourceId as any]);
+    await f.drain();
+    assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 7);
+  }
+  const octoberDashboard = await f.readDashboard("month", "2026-10-01");
+  const novemberDashboard = await f.readDashboard("month", "2026-11-01");
+  const historical = await f.readDashboard("all", "all");
+  assert.equal(octoberDashboard.summary.deliverables, 5);
+  assert.equal(novemberDashboard.summary.deliverables, 2);
+  assert.equal(novemberDashboard.summary.tasks, 1);
+  assert.equal(novemberDashboard.summary.projects, 0);
+  assert.equal(novemberDashboard.deliverables.projectCount, 1);
+  assert.equal(historical.summary.projects, 1);
+  assert.equal(historical.deliverables.projectCount, 1);
+  assert.equal(historical.deliverables.byClient[0].brands[0].subBrands[0].deliverablesTotal, 7);
+  assert.equal(historical.deliverables.byClient[0].brands[0].subBrands[0].projectCount, 1);
+
+  const dryRun = await f.call(backfill, { dryRun: true });
+  assert.equal(dryRun.deliverables, 7);
+  assert.deepEqual(dryRun.diagnostics.deliverables.attribution, {
+    taskDeliverables: 2, taskDeliverablesWithoutEligibleProject: 0,
+    projectRemainder: 5, projectsWithRemainder: 1,
+    remainderExamples: [{ projectId: "original", day: "2026-10-15", deliverables: 5 }],
+    projectsWithExcessShares: 0, excessExamples: [],
+  });
+});
+
+test("task corrections and exclusions do not reappear in the project remainder", async () => {
+  const f = fixture();
+  f.put("projects", { _id: "project", _creationTime: october, name: "Histórico", status: "active", deliverables: 7 });
+  f.put("tasks", { _id: "active", _creationTime: november, title: "Tarea nueva", status: "nueva",
+    projectId: "project", deliverablesCount: 2 });
+  f.put("tasks", { _id: "archived", _creationTime: november, title: "Archivada", status: "nueva",
+    projectId: "project", deliverablesCount: 3, convexStatus: "archived" });
+  const preview = await f.call(backfill, { dryRun: true });
+  assert.equal(preview.deliverables, 4);
+  assert.equal(preview.diagnostics.deliverables.attribution.projectRemainder, 2);
+  assert.equal(f.writes(), 0);
+
+  await f.call(backfill, { dryRun: false });
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 4);
+  const task = f.rows.get("active");
+  task.projectDeliverableAllocation = { amount: 2, trackedOnProject: false };
+  task.deliverablesCount = 1;
+  await notifyAnalytics(f.ctx, ["active" as any]);
+  await f.drain();
+  assert.equal((await f.readDashboard("month", "2026-10-01")).summary.deliverables, 2);
+  assert.equal((await f.readDashboard("month", "2026-11-01")).summary.deliverables, 1);
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 3);
+
+  task.convexStatus = "deleted";
+  await notifyAnalytics(f.ctx, ["active" as any]);
+  await f.drain();
+  assert.equal((await f.readDashboard("month", "2026-11-01")).summary.deliverables, 0);
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 2);
+  assert.equal((await f.call(backfill, { dryRun: true })).deliverables, 2);
+});
+
+test("existing dashboards keep their published deliverables until the dated backfill completes", async () => {
+  const f = fixture();
+  f.put("analyticsState", { _id: "published", key: "published", publishedAt: october });
+  f.put("analyticsState", { _id: "scan", key: "scan", phase: "projects", cursor: null,
+    lastCompletedAt: october, stats: { tasks: 1, projects: 0, taskEvaluations: 0, cleanup: 0, changed: 0 } });
+  f.put("analyticsPeriodRollups", { _id: "legacy-total", periodType: "all", periodKey: "all",
+    counts: { tasks: 1, projects: 1, deliverables: 5, projectsWithDeliverables: 1 } });
+  f.put("projects", { _id: "project", _creationTime: october, name: "Proyecto", status: "active", deliverables: 5 });
+  f.put("tasks", { _id: "task", _creationTime: november, title: "Tarea", status: "nueva",
+    projectId: "project", deliverablesCount: 2 });
+  f.put("analyticsContributions", { _id: "legacy-project", sourceId: "project",
+    projection: { kind: "project", day: "2026-10-15", status: "active", deliverables: 5 } });
+  f.put("analyticsContributions", { _id: "legacy-task", sourceId: "task",
+    projection: { kind: "task", day: "2026-11-04", status: "nueva", source: "internal" } });
+
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 5);
+  const partial = await f.call(backfill, { dryRun: false, maxBatches: 1 });
+  assert.equal(partial.datedDeliverablesReady, false);
+  assert.equal(partial.scanned.tasks, 1);
+  assert.equal((await f.readDashboard("month", "2026-11-01")).summary.deliverables, 0);
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 5);
+
+  const complete = await f.call(backfill, { dryRun: false });
+  assert.equal(complete.datedDeliverablesReady, true);
+  assert.equal((await f.readDashboard("month", "2026-10-01")).summary.deliverables, 3);
+  assert.equal((await f.readDashboard("month", "2026-11-01")).summary.deliverables, 2);
+  assert.equal((await f.readDashboard("all", "all")).summary.deliverables, 5);
+});
+
+test("known deliverables on a task with a missing project count without inventing a project", async () => {
+  const f = fixture();
+  f.put("tasks", { _id: "task", _creationTime: november, title: "Tarea", status: "nueva",
+    projectId: "missing-project", deliverablesCount: 4, clientId: "client", clientBrandId: "brand" });
+  const preview = await f.call(backfill, { dryRun: true });
+  assert.equal(preview.deliverables, 4);
+  assert.equal(preview.diagnostics.deliverables.attribution.taskDeliverablesWithoutEligibleProject, 4);
+  await f.call(backfill, { dryRun: false });
+  const dashboard = await f.readDashboard("all", "all");
+  assert.equal(dashboard.summary.deliverables, 4);
+  assert.equal(dashboard.summary.projects, 0);
+  assert.equal(dashboard.deliverables.projectCount, 0);
+  assert.equal(dashboard.deliverables.byClient[0].brands[0].deliverablesTotal, 4);
 });

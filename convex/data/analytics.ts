@@ -16,6 +16,7 @@ import {
   taskStatuses as TASK_STATUSES,
 } from "../analytics/projection";
 import { periodTypeValidator } from "../analytics/tables";
+import { datedDeliverableMetrics } from "../analytics/deliverables";
 import { canUserAccessAnalytics } from "../lib/analyticsAccess";
 import type { Doc } from "../_generated/dataModel";
 import { applyProjectDeliverablesDelta, positiveDeliverables } from "../lib/deliverableAnalytics";
@@ -356,6 +357,8 @@ export const getPeriodDashboard = query({
     const published = await ctx.db.query("analyticsState")
       .withIndex("by_key", (q) => q.eq("key", "published")).unique();
     if (!published) return { canAccess: true as const, ready: false as const };
+    const datedDeliverables = Boolean(await ctx.db.query("analyticsState")
+      .withIndex("by_key", (q) => q.eq("key", "datedDeliverables")).unique());
 
     const firstPeriod = analyticsPeriod(periodType, analyticsFirstDay);
     const period = periodKey < firstPeriod.periodKey ? firstPeriod : { periodType, periodKey };
@@ -368,7 +371,7 @@ export const getPeriodDashboard = query({
       rankedAnalytics(ctx, period, "tasksByBrand", "clientBrands", 8),
       rankedAnalytics(ctx, period, "tasksByUser", "users", 10),
       rankedAnalytics(ctx, period, "evaluationsByUser", "users", 10),
-      readPeriodDeliverables(ctx, period),
+      readPeriodDeliverables(ctx, period, datedDeliverables),
       Promise.all(trendPeriods.map(async (bucket) => ({
         week: bucket.periodKey < analyticsFirstDay ? analyticsFirstDay : bucket.periodKey,
         count: (await readPeriodCounts(ctx, bucket)).tasks ?? 0,
@@ -377,6 +380,7 @@ export const getPeriodDashboard = query({
       periodAttention(ctx, period, "dueSoon"),
     ]);
     const count = (key: string) => counts[key] ?? 0;
+    const deliverables = count(datedDeliverables ? datedDeliverableMetrics.total : "deliverables");
     const sourceCounts = [
       { key: "internal", label: "Internas", count: count("source_internal") },
       { key: "external", label: "Clientes externos", count: count("source_external") },
@@ -394,7 +398,7 @@ export const getPeriodDashboard = query({
         overdueTasks: count("overdue"),
         dueSoonTasks: count("dueSoon"),
         evaluatedTasks: count("evaluatedTasks"),
-        deliverables: count("deliverables"),
+        deliverables,
       },
       statusCounts: TASK_STATUSES.map((key) => ({
         key, label: getTaskStatusLabel(key), count: count(`task_${key}`),
@@ -412,8 +416,8 @@ export const getPeriodDashboard = query({
       evaluationsByUser: evaluationsByUser.map(({ entityId, name, count }) => ({ userId: entityId, name, count })),
       weeklyTrend,
       deliverables: {
-        historicalTotal: count("deliverables"),
-        projectCount: count("projectsWithDeliverables"),
+        historicalTotal: deliverables,
+        projectCount: count(datedDeliverables ? datedDeliverableMetrics.projects : "projectsWithDeliverables"),
         byClient,
       },
       evaluations: {
@@ -461,14 +465,17 @@ async function rankedAnalytics(
   }));
 }
 
-async function readPeriodDeliverables(ctx: QueryCtx, period: AnalyticsPeriod) {
-  const clients = await rankedAnalytics(ctx, period, "deliverablesByClient", "corClients", 8);
+async function readPeriodDeliverables(ctx: QueryCtx, period: AnalyticsPeriod, dated: boolean) {
+  const clientMetric = dated ? datedDeliverableMetrics.client : "deliverablesByClient";
+  const brandMetric = dated ? datedDeliverableMetrics.brand : "deliverablesByBrand";
+  const subBrandMetric = dated ? datedDeliverableMetrics.subBrand : "deliverablesBySubBrand";
+  const clients = await rankedAnalytics(ctx, period, clientMetric, "corClients", 8);
   return await Promise.all(clients.map(async (client) => {
-    const brands = await rankedAnalytics(ctx, period, "deliverablesByBrand", "clientBrands", 4, client.entityId);
+    const brands = await rankedAnalytics(ctx, period, brandMetric, "clientBrands", 4, client.entityId);
     return {
       clientId: client.entityId, name: client.name, deliverablesTotal: client.count, projectCount: client.projectCount,
       brands: await Promise.all(brands.map(async (brand) => {
-        const subBrands = await rankedAnalytics(ctx, period, "deliverablesBySubBrand", "subBrands", 3,
+        const subBrands = await rankedAnalytics(ctx, period, subBrandMetric, "subBrands", 3,
           analyticsParentKey(client.entityId, brand.entityId));
         return {
           clientBrandId: brand.entityId, name: brand.name, deliverablesTotal: brand.count, projectCount: brand.projectCount,
