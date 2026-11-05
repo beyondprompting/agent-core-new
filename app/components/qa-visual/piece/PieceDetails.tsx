@@ -6,12 +6,41 @@ import {
   FileText,
   Link2,
   ShieldCheck,
+  Minus,
+  X,
 } from "lucide-react";
 import type { Piece, PieceStatus } from "@/app/lib/qa-visual/review-model";
-import type { AiReviewState, HumanReviewState } from "@/app/lib/qa-visual/review-state";
+import type {
+  AiReviewState,
+  HumanReviewState,
+} from "@/app/lib/qa-visual/review-state";
+
+export type PieceFinding = {
+  ruleId: string;
+  outcome: "pass" | "fail" | "unverifiable" | "notApplicable";
+  observed: string;
+};
+
+const controlStates = {
+  pass: { label: "Cumple", tone: "ok", Icon: Check },
+  fail: { label: "No cumple", tone: "fail", Icon: X },
+  unverifiable: { label: "No verificable", tone: "warn", Icon: Eye },
+  notApplicable: { label: "No aplica", tone: "neutral", Icon: Minus },
+  notEvaluated: { label: "Sin evaluar", tone: "neutral", Icon: Minus },
+} as const;
+
+type DetailField = {
+  title: string;
+  value: string;
+  note: string;
+  pending?: boolean;
+  control?: keyof typeof controlStates;
+  observed?: string;
+};
 
 export function PieceDetails({
   piece,
+  findings,
   version,
   status,
   aiReview,
@@ -19,13 +48,63 @@ export function PieceDetails({
   onOpenResources,
 }: {
   piece: Piece;
+  findings?: PieceFinding[];
   version: number;
   status: PieceStatus;
   aiReview: AiReviewState;
   humanReview: HumanReviewState;
   onOpenResources: () => void;
 }) {
-  const groups = [
+  const labels: Record<string, string> = {
+    dimensions: "Dimensiones",
+    format: "Formato",
+    product: "Oferta del cliente",
+    price: "Precio solicitado",
+    date: "Vigencia solicitada",
+    cta: "Llamado a la acción",
+  };
+  const resultByRule = new Map(
+    findings?.map((result) => [result.ruleId, result]),
+  );
+  const requirements = piece.clientRequirements ?? [];
+  const requested: DetailField[] = requirements.map((rule) => {
+    const result = resultByRule.get(rule.id);
+    return {
+      title: labels[rule.id] ?? rule.id,
+      value: rule.expected,
+      note: rule.pending ? `${rule.source} · ${rule.pending}` : rule.source,
+      control:
+        result?.outcome ?? (rule.pending ? "unverifiable" : "notEvaluated"),
+      observed: result?.outcome === "fail" ? result.observed : undefined,
+    };
+  });
+  for (const result of findings ?? []) {
+    if (
+      result.outcome === "notApplicable" &&
+      !requirements.some((rule) => rule.id === result.ruleId)
+    ) {
+      requested.push({
+        title: labels[result.ruleId] ?? result.ruleId,
+        value: "Sin requisito en el pedido",
+        note: result.observed,
+        control: "notApplicable",
+      });
+    }
+  }
+  const groups: { title: string; fields: DetailField[] }[] = [
+    {
+      title: "PEDIDO ORIGINAL DEL CLIENTE · EXCEL",
+      fields: requested.length
+        ? requested
+        : [
+            {
+              title: "Requisitos del cliente",
+              value: "Sin requisitos vinculados",
+              note: "No se encontró una fila única para esta pieza en la matriz.",
+              control: "unverifiable",
+            },
+          ],
+    },
     {
       title: "CONTENIDO Y REVISIÓN",
       fields: [
@@ -40,12 +119,16 @@ export function PieceDetails({
             : "Sin fila vinculada en el CSV",
           pending: piece.product === "—" || piece.price === "—",
         },
-        {
-          title: "Referencia de vigencia",
-          value: piece.validity,
-          note: "Asset declarado en el CSV de producción",
-          pending: piece.validity === "—",
-        },
+        ...(piece.validity === "—"
+          ? []
+          : [
+              {
+                title: "Asset de vigencia",
+                value: piece.validity,
+                note: "Asset declarado en el CSV de producción",
+                pending: false,
+              },
+            ]),
         {
           title: "Referencia de llamado a la acción",
           value: piece.cta,
@@ -155,21 +238,40 @@ export function PieceDetails({
       {groups.map((group) => (
         <section key={group.title} className="detail-group">
           <h4>{group.title}</h4>
-          {group.fields.map((field) => (
-            <div className="requirement-card" key={field.title}>
-              <div>
-                <span
-                  className={`requirement-check ${field.pending ? "warn" : "ok"}`}
-                  title={field.pending ? "Por revisar" : "Dato disponible"}
-                >
-                  {field.pending ? <Eye size={13} /> : <Check size={13} />}
-                </span>
-                <strong>{field.title}</strong>
+          {group.fields.map((field) => {
+            const control = field.control
+              ? controlStates[field.control]
+              : undefined;
+            const Icon = control?.Icon ?? (field.pending ? Eye : Check);
+            return (
+              <div className="requirement-card" key={field.title}>
+                <div>
+                  <span
+                    className={`requirement-check ${control?.tone ?? (field.pending ? "warn" : "ok")}`}
+                    title={
+                      control?.label ??
+                      (field.pending ? "Por revisar" : "Dato disponible")
+                    }
+                  >
+                    <Icon size={13} />
+                  </span>
+                  <strong>{field.title}</strong>
+                  {control && (
+                    <span className={`qa-control-label ${control.tone}`}>
+                      {control.label}
+                    </span>
+                  )}
+                </div>
+                <p className="detail-value">{field.value}</p>
+                <small>{field.note}</small>
+                {field.observed && (
+                  <p className="detail-value">
+                    <small>Observado</small> {field.observed}
+                  </p>
+                )}
               </div>
-              <p className="detail-value">{field.value}</p>
-              <small>{field.note}</small>
-            </div>
-          ))}
+            );
+          })}
         </section>
       ))}
       <div className="info-note">

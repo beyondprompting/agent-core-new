@@ -7,11 +7,17 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { PieceDetails } from "./PieceDetails";
+import { PieceDetails, type PieceFinding } from "./PieceDetails";
 import { PieceVersions } from "./PieceVersions";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
-export function PiecePanel({ session }: { session: ReviewSession }) {
+export function PiecePanel({
+  session,
+  findings,
+}: {
+  session: ReviewSession;
+  findings?: PieceFinding[];
+}) {
   const {
     activeId,
     version,
@@ -48,6 +54,7 @@ export function PiecePanel({ session }: { session: ReviewSession }) {
       ) : rightTab === "Detalles" ? (
         <PieceDetails
           piece={piece}
+          findings={findings}
           version={version}
           status={currentStatus}
           aiReview={aiReview}

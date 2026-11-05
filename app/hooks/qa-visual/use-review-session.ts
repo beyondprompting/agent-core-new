@@ -23,18 +23,18 @@ export function useReviewSession(
   const [rightTab, setRightTab] = useState<RightTab>("Comentarios");
   const [localComments, setLocalComments] = useState<Comment[]>([]);
   const [resolvedOverrides, setResolvedOverrides] = useState<
-    Record<number, boolean>
+    Record<Comment["id"], boolean>
   >({});
   const comments = [...feed.comments, ...localComments].map((comment) => ({
     ...comment,
     resolved: resolvedOverrides[comment.id] ?? comment.resolved,
   }));
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Comment["id"] | null>(null);
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [draft, setDraft] = useState("");
-  const [replyTo, setReplyTo] = useState<number | null>(null);
+  const [replyTo, setReplyTo] = useState<Comment["id"] | null>(null);
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -140,7 +140,7 @@ export function useReviewSession(
     setDraft("");
     setException("");
   };
-  const selectComment = (id: number) => {
+  const selectComment = (id: Comment["id"]) => {
     setSelected(id);
     setRightTab("Comentarios");
     setRightOpen(true);
@@ -159,7 +159,7 @@ export function useReviewSession(
     setDraft("");
     setException("");
   };
-  const toggleResolved = (id: number) =>
+  const toggleResolved = (id: Comment["id"]) =>
     setResolvedOverrides((prev) => ({
       ...prev,
       [id]: !(comments.find((c) => c.id === id)?.resolved ?? false),
@@ -167,10 +167,10 @@ export function useReviewSession(
   const addComment = (
     text: string,
     pin?: { x: number; y: number },
-    response?: number | null,
+    response?: Comment["id"] | null,
   ) => {
     if (!text.trim()) return;
-    const id = Math.max(0, ...comments.map((c) => c.id)) + 1;
+    const id = Math.max(0, ...localComments.map((c) => Number(c.id))) + 1;
     setLocalComments((prev) => [
       ...prev,
       {

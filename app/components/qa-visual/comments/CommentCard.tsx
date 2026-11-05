@@ -48,8 +48,8 @@ export function CommentCard({
           title={c.resolved ? "Reabrir comentario" : "Resolver comentario"}
           aria-label={
             c.resolved
-              ? `Reabrir comentario ${c.id}`
-              : `Resolver comentario ${c.id}`
+              ? `Reabrir comentario ${c.marker ?? c.id}`
+              : `Resolver comentario ${c.marker ?? c.id}`
           }
           onClick={(e) => {
             e.stopPropagation();
@@ -119,7 +119,7 @@ export function CommentCard({
                 selectComment(c.id);
               }}
             >
-              <MessageSquare size={11} /> {c.id} · Ver en imagen
+              <MessageSquare size={11} /> {c.marker ?? c.id} · Ver en imagen
             </button>
           )}
           {c.resolved && (

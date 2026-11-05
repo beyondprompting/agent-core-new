@@ -1,3 +1,10 @@
+export type ClientRequirement = {
+  id: string;
+  expected: string;
+  source: string;
+  pending?: string;
+};
+
 export type AiReviewStatus =
   | "analyzing"
   | "findings"
@@ -17,6 +24,7 @@ export type Piece = {
   campaign: string;
   formatName: string;
   productionLinked: boolean;
+  clientRequirements?: ClientRequirement[];
   platform?: string;
   extension?: string;
   format: string;
@@ -33,7 +41,8 @@ export type Piece = {
 };
 
 export type Comment = {
-  id: number;
+  id: number | string;
+  marker?: number;
   pieceId: string;
   version: number;
   author: string;

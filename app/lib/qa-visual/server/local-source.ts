@@ -132,7 +132,7 @@ export function localQaSource(root: string): QaSource {
         notices,
       };
     },
-    async readPiece(name) {
+    async readPiece(name, expectedRevision) {
       if (
         basename(name) !== name ||
         name.includes("\\") ||
@@ -143,8 +143,10 @@ export function localQaSource(root: string): QaSource {
       try {
         const path = join(await folder(folders.pieces), name);
         const stat = await lstat(path);
-        if (!stat.isFile() || stat.size > 20 * 1024 * 1024) return null;
+        if (!stat.isFile() || stat.size > 20 * 1024 * 1024 ||
+            (expectedRevision !== undefined && stat.mtimeMs !== expectedRevision)) return null;
         const bytes = await readFile(path);
+        if (expectedRevision !== undefined && (await lstat(path)).mtimeMs !== expectedRevision) return null;
         const png = bytes
           .subarray(0, 8)
           .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));

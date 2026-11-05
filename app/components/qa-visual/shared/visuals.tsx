@@ -59,9 +59,11 @@ export function Avatar({
 export function Artwork({
   piece,
   eager = false,
+  onDimensions,
 }: {
   piece: Piece;
   eager?: boolean;
+  onDimensions?: (width: number, height: number) => void;
 }) {
   const [failedImage, setFailedImage] = useState<string>();
   return (
@@ -79,6 +81,12 @@ export function Artwork({
       ) : (
         <img
           onError={() => setFailedImage(piece.image)}
+          onLoad={({ currentTarget }) =>
+            onDimensions?.(
+              currentTarget.naturalWidth,
+              currentTarget.naturalHeight,
+            )
+          }
           src={piece.image}
           alt={piece.name}
           draggable={false}
