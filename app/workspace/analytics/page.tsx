@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { Group } from "@visx/group";
@@ -9,12 +9,15 @@ import { scaleBand, scaleLinear } from "@visx/scale";
 import { Bar } from "@visx/shape";
 import { TooltipWithBounds, useTooltip } from "@visx/tooltip";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   BarChart3,
   CalendarClock,
+  CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   FolderKanban,
   PackageCheck,
@@ -23,13 +26,53 @@ import {
   Users,
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
+import {
+  addAnalyticsDays,
+  analyticsDay,
+  analyticsFirstDay,
+  analyticsPeriod,
+  analyticsPeriodTypes,
+  isAnalyticsDay,
+  shiftAnalyticsPeriod,
+  type AnalyticsPeriod,
+  type AnalyticsPeriodType,
+} from "@/convex/analytics/calendar";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { WorkspaceLayout } from "../../components/WorkspaceLayout";
 
 export default function AnalyticsPage() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <AnalyticsDashboard />
+    </Suspense>
+  );
+}
+
+function AnalyticsDashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [today, setToday] = useState(() => analyticsDay(Date.now()));
+  const periodType = analyticsPeriodTypes.find((type) => type === searchParams.get("period")) ?? "all";
+  const date = searchParams.get("date");
+  const selectedDay = date && isAnalyticsDay(date) && date <= today ? date : today;
+  const anchor = selectedDay < analyticsFirstDay ? analyticsFirstDay : selectedDay;
+  const period = analyticsPeriod(periodType, anchor);
   const analyticsAccess = useQuery(api.data.analytics.viewerCanAccessAnalytics);
-  const analytics = useQuery(api.data.analytics.getDashboard);
+  const viewerId = analyticsAccess?.canAccess ? analyticsAccess.userId : undefined;
+  const periodAnalytics = useQuery(api.data.analytics.getPeriodDashboard,
+    analyticsAccess?.canAccess ? { ...period, today } : "skip");
+  const loadingBackfill = periodAnalytics?.canAccess === true && !periodAnalytics.ready;
+  const legacyAnalytics = useQuery(api.data.analytics.getDashboard, loadingBackfill ? {} : "skip");
+  const currentAnalytics = periodAnalytics?.canAccess && periodAnalytics.ready ? periodAnalytics : undefined;
+  const [lastPeriod, setLastPeriod] = useState<{
+    analytics: NonNullable<typeof currentAnalytics>;
+    periodType: AnalyticsPeriodType;
+    viewerId: string;
+  }>();
+  const previousPeriod = periodAnalytics === undefined && viewerId && lastPeriod?.viewerId === viewerId
+    ? lastPeriod : undefined;
+  const analytics = currentAnalytics ?? previousPeriod?.analytics ?? legacyAnalytics;
+  const displayedPeriodType = previousPeriod?.periodType ?? periodType;
   const {
     results: threads,
     status: threadsStatus,
@@ -40,6 +83,22 @@ export default function AnalyticsPage() {
     { initialNumItems: 20 },
   );
   const createThread = useMutation(api.messaging.threads.createThread);
+
+  useEffect(() => {
+    if (currentAnalytics && viewerId) {
+      setLastPeriod({ analytics: currentAnalytics, periodType, viewerId });
+    }
+  }, [currentAnalytics, periodType, viewerId]);
+
+  useEffect(() => {
+    const refreshDay = () => setToday(analyticsDay(Date.now()));
+    const timer = window.setInterval(refreshDay, 30_000);
+    window.addEventListener("focus", refreshDay);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshDay);
+    };
+  }, []);
 
   useEffect(() => {
     if (analyticsAccess && !analyticsAccess.canAccess) {
@@ -57,6 +116,19 @@ export default function AnalyticsPage() {
   const handleSelectThread = () => {
     router.push("/workspace");
   };
+
+  function selectPeriod(type: AnalyticsPeriodType, day: string) {
+    if (!isAnalyticsDay(day) || day < analyticsFirstDay || day > today) return;
+    const url = new URL(window.location.href);
+    if (type === "all") {
+      url.searchParams.delete("period");
+      url.searchParams.delete("date");
+    } else {
+      url.searchParams.set("period", type);
+      url.searchParams.set("date", day);
+    }
+    window.history.replaceState(null, "", url);
+  }
 
   if (
     analyticsAccess === undefined ||
@@ -82,14 +154,28 @@ export default function AnalyticsPage() {
     >
       <div className="h-full overflow-y-auto bg-background">
         <div className="p-6 space-y-6 max-w-7xl">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">
-              Analytics
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Vista operativa de proyectos, tasks, COR y evaluaciones.
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0 grow basis-64">
+              <h1 className="text-2xl font-semibold text-foreground">Analytics</h1>
+              <p className="mt-1 truncate text-sm text-muted-foreground" role="status">
+                {previousPeriod
+                  ? "Actualizando periodo…"
+                  : "Vista operativa de proyectos, tasks, COR y evaluaciones."}
+              </p>
+            </div>
+            <AnalyticsPeriodPicker
+              period={loadingBackfill ? analyticsPeriod("all", today) : period}
+              anchor={anchor}
+              today={today}
+              disabled={loadingBackfill}
+              onSelect={selectPeriod}
+            />
           </div>
+          {loadingBackfill && (
+            <p id="analytics-period-status" className="text-xs text-muted-foreground">
+              Estás viendo Histórico. La carga inicial de analíticas habilitará los demás periodos.
+            </p>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
             <MetricCard
@@ -101,7 +187,7 @@ export default function AnalyticsPage() {
             <MetricCard
               title="Proyectos"
               value={analytics.summary.projects}
-              detail="Creados recientemente"
+              detail={loadingBackfill ? "Creados recientemente" : "Creados en el periodo"}
               icon={FolderKanban}
             />
             <MetricCard
@@ -113,13 +199,13 @@ export default function AnalyticsPage() {
             <MetricCard
               title="Evaluadas"
               value={analytics.summary.evaluatedTasks}
-              detail={`${analytics.evaluations.total} threads de evaluación`}
+              detail={`${analytics.evaluations.total} registros de evaluación`}
               icon={Sparkles}
             />
             <MetricCard
               title="Entregables"
               value={analytics.summary.deliverables}
-              detail={`${analytics.deliverables.projectCount} proyectos históricos`}
+              detail={`${analytics.deliverables.projectCount} proyectos con entregables`}
               icon={PackageCheck}
             />
           </div>
@@ -213,13 +299,17 @@ export default function AnalyticsPage() {
                 scale="max"
               />
               <p className="text-xs text-muted-foreground mt-3">
-                Atribuido al usuario que creó la task evaluada.
+                Atribuido al usuario que solicitó la evaluación.
               </p>
             </AnalyticsPanel>
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <AnalyticsPanel title="Creación Semanal" className="xl:col-span-2">
+            <AnalyticsPanel
+              title={loadingBackfill || displayedPeriodType === "all" ? "Creación Semanal"
+                : displayedPeriodType === "year" ? "Creación Mensual" : "Creación Diaria"}
+              className="xl:col-span-2"
+            >
               <TrendBars items={analytics.weeklyTrend} />
             </AnalyticsPanel>
 
@@ -256,13 +346,88 @@ export default function AnalyticsPage() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Métricas calculadas sobre las últimas{" "}
-            {analytics.limits.taskSampleSize} tasks leídas y{" "}
-            {analytics.limits.evaluationSampleSize} evaluaciones recientes.
+            {"limits" in analytics
+              ? `Métricas calculadas sobre ${analytics.limits.taskSampleSize} tasks y ${analytics.limits.evaluationSampleSize} evaluaciones recientes.`
+              : "Periodos por fecha de creación (hora de Ecuador). Los estados y vencimientos reflejan la situación actual."}
           </p>
         </div>
       </div>
     </WorkspaceLayout>
+  );
+}
+
+const periodLabels: Record<AnalyticsPeriodType, string> = {
+  day: "Día", week: "Semana", month: "Mes", year: "Año", all: "Histórico",
+};
+
+const shortPeriodDate = new Intl.DateTimeFormat("es-EC", {
+  day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+});
+const longPeriodMonth = new Intl.DateTimeFormat("es-EC", {
+  month: "long", year: "numeric", timeZone: "UTC",
+});
+
+function AnalyticsPeriodPicker({
+  period, anchor, today, disabled, onSelect,
+}: {
+  period: AnalyticsPeriod;
+  anchor: string;
+  today: string;
+  disabled: boolean;
+  onSelect: (type: AnalyticsPeriodType, day: string) => void;
+}) {
+  const { periodType, periodKey } = period;
+  const canNavigate = !disabled && periodType !== "all";
+  const previous = shiftAnalyticsPeriod(period, -1);
+  const next = shiftAnalyticsPeriod(period, 1);
+  const firstPeriodKey = analyticsPeriod(periodType, analyticsFirstDay).periodKey;
+  const visibleStart = periodKey < analyticsFirstDay ? analyticsFirstDay : periodKey;
+  const firstDay = new Date(`${visibleStart}T00:00:00Z`);
+  const dateLabel = periodType === "all" ? "Todos los periodos"
+    : periodType === "year" ? periodKey.slice(0, 4)
+    : periodType === "month" ? longPeriodMonth.format(firstDay)
+    : periodType === "week" ? `${shortPeriodDate.format(firstDay)} – ${shortPeriodDate.format(
+        new Date(`${addAnalyticsDays(periodKey, 6)}T00:00:00Z`))}`
+    : shortPeriodDate.format(firstDay);
+
+  return (
+    <div aria-label="Periodo de analíticas" aria-describedby={disabled ? "analytics-period-status" : undefined}
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2" role="group">
+      <div className="flex flex-wrap items-center gap-2">
+        <CalendarDays aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        {analyticsPeriodTypes.map((type) => (
+          <button key={type} type="button" aria-pressed={periodType === type}
+            disabled={disabled && type !== "all"}
+            onClick={() => onSelect(type, anchor)}
+            className={`h-8 shrink-0 rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${periodType === type
+              ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground enabled:hover:text-foreground"}`}
+          >
+            {periodLabels[type]}
+          </button>
+        ))}
+      </div>
+      <div className="grid w-80 max-w-full grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2">
+        <button type="button" aria-label="Periodo anterior" disabled={!canNavigate || previous < firstPeriodKey}
+          onClick={() => onSelect(periodType, previous < analyticsFirstDay ? analyticsFirstDay : previous)}
+          className="grid size-8 place-items-center rounded-lg bg-muted text-foreground disabled:opacity-40">
+          <ChevronLeft aria-hidden="true" className="size-4" />
+        </button>
+        <div className="relative flex h-8 min-w-0 items-center justify-center rounded-lg border border-border px-3 text-sm text-foreground focus-within:ring-2 focus-within:ring-primary">
+          <span className="truncate" aria-hidden={canNavigate}>{dateLabel}</span>
+          {canNavigate && (
+            <input type="date" aria-label="Elegir fecha del periodo" value={anchor} min={analyticsFirstDay} max={today}
+              onChange={(event) => onSelect(periodType, event.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full"
+            />
+          )}
+        </div>
+        <button type="button" aria-label="Periodo siguiente" disabled={!canNavigate || !isAnalyticsDay(next) || next > today}
+          onClick={() => onSelect(periodType, next)}
+          className="grid size-8 place-items-center rounded-lg bg-muted text-foreground disabled:opacity-40">
+          <ChevronRight aria-hidden="true" className="size-4" />
+        </button>
+      </div>
+    </div>
   );
 }
 

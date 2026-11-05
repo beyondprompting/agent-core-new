@@ -18,7 +18,6 @@ import { internal } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getProjectManagementProvider } from "../integrations/registry";
 import { shouldRetry, getRetryDelay, formatRetryError, isClientError, MAX_RETRY_ATTEMPTS } from "../lib/corRetry";
-import { applyProjectDeliverablesDelta } from "../lib/deliverableAnalytics";
 import { isInternalUserActive } from "../lib/internalUserStatus";
 
 async function isExternalUser(ctx: any, userId: any) {
@@ -53,7 +52,7 @@ async function hasAnyClientAccess(ctx: any, clientId: any, userId: any) {
   return assignments.length > 0;
 }
 
-async function hasProjectAccess(ctx: any, project: any, userId: any) {
+export async function hasProjectAccess(ctx: any, project: any, userId: any) {
   if (!(await isInternalUserActive(ctx, userId))) return false;
   if (project.clientBrandId) {
     const brand = await ctx.db.get(project.clientBrandId);
@@ -335,6 +334,7 @@ export const createProjectInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     const projectId = await ctx.db.insert("projects", {
+      updatedAt: Date.now(),
       name: args.name,
       brief: args.brief,
       startDate: args.startDate,
@@ -350,8 +350,6 @@ export const createProjectInternal = internalMutation({
       estimatedTime: args.estimatedTime,
       corSyncStatus: "pending",
     });
-    const createdProject = await ctx.db.get(projectId);
-    await applyProjectDeliverablesDelta(ctx, null, createdProject);
 
     console.log(`[projects] ✅ Proyecto creado: "${args.name}" (ID: ${projectId})`);
     return projectId;
@@ -384,10 +382,9 @@ export const softDeleteProject = mutation({
     }
 
     await ctx.db.patch(args.projectId, {
+      updatedAt: Date.now(),
       convexStatus: "deleted",
     });
-    const deletedProject = await ctx.db.get(args.projectId);
-    await applyProjectDeliverablesDelta(ctx, project, deletedProject);
 
     // Al eliminar proyecto localmente, eliminar también sus tasks locales para evitar huérfanos.
     const projectTasks = await ctx.db
@@ -397,6 +394,7 @@ export const softDeleteProject = mutation({
 
     for (const task of projectTasks) {
       await ctx.db.patch(task._id, {
+        updatedAt: Date.now(),
         convexStatus: "deleted",
       });
     }
@@ -462,9 +460,7 @@ export const updateProjectFields = mutation({
 
     if (Object.keys(updates).length === 0) return;
 
-    await ctx.db.patch(args.projectId, updates);
-    const updatedProject = await ctx.db.get(args.projectId);
-    await applyProjectDeliverablesDelta(ctx, project, updatedProject);
+    await ctx.db.patch(args.projectId, { ...updates, updatedAt: Date.now() });
     console.log(`[projects] ✅ Proyecto "${project.name}" actualizado (${Object.keys(updates).join(", ")})`);
 
     // Programar sync a COR si corresponde
@@ -505,9 +501,7 @@ export const updateProjectInternal = internalMutation({
 
     if (Object.keys(updateData).length === 0) return args.projectId;
 
-    await ctx.db.patch(args.projectId, updateData);
-    const updatedProject = await ctx.db.get(args.projectId);
-    await applyProjectDeliverablesDelta(ctx, project, updatedProject);
+    await ctx.db.patch(args.projectId, { ...updateData, updatedAt: Date.now() });
     console.log(`[projects.updateProjectInternal] ✅ Proyecto actualizado`);
     return args.projectId;
   },
@@ -774,6 +768,7 @@ export const attachProjectToExistingCORProject = internalMutation({
       .sort((a, b) => a._creationTime - b._creationTime)[0];
 
     const updates: Record<string, unknown> = {
+      updatedAt: Date.now(),
       corProjectId: args.corProjectId,
       corSyncStatus: "synced",
       corSyncError: undefined,
@@ -794,12 +789,6 @@ export const attachProjectToExistingCORProject = internalMutation({
 
     if (canonicalProject) {
       await ctx.db.patch(canonicalProject._id, updates);
-      const updatedCanonicalProject = await ctx.db.get(canonicalProject._id);
-      await applyProjectDeliverablesDelta(
-        ctx,
-        canonicalProject,
-        updatedCanonicalProject,
-      );
 
       if (args.taskId) {
         await ctx.db.patch(args.taskId, {
@@ -819,8 +808,14 @@ export const attachProjectToExistingCORProject = internalMutation({
         );
 
         if (!hasOtherActiveTasks) {
-          await applyProjectDeliverablesDelta(ctx, previousProject, null);
           await ctx.db.delete(args.projectId);
+          if (args.taskId) {
+            const task = await ctx.db.get(args.taskId);
+            if (task) await ctx.db.patch(args.taskId, {
+              updatedAt: Date.now(),
+              replacedProjectIds: [...new Set([...(task.replacedProjectIds ?? []), args.projectId])],
+            });
+          }
           deletedUnusedProject = true;
         }
       }
@@ -837,8 +832,6 @@ export const attachProjectToExistingCORProject = internalMutation({
     }
 
     await ctx.db.patch(args.projectId, updates);
-    const updatedProject = await ctx.db.get(args.projectId);
-    await applyProjectDeliverablesDelta(ctx, previousProject, updatedProject);
 
     if (args.taskId) {
       await ctx.db.patch(args.taskId, {

@@ -2,9 +2,11 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { analyticsTables } from "./analytics/tables";
 
 export default defineSchema({
   ...authTables,
+  ...analyticsTables,
 
   // Niveles de administración. No conceden acceso a clientes, categorías o tareas.
   // Solo se guardan perfiles internos; los externos nunca tienen platformRole.
@@ -196,6 +198,8 @@ export default defineSchema({
   //   priority    → numérico: 0=Low, 1=Medium, 2=High, 3=Urgent
   //   status      → estado de la task
   tasks: defineTable({
+    updatedAt: v.optional(v.number()),
+    replacedProjectIds: v.optional(v.array(v.id("projects"))),
     // === Campos 1:1 con COR ===
     title: v.string(),
     description: v.optional(v.string()), // Contiene todos los datos del brief formateados
@@ -293,6 +297,7 @@ export default defineSchema({
     archivedAt: v.optional(v.number()),
     archivedBy: v.optional(v.string()),
   })
+    .index("by_updatedAt", ["updatedAt"])
     .index("by_thread", ["threadId"])
     .index("by_taskDraftId", ["taskDraftId"])
     .index("by_status", ["status"])
@@ -529,6 +534,7 @@ export default defineSchema({
     .index("by_requestedBy", ["requestedBy"])
     .index("by_status", ["status"])
     .index("by_createdAt", ["createdAt"])
+    .index("by_updatedAt", ["updatedAt"])
     .index("by_task_and_createdAt", ["taskId", "createdAt"])
     .index("by_requestedBy_and_createdAt", ["requestedBy", "createdAt"])
     .index("by_clientId_and_createdAt", ["clientId", "createdAt"])
@@ -768,6 +774,7 @@ export default defineSchema({
   // Projects — Proyectos locales (Client → Project → Task)
   // =====================================================
   projects: defineTable({
+    updatedAt: v.optional(v.number()),
     // === Campos 1:1 con COR ===
     name: v.string(),
     brief: v.optional(v.string()),
@@ -814,6 +821,7 @@ export default defineSchema({
     archivedAt: v.optional(v.number()),
     archivedBy: v.optional(v.string()),
   })
+    .index("by_updatedAt", ["updatedAt"])
     .index("by_clientId", ["clientId"])
     .index("by_status", ["status"])
     .index("by_source", ["source"])
