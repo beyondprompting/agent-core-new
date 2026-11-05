@@ -67,7 +67,7 @@ export function TopNavigation() {
       isActive: pathname === "/workspace/clients",
     },
     {
-      label: "Analytics",
+      label: "Analíticas",
       href: "/workspace/analytics",
       icon: BarChart3,
       isActive: pathname === "/workspace/analytics",

@@ -177,7 +177,7 @@ function AnalyticsDashboard() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0 grow basis-64">
               <h1 className="text-2xl font-semibold text-foreground">
-                Analytics
+                Analíticas
               </h1>
               <p
                 className="mt-1 truncate text-sm text-muted-foreground"
