@@ -16,6 +16,13 @@ import type * as agents_externalBriefAgent from "../agents/externalBriefAgent.js
 import type * as agents_orchestratorAgent from "../agents/orchestratorAgent.js";
 import type * as agents_priorityAgent from "../agents/priorityAgent.js";
 import type * as agents_reviewerAgent from "../agents/reviewerAgent.js";
+import type * as analytics_calendar from "../analytics/calendar.js";
+import type * as analytics_deliverables from "../analytics/deliverables.js";
+import type * as analytics_jobs from "../analytics/jobs.js";
+import type * as analytics_maintenance from "../analytics/maintenance.js";
+import type * as analytics_notify from "../analytics/notify.js";
+import type * as analytics_projection from "../analytics/projection.js";
+import type * as analytics_tables from "../analytics/tables.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as data_analytics from "../data/analytics.js";
@@ -146,6 +153,13 @@ declare const fullApi: ApiFromModules<{
   "agents/orchestratorAgent": typeof agents_orchestratorAgent;
   "agents/priorityAgent": typeof agents_priorityAgent;
   "agents/reviewerAgent": typeof agents_reviewerAgent;
+  "analytics/calendar": typeof analytics_calendar;
+  "analytics/deliverables": typeof analytics_deliverables;
+  "analytics/jobs": typeof analytics_jobs;
+  "analytics/maintenance": typeof analytics_maintenance;
+  "analytics/notify": typeof analytics_notify;
+  "analytics/projection": typeof analytics_projection;
+  "analytics/tables": typeof analytics_tables;
   auth: typeof auth;
   crons: typeof crons;
   "data/analytics": typeof data_analytics;
