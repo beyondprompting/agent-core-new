@@ -72,7 +72,7 @@ export function TopNavigation() {
       label: "QA Visual",
       href: "/workspace/qa-visual",
       icon: ScanLine,
-      isActive: pathname === "/workspace/qa-visual",
+      isActive: pathname === "/workspace/qa-visual" || pathname.startsWith("/workspace/qa-visual/"),
     },
     {
       label: "Analíticas",

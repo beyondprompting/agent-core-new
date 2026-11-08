@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile, realpath } from "node:fs/promises";
 import { z } from "zod";
-import { readClientMatrix, matrixRequirements } from "./client-matrix";
-import type { QaInventory } from "../source";
+import { parseClientMatrix, matrixRequirements } from "./clientMatrix.node";
+import type { QaInventory } from "../../app/lib/qa-visual/source";
 
 const confirmedRules = z.object({
   rules: z
@@ -64,17 +63,19 @@ function digest(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-export async function prepareAnalysisInputs(
-  root: string,
+export function driveReviewKey(folderId: string) {
+  return digest(["google-drive", folderId]);
+}
+
+export function prepareAnalysisInputs(
+  folderId: string,
   inventory: QaInventory,
+  matrix?: Awaited<ReturnType<typeof parseClientMatrix>>,
 ) {
-  const matrix = inventory.matrix
-    ? await readClientMatrix(root, inventory.matrix)
+  const config = folderId === process.env.QA_VISUAL_GOOGLE_FOLDER_ID?.trim()
+    ? process.env.QA_VISUAL_RULES_JSON
     : undefined;
-  const config = process.env.QA_VISUAL_RULES_FILE;
-  const confirmed = config
-    ? confirmedRules.parse(JSON.parse(await readFile(config, "utf8"))).rules
-    : [];
+  const confirmed = config ? confirmedRules.parse(JSON.parse(config)).rules : [];
   const rulesById = new Map<
     string,
     Omit<(typeof confirmed)[number], "expectedByPiece">
@@ -103,7 +104,6 @@ export async function prepareAnalysisInputs(
     names: inventory.pieces.map((file) => file.name),
     extraction: 1,
   });
-  const campaign = digest(await realpath(root));
   const inputs = inventory.pieces.map((file) => {
     const stem = file.name.replace(/\.[^.]+$/, "");
     const production =
@@ -149,9 +149,10 @@ export async function prepareAnalysisInputs(
         name: file.name,
         size: file.bytes,
         revision: file.updatedAt,
+        driveVersion: file.driveVersion,
         production,
       }),
     };
   });
-  return { campaign, ruleVersion, rules, inputs, matrix };
+  return { ruleVersion, rules, inputs, matrix };
 }

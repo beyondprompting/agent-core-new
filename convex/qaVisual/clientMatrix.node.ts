@@ -1,11 +1,9 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { basename, join, posix } from "node:path";
+import { posix } from "node:path";
 import { DOMParser } from "@xmldom/xmldom";
 import JSZip from "jszip";
-import type { QaFile } from "../source";
-import type { ProductionFields } from "../production-csv";
-import type { ClientRequirement } from "../review-model";
+import type { ProductionFields } from "../../app/lib/qa-visual/production-csv";
+import type { ClientRequirement } from "../../app/lib/qa-visual/review-model";
 
 const sheets = ["PRODUCCION", "LEYENDA", "REGLAS"] as const;
 const normalized = (s: string) =>
@@ -16,15 +14,7 @@ const normalized = (s: string) =>
     .replace(/[^A-Z0-9]+/g, " ")
     .trim();
 
-export async function readClientMatrix(root: string, file: QaFile) {
-  const folder = join(await realpath(root), "RECURSOS");
-  if ((await realpath(folder)) !== folder || basename(file.name) !== file.name)
-    throw new Error("Ruta de matriz inválida");
-  const path = join(folder, file.name);
-  const stat = await lstat(path);
-  if (!stat.isFile() || stat.size > 500_000 || stat.mtimeMs !== file.updatedAt)
-    throw new Error("La matriz cambió o supera el límite del piloto");
-  const bytes = await readFile(path);
+export async function parseClientMatrix(name: string, bytes: Buffer) {
   const zip = await JSZip.loadAsync(bytes);
   const xml = async (path: string) => {
     const entry = zip.file(path);
@@ -82,14 +72,14 @@ export async function readClientMatrix(root: string, file: QaFile) {
     }
   }
   return {
-    name: file.name,
+    name,
     hash: createHash("sha256").update(bytes).digest("hex"),
     bytes,
     cells,
   };
 }
 
-type Matrix = Awaited<ReturnType<typeof readClientMatrix>>;
+type Matrix = Awaited<ReturnType<typeof parseClientMatrix>>;
 function numbered(value: string) {
   return [...value.matchAll(/(?:^|\n)\s*(\d+)\.\s*([^\n]*)/g)].map((match) => ({
     ordinal: match[1],

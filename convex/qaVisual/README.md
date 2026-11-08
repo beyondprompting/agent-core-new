@@ -1,25 +1,9 @@
-# Piloto de QA Visual
+# QA Visual
 
-La página local utiliza `QA_VISUAL_LOCAL_ROOT`. **Analizar piezas** analiza las imágenes de la campaña en el orden del inventario. **Reintentar fallidas** vuelve a tomar las piezas con error de la última ejecución.
+Configurá `QA_VISUAL_GOOGLE_SERVICE_ACCOUNT_JSON` en el despliegue de Convex. Compartí cada carpeta de campaña con la cuenta de servicio como lectora. En **QA Visual → Agregar campaña**, pegá el enlace de la carpeta. Cada campaña queda registrada en `qaVisualCampaigns`. Convex lee la matriz XLSX de `RECURSOS`, el CSV de producción de `EDITABLES` y las imágenes PNG o JPEG de `DESPLIEGUE`.
 
-Sincronizá el esquema y las funciones con el despliegue de desarrollo mediante `npx convex dev`. El análisis usa los proveedores configurados en `convex/lib/llmFallback.ts` y sus claves en el entorno de Convex. Next.js calcula el hash y las dimensiones del original y prepara una copia JPEG para que el workflow la analice.
+**Analizar piezas** toma las imágenes en el orden del inventario. Convex guarda la matriz y sus requisitos con las referencias de celda, prepara las vistas para análisis y ejecuta el workflow existente. **Reintentar fallidas** vuelve a tomar las piezas con error de la última ejecución.
 
-Las reglas iniciales comparan dimensiones, producto y precio con el CSV. Para evaluar vigencia, CTA u otros criterios, agregá referencias aprobadas a un archivo JSON e indicá su ruta en `QA_VISUAL_RULES_FILE` en `.env.local`. Por ejemplo:
+Las reglas parten de las hojas `PRODUCCION`, `LEYENDA` y `REGLAS`. Para agregar referencias aprobadas por pieza, el despliegue también admite un JSON opcional en `QA_VISUAL_RULES_JSON`, limitado a la carpeta que se indique en `QA_VISUAL_GOOGLE_FOLDER_ID` con la estructura `{"rules":[{"id":"cta","criterion":"Criterio de revisión","source":"REGLAS!B12","severity":"warning","expectedByPiece":{"pieza.png":"Texto esperado"}}]}`. Usá el nombre completo del archivo o el nombre sin extensión como clave. Al cambiar las fuentes o reglas, recargá la página para actualizar los resultados que corresponden a esas versiones.
 
-```json
-{
-  "rules": [
-    {
-      "id": "cta",
-      "criterion": "Verificar que la pieza invite explícitamente a descargar la aplicación.",
-      "source": "Matriz aprobada · hoja REGLAS, celda B12",
-      "severity": "warning",
-      "expectedByPiece": {
-        "nombre-de-la-pieza.png": "Llamado explícito a descargar la aplicación"
-      }
-    }
-  ]
-}
-```
-
-Usá el nombre completo del archivo o el nombre sin extensión como clave. Los controles sin referencia quedan **No verificables**. Al cambiar reglas o insumos, recargá la página para ver qué resultados quedaron desactualizados.
+La acción interna `qaVisual/mediaHttp:probe` verifica la lectura y el procesamiento de una campaña. Ejecutala en Convex Dev con `{"folderUrl":"https://drive.google.com/drive/folders/ID"}` para comprobar la conexión.

@@ -1,7 +1,8 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { useRef, useState } from "react";
+import type { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
 import type { Comment, ReviewFeed } from "@/app/lib/qa-visual/review-model";
 
@@ -16,12 +17,13 @@ const referenceLabels: Readonly<Record<string, string>> = {
 };
 
 export type AnalysisContext = {
-  campaign: string;
+  campaignId: Id<"qaVisualCampaigns">;
   inputs: { name: string; contextKey: string }[];
 };
 
 export function useAgentAnalysis(context?: AnalysisContext) {
   const dashboard = useQuery(api.qaVisual.runs.dashboard, context ?? "skip");
+  const launchDriveAnalysis = useAction(api.qaVisual.driveAnalysis.launch);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const sending = useRef(false);
@@ -32,15 +34,13 @@ export function useAgentAnalysis(context?: AnalysisContext) {
     setSubmitting(true);
     setError(undefined);
     try {
-      const response = await fetch("/workspace/qa-visual/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: crypto.randomUUID(), kind, names }),
+      const result = await launchDriveAnalysis({
+        campaignId: context.campaignId,
+        requestId: crypto.randomUUID(),
+        kind,
+        names,
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        setError(body?.error ?? "No se pudo iniciar el análisis.");
-      }
+      if ("error" in result) setError(result.error);
     } catch {
       setError(
         "Se perdió la conexión al iniciar el análisis. Revisá el progreso antes de reintentar.",

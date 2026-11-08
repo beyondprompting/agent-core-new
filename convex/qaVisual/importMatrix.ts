@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { v, type Infer } from "convex/values";
-import { action, internalAction, type ActionCtx } from "../_generated/server";
+import { internalAction, type ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
 import { clientRequirement, sourceCell } from "./validators";
@@ -58,12 +58,4 @@ async function importMatrix(
     throw error;
   }
 }
-export const sync = action({
-  args,
-  handler: async (ctx, payload): Promise<Id<"qaVisualSourceDocuments">> => {
-    if (!(await ctx.runQuery(internal.qaVisual.access.viewerIsQaAdmin)))
-      throw new Error("Acceso denegado");
-    return importMatrix(ctx, payload);
-  },
-});
 export const seed = internalAction({ args, handler: importMatrix });

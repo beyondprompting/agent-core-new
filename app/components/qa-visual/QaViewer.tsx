@@ -1,9 +1,6 @@
 "use client";
 
 import { useMemo, useTransition } from "react";
-import { useMutation, usePaginatedQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
-import { WorkspaceLayout } from "@/app/components/WorkspaceLayout";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, ScanLine, X, AlertCircle } from "lucide-react";
 import { useTheme } from "@/app/hooks/useTheme";
@@ -30,11 +27,13 @@ import {
 import "./review.css";
 
 export function QaViewer({
+  campaignId,
   inventory,
   feed = emptyReviewFeed,
   analysis,
   analysisError,
 }: {
+  campaignId: string;
   inventory: QaInventory;
   feed?: ReviewFeed;
   analysis?: AnalysisContext;
@@ -43,78 +42,52 @@ export function QaViewer({
   const agent = useAgentAnalysis(analysis);
   const { user } = useUser();
   const reviewer = user?.name || user?.email || "Revisor";
-  const pieces = useMemo(() => toReviewPieces(inventory), [inventory]);
+  const pieces = useMemo(() => toReviewPieces(inventory, campaignId), [inventory, campaignId]);
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
   const router = useRouter();
   const [refreshing, startTransition] = useTransition();
-  const {
-    results: threads,
-    status: threadsStatus,
-    loadMore,
-  } = usePaginatedQuery(
-    api.messaging.threads.getMyThreads,
-    {},
-    { initialNumItems: 20 },
-  );
-  const createThread = useMutation(api.messaging.threads.createThread);
-
-  function openThread(threadId: string) {
-    router.push("/workspace?" + new URLSearchParams({ threadId }));
-  }
-
-  async function newThread() {
-    const threadId = await createThread({
-      title: `Nuevo chat • ${new Date().toLocaleString()}`,
-    });
-    openThread(threadId);
-  }
-
   return (
-    <WorkspaceLayout
-      threads={threads}
-      threadsStatus={threadsStatus}
-      loadMoreThreads={loadMore}
-      onSelectThread={openThread}
-      onNewThread={newThread}
-    >
-      <div className="qa-visual">
-        <div className={`workspace${dark ? " dark" : ""}`}>
-          {inventory.notices.length > 0 && (
-            <div className="drive-notices" role="status">
-              {inventory.notices.map((notice) => (
-                <p key={notice}>{notice}</p>
-              ))}
-              <button
-                disabled={refreshing}
-                onClick={() => startTransition(() => router.refresh())}
-              >
-                Actualizar desde Drive
-              </button>
-            </div>
-          )}
-          {analysisError && (
-            <div className="drive-notices" role="alert">
-              {analysisError}
-            </div>
-          )}
-          {pieces.length ? (
-            <ReviewWorkspace
-              pieces={pieces}
-              inventory={inventory}
-              feed={analysis ? agent.feed : feed}
-              agent={agent}
-              reviewer={reviewer}
-            />
-          ) : (
+    <div className="qa-visual">
+      <div className={`workspace${dark ? " dark" : ""}`}>
+        {inventory.notices.length > 0 && (
+          <div className="drive-notices" role="status">
+            {inventory.notices.map((notice) => (
+              <p key={notice}>{notice}</p>
+            ))}
+            <button
+              disabled={refreshing}
+              onClick={() => startTransition(() => router.refresh())}
+            >
+              Actualizar desde Drive
+            </button>
+          </div>
+        )}
+        {analysisError && (
+          <div className="drive-notices" role="alert">
+            {analysisError}
+          </div>
+        )}
+        {pieces.length ? (
+          <ReviewWorkspace
+            key={campaignId}
+            pieces={pieces}
+            inventory={inventory}
+            feed={analysis ? agent.feed : feed}
+            agent={agent}
+            reviewer={reviewer}
+          />
+        ) : (
+          <>
+            <CampaignHeader campaignName={inventory.campaignName} reviewer={reviewer} analyzing={false} />
             <section className="empty-state">
               <ScanLine size={28} />
               <p>No hay piezas disponibles para revisar.</p>
             </section>
-          )}
-        </div>
+          </>
+        )}
       </div>
-    </WorkspaceLayout>
+    </div>
   );
 }
 
@@ -170,7 +143,9 @@ function ReviewWorkspace({
   return (
     <>
       <CampaignHeader
-        session={session}
+        campaignName={inventory.campaignName}
+        reviewer={reviewer}
+        onShare={() => session.setModal("share")}
         analyzing={agent.busy}
         onAnalyze={
           agent.available ? () => void agent.launch("batch") : undefined

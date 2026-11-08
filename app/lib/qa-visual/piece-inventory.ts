@@ -8,11 +8,10 @@ const label = (value: string) =>
     .replace(/^./u, (char) => char.toLocaleUpperCase("es"));
 const display = (value?: string) => (value ? label(value) : "—");
 
-export function toReviewPieces({
-  pieces,
-  production,
-  clientRequirements,
-}: QaInventory): Piece[] {
+export function toReviewPieces(
+  { pieces, production, clientRequirements }: QaInventory,
+  campaignId: string,
+): Piece[] {
   return pieces.map((file) => {
     const stem = file.name.replace(/\.[^.]+$/, "");
     const record = production?.[stem.normalize("NFC").toLowerCase()];
@@ -45,7 +44,7 @@ export function toReviewPieces({
       filename: file.name,
       image:
         "/workspace/qa-visual/media?" +
-        new URLSearchParams({ name: file.name, v: String(file.updatedAt) }),
+        new URLSearchParams({ campaign: campaignId, id: file.driveId, v: file.driveVersion }),
       width,
       height,
       channel,

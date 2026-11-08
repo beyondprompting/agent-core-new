@@ -4,7 +4,6 @@ import type { Id } from "../_generated/dataModel";
 import {
   internalMutation,
   internalQuery,
-  mutation,
   query,
   type MutationCtx,
 } from "../_generated/server";
@@ -12,11 +11,13 @@ import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
 import { attempt, finding, input, rule, snapshot, status } from "./validators";
 
-export const start = mutation({
+export const start = internalMutation({
   args: {
-    campaign: v.string(),
+    campaignId: v.id("qaVisualCampaigns"),
     requestId: v.string(),
     inputs: v.array(input),
+    driveFolderId: v.string(),
+    driveFiles: v.array(v.object({ id: v.string(), version: v.string() })),
     ruleVersion: v.string(),
     sourceDocumentId: v.id("qaVisualSourceDocuments"),
     rules: v.array(rule),
@@ -27,8 +28,11 @@ export const start = mutation({
     args,
   ): Promise<{ runId: Id<"qaVisualRuns">; ids: Id<"qaVisualReviews">[] }> => {
     const requestedBy = await requireQaAdmin(ctx);
+    const registered = await ctx.db.get(args.campaignId);
+    if (registered?.status !== "active") throw new Error("Campaña no disponible.");
+    const campaign = registered.reviewKey;
     const document = await ctx.db.get(args.sourceDocumentId);
-    if (document?.campaign !== args.campaign)
+    if (document?.campaign !== campaign)
       throw new Error("Matriz de campaña inválida.");
     const existing = await ctx.db
       .query("qaVisualRuns")
@@ -36,10 +40,14 @@ export const start = mutation({
         q.eq("requestedBy", requestedBy).eq("requestId", args.requestId),
       )
       .unique();
-    if (existing) return { runId: existing._id, ids: [] };
+    if (existing) {
+      if (existing.campaign !== campaign) throw new Error("La solicitud pertenece a otra campaña.");
+      return { runId: existing._id, ids: [] };
+    }
     if (
       !args.inputs.length ||
       args.inputs.length > 200 ||
+      args.inputs.length !== args.driveFiles.length ||
       new Set(args.inputs.map((item) => item.name)).size !==
         args.inputs.length ||
       args.rules.length > 20 ||
@@ -51,7 +59,7 @@ export const start = mutation({
       const active = await ctx.db
         .query("qaVisualRuns")
         .withIndex("by_campaign_state", (q) =>
-          q.eq("campaign", args.campaign).eq("state", state),
+          q.eq("campaign", campaign).eq("state", state),
         )
         .first();
       if (active) return { runId: active._id, ids: [] };
@@ -59,19 +67,19 @@ export const start = mutation({
     const previous = await ctx.db
       .query("qaVisualRuleSets")
       .withIndex("by_campaign_version", (q) =>
-        q.eq("campaign", args.campaign).eq("version", args.ruleVersion),
+        q.eq("campaign", campaign).eq("version", args.ruleVersion),
       )
       .unique();
     const ruleSetId =
       previous?._id ??
       (await ctx.db.insert("qaVisualRuleSets", {
-        campaign: args.campaign,
+        campaign,
         version: args.ruleVersion,
         rules: args.rules,
         sourceDocumentId: args.sourceDocumentId,
       }));
     const runId = await ctx.db.insert("qaVisualRuns", {
-      campaign: args.campaign,
+      campaign,
       requestedBy,
       ruleSetId,
       kind: args.kind,
@@ -82,7 +90,7 @@ export const start = mutation({
       args.inputs.map((item, order) =>
         ctx.db.insert("qaVisualReviews", {
           runId,
-          campaign: args.campaign,
+          campaign,
           input: item,
           order,
           status: "preparing",
@@ -95,21 +103,12 @@ export const start = mutation({
       internal.qaVisual.runs.expirePreparation,
       { runId },
     );
+    await ctx.scheduler.runAfter(0, internal.qaVisual.stageDriveRun.prepare, {
+      runId,
+      folderId: args.driveFolderId,
+      items: ids.map((reviewId, index) => ({ reviewId, ...args.driveFiles[index] })),
+    });
     return { runId, ids };
-  },
-});
-
-export const canStage = internalQuery({
-  args: { reviewId: v.id("qaVisualReviews") },
-  handler: async (ctx, { reviewId }) => {
-    const user = await requireQaAdmin(ctx);
-    const review = await ctx.db.get(reviewId);
-    const run = review && (await ctx.db.get(review.runId));
-    return (
-      review?.status === "preparing" &&
-      run?.state === "preparing" &&
-      run.requestedBy === user
-    );
   },
 });
 
@@ -186,16 +185,6 @@ async function dispatch(ctx: MutationCtx, runId: Id<"qaVisualRuns">) {
   }
 }
 
-export const finishPreparation = mutation({
-  args: { runId: v.id("qaVisualRuns") },
-  handler: async (ctx, { runId }): Promise<void> => {
-    const user = await requireQaAdmin(ctx);
-    if ((await ctx.db.get(runId))?.requestedBy !== user)
-      throw new Error("Acceso denegado");
-    await dispatch(ctx, runId);
-  },
-});
-
 export const expirePreparation = internalMutation({
   args: { runId: v.id("qaVisualRuns") },
   handler: async (ctx, { runId }): Promise<void> => dispatch(ctx, runId),
@@ -243,11 +232,14 @@ export const update = internalMutation({
 
 export const dashboard = query({
   args: {
-    campaign: v.string(),
+    campaignId: v.id("qaVisualCampaigns"),
     inputs: v.array(v.object({ name: v.string(), contextKey: v.string() })),
   },
-  handler: async (ctx, { campaign, inputs }) => {
+  handler: async (ctx, { campaignId, inputs }) => {
     await requireQaAdmin(ctx);
+    const registered = await ctx.db.get(campaignId);
+    if (registered?.status !== "active") return null;
+    const campaign = registered.reviewKey;
     if (inputs.length > 1000)
       throw new Error("El inventario supera el límite admitido.");
     const preparing = await ctx.db

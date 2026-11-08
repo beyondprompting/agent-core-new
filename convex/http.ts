@@ -7,7 +7,10 @@ import { upload as uploadTaskPanelFile, preflight as taskPanelPreflight } from "
 
 import { media as taskPanelMedia, preflight as taskPanelMediaPreflight } from "./taskPanelMediaHttp";
 
+import { driveMedia } from "./qaVisual/mediaHttp";
+
 const http = httpRouter();
+http.route({ path: "/qa-visual/media", method: "GET", handler: driveMedia });
 http.route({ path: "/task-panel/media", method: "GET", handler: taskPanelMedia });
 http.route({ path: "/task-panel/media", method: "OPTIONS", handler: taskPanelMediaPreflight });
 http.route({ path: "/task-panel/upload", method: "POST", handler: uploadTaskPanelFile });

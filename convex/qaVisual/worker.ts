@@ -4,9 +4,9 @@ import { APICallError, generateText, NoObjectGeneratedError, Output } from "ai";
 import { v, type Infer } from "convex/values";
 import { z } from "zod";
 import { internal } from "../_generated/api";
-import { action, internalAction } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { geminiConfig, openaiConfig } from "../lib/llmFallback";
-import { attempt, finding, provider, snapshot } from "./validators";
+import { attempt, finding, provider } from "./validators";
 
 const responseSchema = z.object({
   controls: z.array(
@@ -35,38 +35,6 @@ type Result =
     }
   | { kind: "input"; message: string }
   | { kind: "provider"; retryable: boolean; attempt: Infer<typeof attempt> };
-
-export const stage = action({
-  args: {
-    reviewId: v.id("qaVisualReviews"),
-    image: v.optional(v.object({ bytes: v.bytes(), snapshot })),
-  },
-  handler: async (ctx, { reviewId, image }): Promise<void> => {
-    if (!(await ctx.runQuery(internal.qaVisual.runs.canStage, { reviewId })))
-      throw new Error("Acceso denegado");
-    if (!image) {
-      await ctx.runMutation(internal.qaVisual.runs.attach, { reviewId });
-      return;
-    }
-    if (image.bytes.byteLength > 750_000)
-      throw new Error("La vista de análisis supera el tamaño admitido.");
-    const storageId = await ctx.storage.store(
-      new Blob([image.bytes], { type: "image/jpeg" }),
-    );
-    try {
-      await ctx.runMutation(internal.qaVisual.runs.attach, {
-        reviewId,
-        asset: { storageId, snapshot: image.snapshot },
-      });
-    } catch (error) {
-      const attached = await ctx
-        .runQuery(internal.qaVisual.runs.hasStorage, { storageId })
-        .catch(() => true);
-      if (!attached) await ctx.storage.delete(storageId);
-      throw error;
-    }
-  },
-});
 
 export const analyze = internalAction({
   args: { reviewId: v.id("qaVisualReviews"), provider },

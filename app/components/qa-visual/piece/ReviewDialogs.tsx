@@ -1,3 +1,4 @@
+import { usePathname } from "next/navigation";
 import {
   Check,
   CheckCircle2,
@@ -35,6 +36,8 @@ export function ReviewDialogs({
 }: {
   session: ReviewSession;
 }) {
+  const pathname = usePathname();
+
   return (
     <>
       {modal && (
@@ -65,7 +68,7 @@ export function ReviewDialogs({
                 </p>
                 <div className="share-link">
                   <Link2 size={15} />
-                  <span>/workspace/qa-visual</span>
+                  <span className="min-w-0 truncate" title={pathname}>{pathname}</span>
                   <button
                     onClick={async () => {
                       try {

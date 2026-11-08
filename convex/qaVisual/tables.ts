@@ -12,6 +12,15 @@ import {
 } from "./validators";
 
 export const qaVisualTables = {
+  qaVisualCampaigns: defineTable({
+    name: v.string(),
+    driveFolderId: v.string(),
+    reviewKey: v.string(),
+    status: v.union(v.literal("active"), v.literal("archived")),
+    createdBy: v.id("users"),
+  })
+    .index("by_drive_folder", ["driveFolderId"])
+    .index("by_status", ["status"]),
   qaVisualSourceDocuments: defineTable({
     campaign: v.string(),
     name: v.string(),
