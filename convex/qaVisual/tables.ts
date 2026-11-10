@@ -8,6 +8,8 @@ import {
   rule,
   snapshot,
   sourceCell,
+  sourceKind,
+  pieceFile,
   status,
 } from "./validators";
 
@@ -18,6 +20,13 @@ export const qaVisualTables = {
     reviewKey: v.string(),
     status: v.union(v.literal("active"), v.literal("archived")),
     createdBy: v.id("users"),
+    currentSnapshotId: v.optional(v.id("qaVisualCampaignSnapshots")),
+    sync: v.optional(v.object({
+      startedAt: v.number(),
+      jobId: v.id("_scheduled_functions"),
+    })),
+    lastSyncedAt: v.optional(v.number()),
+    syncError: v.optional(v.string()),
   })
     .index("by_drive_folder", ["driveFolderId"])
     .index("by_status", ["status"]),
@@ -25,9 +34,30 @@ export const qaVisualTables = {
     campaign: v.string(),
     name: v.string(),
     hash: v.string(),
-    mappingVersion: v.string(),
+    mappingVersion: v.optional(v.string()),
+    kind: v.optional(sourceKind),
+    driveFileId: v.optional(v.string()),
+    driveVersion: v.optional(v.string()),
+    bytes: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
     storageId: v.id("_storage"),
-  }).index("by_version", ["campaign", "hash", "mappingVersion"]),
+  }).index("by_drive_version", ["campaign", "kind", "driveFileId", "driveVersion"]),
+  qaVisualCampaignSnapshots: defineTable({
+    campaignId: v.id("qaVisualCampaigns"),
+    fingerprint: v.string(),
+    excelDocumentId: v.id("qaVisualSourceDocuments"),
+    csvDocumentId: v.id("qaVisualSourceDocuments"),
+    deploymentFolderId: v.string(),
+    ruleVersion: v.string(),
+    rules: v.array(rule),
+    notices: v.array(v.string()),
+  }).index("by_campaign_fingerprint", ["campaignId", "fingerprint"]),
+  qaVisualCampaignPieces: defineTable({
+    snapshotId: v.id("qaVisualCampaignSnapshots"),
+    order: v.number(),
+    file: pieceFile,
+    input,
+  }).index("by_snapshot", ["snapshotId", "order"]),
   qaVisualClientRequirements: defineTable({
     documentId: v.id("qaVisualSourceDocuments"),
     cell: v.optional(sourceCell),
@@ -56,6 +86,7 @@ export const qaVisualTables = {
   qaVisualRuns: defineTable({
     campaign: v.string(),
     requestedBy: v.id("users"),
+    snapshotId: v.optional(v.id("qaVisualCampaignSnapshots")),
     ruleSetId: v.id("qaVisualRuleSets"),
     kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
     state: v.union(

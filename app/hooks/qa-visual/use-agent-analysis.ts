@@ -1,6 +1,6 @@
 "use client";
 
-import { useAction, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useRef, useState } from "react";
 import type { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
@@ -18,12 +18,15 @@ const referenceLabels: Readonly<Record<string, string>> = {
 
 export type AnalysisContext = {
   campaignId: Id<"qaVisualCampaigns">;
+  snapshotId: Id<"qaVisualCampaignSnapshots">;
   inputs: { name: string; contextKey: string }[];
 };
 
 export function useAgentAnalysis(context?: AnalysisContext) {
-  const dashboard = useQuery(api.qaVisual.runs.dashboard, context ?? "skip");
-  const launchDriveAnalysis = useAction(api.qaVisual.driveAnalysis.launch);
+  const dashboard = useQuery(api.qaVisual.runs.dashboard, context
+    ? { campaignId: context.campaignId, inputs: context.inputs }
+    : "skip");
+  const launchDriveAnalysis = useMutation(api.qaVisual.runs.start);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const sending = useRef(false);
@@ -36,6 +39,7 @@ export function useAgentAnalysis(context?: AnalysisContext) {
     try {
       const result = await launchDriveAnalysis({
         campaignId: context.campaignId,
+        snapshotId: context.snapshotId,
         requestId: crypto.randomUUID(),
         kind,
         names,

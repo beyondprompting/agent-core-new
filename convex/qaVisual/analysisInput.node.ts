@@ -67,14 +67,18 @@ export function driveReviewKey(folderId: string) {
   return digest(["google-drive", folderId]);
 }
 
+export function confirmedRulesConfig(folderId: string) {
+  return folderId === process.env.QA_VISUAL_GOOGLE_FOLDER_ID?.trim()
+    ? process.env.QA_VISUAL_RULES_JSON
+    : undefined;
+}
+
 export function prepareAnalysisInputs(
   folderId: string,
   inventory: QaInventory,
   matrix?: Awaited<ReturnType<typeof parseClientMatrix>>,
 ) {
-  const config = folderId === process.env.QA_VISUAL_GOOGLE_FOLDER_ID?.trim()
-    ? process.env.QA_VISUAL_RULES_JSON
-    : undefined;
+  const config = confirmedRulesConfig(folderId);
   const confirmed = config ? confirmedRules.parse(JSON.parse(config)).rules : [];
   const rulesById = new Map<
     string,

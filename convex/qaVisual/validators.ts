@@ -83,3 +83,13 @@ export const snapshot = v.object({
   height: v.number(),
   format: v.string(),
 });
+
+export const sourceKind = v.union(v.literal("excel"), v.literal("csv"));
+export const pieceFile = v.object({
+  name: v.string(),
+  bytes: v.number(),
+  updatedAt: v.number(),
+  driveId: v.string(),
+  driveVersion: v.string(),
+});
+export const campaignPiece = v.object({ file: pieceFile, input });

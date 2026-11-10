@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo } from "react";
 import { CheckCircle2, ScanLine, X, AlertCircle } from "lucide-react";
 import { useTheme } from "@/app/hooks/useTheme";
 import { CampaignHeader } from "@/app/components/qa-visual/campaign/CampaignHeader";
@@ -31,13 +30,17 @@ export function QaViewer({
   inventory,
   feed = emptyReviewFeed,
   analysis,
-  analysisError,
+  syncError,
+  refreshing = false,
+  onRefresh,
 }: {
   campaignId: string;
   inventory: QaInventory;
   feed?: ReviewFeed;
   analysis?: AnalysisContext;
-  analysisError?: string;
+  syncError?: string;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }) {
   const agent = useAgentAnalysis(analysis);
   const { user } = useUser();
@@ -45,8 +48,6 @@ export function QaViewer({
   const pieces = useMemo(() => toReviewPieces(inventory, campaignId), [inventory, campaignId]);
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
-  const router = useRouter();
-  const [refreshing, startTransition] = useTransition();
   return (
     <div className="qa-visual">
       <div className={`workspace${dark ? " dark" : ""}`}>
@@ -55,17 +56,11 @@ export function QaViewer({
             {inventory.notices.map((notice) => (
               <p key={notice}>{notice}</p>
             ))}
-            <button
-              disabled={refreshing}
-              onClick={() => startTransition(() => router.refresh())}
-            >
-              Actualizar desde Drive
-            </button>
           </div>
         )}
-        {analysisError && (
+        {syncError && (
           <div className="drive-notices" role="alert">
-            {analysisError}
+            {syncError}
           </div>
         )}
         {pieces.length ? (
@@ -76,13 +71,23 @@ export function QaViewer({
             feed={analysis ? agent.feed : feed}
             agent={agent}
             reviewer={reviewer}
+            onRefresh={onRefresh}
+            refreshing={refreshing}
           />
         ) : (
           <>
-            <CampaignHeader campaignName={inventory.campaignName} reviewer={reviewer} analyzing={false} />
+            <CampaignHeader
+              campaignName={inventory.campaignName}
+              reviewer={reviewer}
+              analyzing={false}
+              onRefresh={onRefresh}
+              refreshing={refreshing}
+            />
             <section className="empty-state">
               <ScanLine size={28} />
-              <p>No hay piezas disponibles para revisar.</p>
+              <p role="status">
+                {refreshing ? "Importando los archivos de Drive…" : "No hay piezas disponibles para revisar."}
+              </p>
             </section>
           </>
         )}
@@ -97,8 +102,12 @@ function ReviewWorkspace({
   feed,
   reviewer,
   agent,
+  onRefresh,
+  refreshing,
 }: {
   agent: ReturnType<typeof useAgentAnalysis>;
+  onRefresh?: () => void;
+  refreshing: boolean;
   feed: ReviewFeed;
   reviewer: string;
   pieces: Piece[];
@@ -147,6 +156,8 @@ function ReviewWorkspace({
         reviewer={reviewer}
         onShare={() => session.setModal("share")}
         analyzing={agent.busy}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
         onAnalyze={
           agent.available ? () => void agent.launch("batch") : undefined
         }

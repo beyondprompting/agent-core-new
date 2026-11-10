@@ -1,68 +1,52 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "../_generated/server";
-import { clientRequirement, sourceCell } from "./validators";
+import { internalMutation, internalQuery, type QueryCtx } from "../_generated/server";
+import { sourceCell, sourceKind } from "./validators";
 
-export const findVersion = internalQuery({
-  args: { campaign: v.string(), hash: v.string(), mappingVersion: v.string() },
-  handler: (ctx, { campaign, hash, mappingVersion }) =>
-    ctx.db
-      .query("qaVisualSourceDocuments")
-      .withIndex("by_version", (q) =>
-        q
-          .eq("campaign", campaign)
-          .eq("hash", hash)
-          .eq("mappingVersion", mappingVersion),
-      )
-      .unique(),
+const driveSource = {
+  campaign: v.string(),
+  kind: sourceKind,
+  driveFileId: v.string(),
+  driveVersion: v.string(),
+};
+
+function sourceVersion(
+  ctx: QueryCtx,
+  source: { campaign: string; kind: "excel" | "csv"; driveFileId: string; driveVersion: string },
+) {
+  return ctx.db
+    .query("qaVisualSourceDocuments")
+    .withIndex("by_drive_version", (q) => q
+      .eq("campaign", source.campaign)
+      .eq("kind", source.kind)
+      .eq("driveFileId", source.driveFileId)
+      .eq("driveVersion", source.driveVersion))
+    .unique();
+}
+
+export const findDriveVersion = internalQuery({
+  args: driveSource,
+  handler: sourceVersion,
 });
 
-export const save = internalMutation({
+export const saveDriveVersion = internalMutation({
   args: {
-    campaign: v.string(),
+    ...driveSource,
     name: v.string(),
     hash: v.string(),
-    mappingVersion: v.string(),
+    bytes: v.number(),
+    updatedAt: v.number(),
     storageId: v.id("_storage"),
-    cells: v.array(sourceCell),
-    pieces: v.array(
-      v.object({ name: v.string(), requirements: v.array(clientRequirement) }),
-    ),
+    cells: v.optional(v.array(sourceCell)),
   },
-  handler: async (
-    ctx,
-    { campaign, hash, mappingVersion, name, storageId, cells, pieces },
-  ) => {
-    const existing = await ctx.db
-      .query("qaVisualSourceDocuments")
-      .withIndex("by_version", (q) =>
-        q
-          .eq("campaign", campaign)
-          .eq("hash", hash)
-          .eq("mappingVersion", mappingVersion),
-      )
-      .unique();
+  handler: async (ctx, { cells, ...source }) => {
+    const existing = await sourceVersion(ctx, source);
     if (existing) {
-      if (existing.storageId !== storageId) await ctx.storage.delete(storageId);
+      if (existing.storageId !== source.storageId) await ctx.storage.delete(source.storageId);
       return existing._id;
     }
-    const documentId = await ctx.db.insert("qaVisualSourceDocuments", {
-      campaign,
-      hash,
-      mappingVersion,
-      name,
-      storageId,
-    });
-    for (const cell of cells)
+    const documentId = await ctx.db.insert("qaVisualSourceDocuments", source);
+    for (const cell of cells ?? [])
       await ctx.db.insert("qaVisualClientRequirements", { documentId, cell });
-    for (const piece of pieces) {
-      for (const requirement of piece.requirements) {
-        await ctx.db.insert("qaVisualClientRequirements", {
-          documentId,
-          piece: piece.name,
-          requirement,
-        });
-      }
-    }
     return documentId;
   },
 });

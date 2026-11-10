@@ -5,35 +5,29 @@ import {
   internalMutation,
   internalQuery,
   query,
+  mutation,
   type MutationCtx,
 } from "../_generated/server";
 import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
-import { attempt, finding, input, rule, snapshot, status } from "./validators";
+import { attempt, finding, snapshot, status } from "./validators";
 
-export const start = internalMutation({
+export const start = mutation({
   args: {
     campaignId: v.id("qaVisualCampaigns"),
     requestId: v.string(),
-    inputs: v.array(input),
-    driveFolderId: v.string(),
-    driveFiles: v.array(v.object({ id: v.string(), version: v.string() })),
-    ruleVersion: v.string(),
-    sourceDocumentId: v.id("qaVisualSourceDocuments"),
-    rules: v.array(rule),
+    snapshotId: v.id("qaVisualCampaignSnapshots"),
+    names: v.optional(v.array(v.string())),
     kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ runId: Id<"qaVisualRuns">; ids: Id<"qaVisualReviews">[] }> => {
+  handler: async (ctx, args): Promise<{ runId: Id<"qaVisualRuns"> } | { error: string }> => {
     const requestedBy = await requireQaAdmin(ctx);
+    if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) || (args.names?.length ?? 0) > 200)
+      return { error: "Solicitud de análisis inválida." };
+
     const registered = await ctx.db.get(args.campaignId);
-    if (registered?.status !== "active") throw new Error("Campaña no disponible.");
+    if (registered?.status !== "active") return { error: "La campaña ya no está disponible." };
     const campaign = registered.reviewKey;
-    const document = await ctx.db.get(args.sourceDocumentId);
-    if (document?.campaign !== campaign)
-      throw new Error("Matriz de campaña inválida.");
     const existing = await ctx.db
       .query("qaVisualRuns")
       .withIndex("by_request", (q) =>
@@ -41,20 +35,25 @@ export const start = internalMutation({
       )
       .unique();
     if (existing) {
-      if (existing.campaign !== campaign) throw new Error("La solicitud pertenece a otra campaña.");
-      return { runId: existing._id, ids: [] };
+      if (existing.campaign !== campaign) return { error: "La solicitud pertenece a otra campaña." };
+      return { runId: existing._id };
     }
-    if (
-      !args.inputs.length ||
-      args.inputs.length > 200 ||
-      args.inputs.length !== args.driveFiles.length ||
-      new Set(args.inputs.map((item) => item.name)).size !==
-        args.inputs.length ||
-      args.rules.length > 20 ||
-      new Set(args.rules.map((item) => item.id)).size !== args.rules.length
-    ) {
-      throw new Error("El lote o sus reglas no son válidos.");
-    }
+    if (registered.currentSnapshotId !== args.snapshotId)
+      return { error: "Los datos de la campaña cambiaron. Volvé a iniciar el análisis." };
+    const data = await ctx.db.get(args.snapshotId);
+    if (!data || data.campaignId !== args.campaignId)
+      return { error: "La campaña todavía no tiene datos importados." };
+
+    const pieces = await ctx.db.query("qaVisualCampaignPieces")
+      .withIndex("by_snapshot", (q) => q.eq("snapshotId", data._id))
+      .collect();
+    const names = new Set(args.names);
+    const selected = pieces.filter((piece) => args.kind === "batch" || names.has(piece.input.name));
+    if (!selected.length || selected.length > 200 ||
+        (args.kind !== "batch" && selected.length !== names.size) ||
+        (args.kind === "piece" && selected.length !== 1))
+      return { error: "La selección no coincide con las piezas importadas o supera el límite de 200 piezas." };
+
     for (const state of ["preparing", "running"] as const) {
       const active = await ctx.db
         .query("qaVisualRuns")
@@ -62,36 +61,37 @@ export const start = internalMutation({
           q.eq("campaign", campaign).eq("state", state),
         )
         .first();
-      if (active) return { runId: active._id, ids: [] };
+      if (active) return { runId: active._id };
     }
     const previous = await ctx.db
       .query("qaVisualRuleSets")
       .withIndex("by_campaign_version", (q) =>
-        q.eq("campaign", campaign).eq("version", args.ruleVersion),
+        q.eq("campaign", campaign).eq("version", data.ruleVersion),
       )
       .unique();
     const ruleSetId =
       previous?._id ??
       (await ctx.db.insert("qaVisualRuleSets", {
         campaign,
-        version: args.ruleVersion,
-        rules: args.rules,
-        sourceDocumentId: args.sourceDocumentId,
+        version: data.ruleVersion,
+        rules: data.rules,
+        sourceDocumentId: data.excelDocumentId,
       }));
     const runId = await ctx.db.insert("qaVisualRuns", {
       campaign,
       requestedBy,
+      snapshotId: data._id,
       ruleSetId,
       kind: args.kind,
       state: "preparing",
       requestId: args.requestId,
     });
     const ids = await Promise.all(
-      args.inputs.map((item, order) =>
+      selected.map(({ input }, order) =>
         ctx.db.insert("qaVisualReviews", {
           runId,
           campaign,
-          input: item,
+          input,
           order,
           status: "preparing",
           attempts: [],
@@ -105,10 +105,12 @@ export const start = internalMutation({
     );
     await ctx.scheduler.runAfter(0, internal.qaVisual.stageDriveRun.prepare, {
       runId,
-      folderId: args.driveFolderId,
-      items: ids.map((reviewId, index) => ({ reviewId, ...args.driveFiles[index] })),
+      folderId: data.deploymentFolderId,
+      items: selected.map(({ file }, index) => ({
+        reviewId: ids[index], id: file.driveId, version: file.driveVersion,
+      })),
     });
-    return { runId, ids };
+    return { runId };
   },
 });
 

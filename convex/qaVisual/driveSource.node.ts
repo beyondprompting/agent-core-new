@@ -6,7 +6,7 @@ import {
   folderMime, getDriveFile, listDriveFolder, matrixLimit, type DriveFile,
 } from "./driveClient";
 
-function toQaFile(file: DriveFile): QaFile {
+export function toQaFile(file: DriveFile): QaFile {
   return {
     name: file.name,
     bytes: Number(file.size ?? 0),
@@ -53,7 +53,7 @@ export async function validateDriveFolder(url: string) {
   return { name: root.name, driveFolderId: root.id };
 }
 
-export async function readDriveCampaign(id: string) {
+export async function listDriveCampaign(id: string) {
   const { root, children } = await readCampaignRoot(id);
   const notices: string[] = [];
   const results = await Promise.allSettled(campaignFolders.map(async (name) => {
@@ -92,25 +92,19 @@ export async function readDriveCampaign(id: string) {
     pieces.push({ ...toQaFile(file), driveId: file.id, driveVersion: file.version });
   }
 
-  let production;
-  if (csv) {
-    try {
-      production = productionByPiece((await downloadDriveFile(csv, csvLimit)).toString("utf8"));
-    } catch (error) {
-      console.warn("QA Visual: no se pudo procesar el CSV", error);
-      notices.push("No se pudieron leer los datos del CSV de producción.");
-    }
-  }
-
   const inventory: QaInventory = {
     campaignName: root.name,
     matrix: matrix && toQaFile(matrix),
     csv: csv && toQaFile(csv),
     pieces,
-    production,
     notices,
   };
-  return { folderId: root.id, inventory, matrix, deployment };
+  return { folderId: root.id, inventory, matrix, csv, deployment };
+}
+
+export async function loadDriveCsv(csv: DriveFile) {
+  const bytes = await downloadDriveFile(csv, csvLimit);
+  return { bytes, production: productionByPiece(bytes.toString("utf8")) };
 }
 
 export async function loadDriveMatrix(matrix: DriveFile) {

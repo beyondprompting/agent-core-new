@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "../_generated/server";
+import { queueSync } from "./campaignSnapshots";
 import { requireQaAdmin } from "./access";
 
 export const list = query({
@@ -36,7 +37,10 @@ export const register = internalMutation({
       .unique();
     if (existing) return existing.status === "active" ? "existing" : "archived";
 
-    await ctx.db.insert("qaVisualCampaigns", { ...args, status: "active", createdBy });
+    const campaignId = await ctx.db.insert("qaVisualCampaigns", {
+      ...args, status: "active", createdBy,
+    });
+    await queueSync(ctx, campaignId);
     return "created";
   },
 });

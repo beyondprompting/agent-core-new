@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { convexAuthNextjsToken } from "@convex-dev/auth/nextjs/server";
-import { fetchAction } from "convex/nextjs";
+import { preloadQuery, preloadedQueryResult } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { canAccessQa } from "@/app/lib/qa-visual/server/access";
-import { QaViewer } from "@/app/components/qa-visual/QaViewer";
+import { CampaignSnapshotViewer } from "@/app/components/qa-visual/campaign/CampaignSnapshotViewer";
 
 export default async function CampaignEditorPage({
   params,
@@ -15,35 +15,7 @@ export default async function CampaignEditorPage({
   const token = await convexAuthNextjsToken();
   if (!token) notFound();
 
-  let data;
-  try {
-    data = await fetchAction(api.qaVisual.drive.viewer, { campaignId }, { token });
-  } catch (error) {
-    console.error("QA Visual: no se pudo abrir la campaña", error);
-    return (
-      <QaViewer
-        campaignId={campaignId}
-        inventory={{
-          matrix: null,
-          csv: null,
-          pieces: [],
-          notices: ["No se pudo abrir la campaña. Intentá actualizar desde Drive."],
-        }}
-      />
-    );
-  }
-  if (!data) notFound();
-  const { inventory, production, requirements, analysis, analysisError } = data;
-  return (
-    <QaViewer
-      campaignId={campaignId}
-      inventory={{
-        ...inventory,
-        production: Object.fromEntries(production),
-        clientRequirements: Object.fromEntries(requirements),
-      }}
-      analysis={analysis}
-      analysisError={analysisError}
-    />
-  );
+  const preloaded = await preloadQuery(api.qaVisual.campaignSnapshots.viewer, { campaignId }, { token });
+  if (!preloadedQueryResult(preloaded)) notFound();
+  return <CampaignSnapshotViewer key={campaignId} preloaded={preloaded} />;
 }
