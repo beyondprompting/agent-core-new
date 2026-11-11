@@ -10,6 +10,7 @@ import {
 } from "../_generated/server";
 import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
+import { dispatchReady } from "./runDispatch";
 import { attempt, finding, snapshot, status } from "./validators";
 
 export const start = mutation({
@@ -84,6 +85,8 @@ export const start = mutation({
       ruleSetId,
       kind: args.kind,
       state: "preparing",
+      activeBatch: [],
+      rollingQueue: true,
       requestId: args.requestId,
     });
     const ids = await Promise.all(
@@ -114,15 +117,34 @@ export const start = mutation({
   },
 });
 
+export const preparationRun = internalQuery({
+  args: { runId: v.id("qaVisualRuns") },
+  handler: async (ctx, { runId }) => {
+    const run = await ctx.db.get(runId);
+    return run && run.state !== "finished"
+      ? { campaign: run.campaign, progressive: run.activeBatch !== undefined }
+      : null;
+  },
+});
+
 export const attach = internalMutation({
   args: {
     reviewId: v.id("qaVisualReviews"),
     asset: v.optional(v.object({ storageId: v.id("_storage"), snapshot })),
+    copyId: v.optional(v.id("qaVisualImageCopies")),
   },
-  handler: async (ctx, { reviewId, asset }) => {
+  handler: async (ctx, { reviewId, asset, copyId }): Promise<void> => {
     const review = await ctx.db.get(reviewId);
     if (!review || review.status !== "preparing") {
       if (asset) await ctx.storage.delete(asset.storageId);
+      return;
+    }
+    if (copyId) {
+      const copy = await ctx.db.get(copyId);
+      if (!copy?.files || copy.campaign !== review.campaign)
+        throw new Error("Copia de la pieza no disponible.");
+      await ctx.db.patch(reviewId, { status: "queued", copyId });
+      await dispatchReady(ctx, review.runId);
       return;
     }
     if (!asset) {
@@ -130,6 +152,7 @@ export const attach = internalMutation({
         status: "failed",
         error: "No se pudo leer o preparar la imagen original.",
       });
+      await dispatchReady(ctx, review.runId);
       return;
     }
     const previous = await ctx.db
@@ -151,6 +174,7 @@ export const attach = internalMutation({
       }));
     if (previous) await ctx.storage.delete(asset.storageId);
     await ctx.db.patch(reviewId, { status: "queued", assetId });
+    await dispatchReady(ctx, review.runId);
   },
 });
 
@@ -189,18 +213,41 @@ async function dispatch(ctx: MutationCtx, runId: Id<"qaVisualRuns">) {
 
 export const expirePreparation = internalMutation({
   args: { runId: v.id("qaVisualRuns") },
-  handler: async (ctx, { runId }): Promise<void> => dispatch(ctx, runId),
+  handler: async (ctx, { runId }): Promise<void> => {
+    const run = await ctx.db.get(runId);
+    if (!run || run.state === "finished") return;
+    if (run.activeBatch === undefined) {
+      await dispatch(ctx, runId);
+      return;
+    }
+    const pending = await ctx.db.query("qaVisualReviews")
+      .withIndex("by_run_status", (q) => q.eq("runId", runId).eq("status", "preparing"))
+      .collect();
+    for (const row of pending) {
+      await ctx.db.patch(row._id, {
+        status: "failed", error: "Se interrumpió la preparación de la imagen.",
+      });
+    }
+    await dispatchReady(ctx, runId);
+  },
 });
 
 export const getWork = internalQuery({
   args: { reviewId: v.id("qaVisualReviews") },
   handler: async (ctx, { reviewId }) => {
     const review = await ctx.db.get(reviewId);
-    if (!review?.assetId) return null;
+    if (!review) return null;
     const run = await ctx.db.get(review.runId);
-    const asset = await ctx.db.get(review.assetId);
     const ruleSet = run && (await ctx.db.get(run.ruleSetId));
-    return asset && ruleSet ? { asset, rules: ruleSet.rules } : null;
+    if (!ruleSet) return null;
+    const copy = review.copyId && (await ctx.db.get(review.copyId))?.files;
+    const asset = copy
+      ? { storageId: copy.analysisId, snapshot: copy.snapshot }
+      : review.assetId && await ctx.db.get(review.assetId);
+    return asset ? {
+      asset: { storageId: asset.storageId, snapshot: asset.snapshot, input: review.input },
+      rules: ruleSet.rules,
+    } : null;
   },
 });
 
@@ -320,6 +367,8 @@ export const dashboard = query({
     return {
       active: Boolean(preparing || running),
       total: batch.length,
+      preparedImages: batch.filter((row) => row.copyId || row.assetId).length,
+      preparingImages: batch.filter((row) => row.status === "preparing").length,
       completed: batch.filter((row) => row.status === "completed").length,
       failed: batch.filter((row) => row.status === "failed").length,
       failedNames: batch

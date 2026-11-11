@@ -34,7 +34,7 @@ export function PieceVersions({
             onClick={() => onSelectVersion(v)}
           >
             <div className="version-thumb">
-              <Artwork piece={piece} />
+              <Artwork piece={piece} thumbnail />
             </div>
             <div>
               <strong>Versión {v}</strong>

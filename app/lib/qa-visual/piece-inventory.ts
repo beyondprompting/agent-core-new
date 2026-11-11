@@ -33,6 +33,8 @@ export function toReviewPieces(
       variant?.toUpperCase() === "AUTORAPIDO"
         ? "Auto Rápido"
         : display(variant);
+    const media = "/workspace/qa-visual/media?" +
+      new URLSearchParams({ campaign: campaignId, id: file.driveId, v: file.driveVersion });
     return {
       id: file.name,
       name:
@@ -42,9 +44,8 @@ export function toReviewPieces(
             ? `${product} · ${variantLabel}`
             : product,
       filename: file.name,
-      image:
-        "/workspace/qa-visual/media?" +
-        new URLSearchParams({ campaign: campaignId, id: file.driveId, v: file.driveVersion }),
+      image: media,
+      thumbnail: file.thumbnailReady ? media + "&variant=thumbnail" : undefined,
       width,
       height,
       channel,

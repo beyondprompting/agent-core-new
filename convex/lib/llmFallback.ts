@@ -4,7 +4,7 @@
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { openai } from "@ai-sdk/openai";
-import type { LanguageModel } from "ai";
+import type { generateText, LanguageModel } from "ai";
 
 // ==================== TIPOS ====================
 
@@ -14,7 +14,7 @@ export interface LLMConfig {
   provider: LLMProvider;
   model: LanguageModel;
   modelId: string;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: Parameters<typeof generateText>[0]["providerOptions"];
 }
 
 export interface LLMError {

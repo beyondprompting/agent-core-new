@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { ImageIcon } from "lucide-react";
 import type { Piece } from "@/app/lib/qa-visual/review-model";
 
 export function Avatar({
@@ -55,17 +56,19 @@ export function Avatar({
   );
 }
 
-// Display the original supplied PNG, with no synthetic creative overlays.
 export function Artwork({
   piece,
   eager = false,
+  thumbnail = false,
   onDimensions,
 }: {
   piece: Piece;
   eager?: boolean;
+  thumbnail?: boolean;
   onDimensions?: (width: number, height: number) => void;
 }) {
   const [failedImage, setFailedImage] = useState<string>();
+  const src = thumbnail ? piece.thumbnail : piece.image;
   return (
     <div
       className={`artwork ${piece.height > piece.width ? "artwork-story" : ""}`}
@@ -76,18 +79,22 @@ export function Artwork({
             : undefined,
       }}
     >
-      {failedImage === piece.image ? (
+      {!src || (thumbnail && failedImage === src) ? (
+        <span className="artwork-unavailable" aria-hidden="true">
+          <ImageIcon size={16} />
+        </span>
+      ) : failedImage === src ? (
         <span className="artwork-unavailable">Imagen no disponible</span>
       ) : (
         <img
-          onError={() => setFailedImage(piece.image)}
+          onError={() => setFailedImage(src)}
           onLoad={({ currentTarget }) =>
             onDimensions?.(
               currentTarget.naturalWidth,
               currentTarget.naturalHeight,
             )
           }
-          src={piece.image}
+          src={src}
           alt={piece.name}
           draggable={false}
           loading={eager ? "eager" : "lazy"}

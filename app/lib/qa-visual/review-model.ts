@@ -21,6 +21,7 @@ export type Piece = {
   name: string;
   filename: string;
   image: string;
+  thumbnail?: string;
   campaign: string;
   formatName: string;
   productionLinked: boolean;

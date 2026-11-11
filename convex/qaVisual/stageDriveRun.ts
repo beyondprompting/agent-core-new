@@ -3,25 +3,8 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { internalAction, type ActionCtx } from "../_generated/server";
-import { prepareDriveImage } from "./preview.node";
-
-async function attachPreview(
-  ctx: ActionCtx,
-  reviewId: Id<"qaVisualReviews">,
-  preview: Awaited<ReturnType<typeof prepareDriveImage>>,
-) {
-  const storageId = await ctx.storage.store(new Blob([preview.bytes], { type: "image/jpeg" }));
-  try {
-    await ctx.runMutation(internal.qaVisual.runs.attach, {
-      reviewId, asset: { storageId, snapshot: preview.snapshot },
-    });
-  } catch (error) {
-    const attached = await ctx.runQuery(internal.qaVisual.runs.hasStorage, { storageId }).catch(() => true);
-    if (!attached) await ctx.storage.delete(storageId);
-    throw error;
-  }
-}
+import { internalAction } from "../_generated/server";
+import { ensureImageCopies } from "./imagePreparation.node";
 
 export const prepare = internalAction({
   args: {
@@ -31,15 +14,20 @@ export const prepare = internalAction({
   },
   handler: async (ctx, { runId, folderId, items }): Promise<void> => {
     for (let index = 0; index < items.length; index += 4) {
+      const run = await ctx.runQuery(internal.qaVisual.runs.preparationRun, { runId });
+      if (!run) return;
       await Promise.allSettled(items.slice(index, index + 4).map(async ({ reviewId, id, version }) => {
         try {
-          await attachPreview(ctx, reviewId, await prepareDriveImage(folderId, id, version));
+          const copyId = await ensureImageCopies(ctx, run.campaign, folderId, id, version);
+          await ctx.runMutation(internal.qaVisual.runs.attach, { reviewId, copyId });
         } catch (error) {
           console.warn("QA Visual: no se pudo preparar una pieza de Google Drive", reviewId, error);
           await ctx.runMutation(internal.qaVisual.runs.attach, { reviewId });
         }
       }));
     }
-    await ctx.runMutation(internal.qaVisual.runs.expirePreparation, { runId });
+    const run = await ctx.runQuery(internal.qaVisual.runs.preparationRun, { runId });
+    if (run && !run.progressive)
+      await ctx.runMutation(internal.qaVisual.runs.expirePreparation, { runId });
   },
 });

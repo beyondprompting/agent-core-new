@@ -133,7 +133,7 @@ export function FilesPanel({
                   onClick={() => choosePiece(p.id)}
                 >
                   <div className="file-thumbnail">
-                    <Artwork piece={p} />
+                    <Artwork piece={p} thumbnail />
                     {p.width > 0 && p.height * 9 === p.width * 16 && (
                       <span className="thumbnail-format">9:16</span>
                     )}

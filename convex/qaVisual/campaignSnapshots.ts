@@ -5,6 +5,8 @@ import {
   internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx,
 } from "../_generated/server";
 import { requireQaAdmin } from "./access";
+import { findImageCopy } from "./imageCopies";
+import { queueImageWarmup } from "./imageWarmup";
 import { campaignPiece, rule } from "./validators";
 
 async function syncIsRunning(ctx: QueryCtx, sync: Doc<"qaVisualCampaigns">["sync"]) {
@@ -61,6 +63,7 @@ export const reuse = internalMutation({
     await ctx.db.patch(campaignId, {
       currentSnapshotId: snapshot._id, lastSyncedAt: Date.now(), sync: undefined,
     });
+    await queueImageWarmup(ctx, snapshot._id);
     return true;
   },
 });
@@ -90,6 +93,7 @@ export const publish = internalMutation({
     await ctx.db.patch(campaign._id, {
       currentSnapshotId: snapshotId, lastSyncedAt: Date.now(), sync: undefined,
     });
+    await queueImageWarmup(ctx, snapshotId);
   },
 });
 
@@ -137,9 +141,14 @@ export const viewer = query({
       matrix: fileDetails(excel),
       csv: fileDetails(csv),
       notices: data?.notices ?? [],
-      pieces: pieces.map(({ file, input }) => ({
-        file, production: input.production, requirements: input.requirements ?? [],
-        contextKey: input.contextKey,
+      pieces: await Promise.all(pieces.map(async ({ file, input }) => {
+        const copy = await findImageCopy(ctx, {
+          campaign: campaign.reviewKey, id: file.driveId, version: file.driveVersion,
+        });
+        return {
+          file, production: input.production, requirements: input.requirements ?? [],
+          contextKey: input.contextKey, thumbnailReady: Boolean(copy?.files),
+        };
       })),
     };
   },

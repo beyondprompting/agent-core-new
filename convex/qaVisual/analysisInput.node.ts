@@ -106,7 +106,7 @@ export function prepareAnalysisInputs(
     matrixHash: matrix?.hash,
     production: inventory.production,
     names: inventory.pieces.map((file) => file.name),
-    extraction: 1,
+    extraction: 2,
   });
   const inputs = inventory.pieces.map((file) => {
     const stem = file.name.replace(/\.[^.]+$/, "");

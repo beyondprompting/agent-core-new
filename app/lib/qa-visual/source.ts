@@ -7,7 +7,7 @@ export type QaInventory = {
   campaignName?: string;
   matrix: QaFile | null;
   csv: QaFile | null;
-  pieces: QaPieceFile[];
+  pieces: (QaPieceFile & { thumbnailReady?: boolean })[];
   notices: string[];
   clientRequirements?: Record<string, ClientRequirement[]>;
   production?: Record<string, ProductionFields>;

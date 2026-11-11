@@ -81,10 +81,21 @@ export async function parseClientMatrix(name: string, bytes: Buffer) {
 
 type Matrix = Awaited<ReturnType<typeof parseClientMatrix>>;
 function numbered(value: string) {
-  return [...value.matchAll(/(?:^|\n)\s*(\d+)\.\s*([^\n]*)/g)].map((match) => ({
-    ordinal: match[1],
-    value: match[2].trim(),
-  }));
+  // A number without text still belongs to its own line (e.g. an empty PVP).
+  return value.split(/\r\n|\r|\n/).flatMap((line) => {
+    const match = /^(\d+)\.(.*)$/.exec(line.trim());
+    return match ? [{
+      ordinal: match[1].replace(/^0+(?=\d)/, ""),
+      value: match[2].trim(),
+    }] : [];
+  });
+}
+
+function priceAmount(value: string) {
+  const match = /^\$?\s*(\d+)(?:[.,](\d{1,2}))?$/.exec(value.trim());
+  if (!match) return undefined;
+  const whole = match[1].replace(/^0+(?=\d)/, "");
+  return `${whole}.${(match[2] ?? "").padEnd(2, "0")}`;
 }
 
 export function matrixRequirements(
@@ -186,7 +197,8 @@ export function matrixRequirements(
       /\b(?:OCTUBRE|NOVIEMBRE|DICIEMBRE|ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE) \d{1,2}\b|\bHOY\b/g,
     )
     ?.at(-1);
-  const offers = numbered(get("K")).filter(({ value }) => {
+  const numberedOffers = numbered(get("K"));
+  const offers = numberedOffers.filter(({ value }) => {
     const offer = normalized(value);
     const product = normalized(production.product);
     if (!product || !` ${offer} `.includes(` ${product} `)) return false;
@@ -218,11 +230,31 @@ export function matrixRequirements(
       ref("K") + (pending ? " · REGLAS!B6 · LEYENDA!B12" : ""),
       pending,
     );
-    const price = numbered(get("L")).find(
-      (item) => item.ordinal === ordinal,
-    )?.value;
-    if (price)
-      add("price", price, ref("L") + (pending ? " · REGLAS!B6" : ""), pending);
+    const priceCell = get("L");
+    const prices = numbered(priceCell).filter((item) => item.ordinal === ordinal);
+    const price = prices.length === 1 ? prices[0].value : "";
+    const csvPrice = production.price.trim();
+    const amount = priceAmount(price);
+    const offerSource = `${ref("K")} · Oferta n.º ${ordinal}`;
+    const priceSource = `${ref("L")} · Precio n.º ${ordinal}`;
+    if (numberedOffers.filter((item) => item.ordinal === ordinal).length !== 1) {
+      add("price", "Sin precio confirmado", offerSource,
+        `El número ${ordinal} se repite en la lista de ofertas del Excel.`);
+    } else if (prices.length > 1) {
+      add("price", "Sin precio confirmado", priceSource,
+        `El número ${ordinal} se repite en la lista de precios del Excel.`);
+    } else if ((priceCell && prices.length === 0) || (!price && csvPrice)) {
+      add("price", "Sin precio confirmado", priceSource,
+        `El Excel no indica un precio para la oferta n.º ${ordinal}.`);
+    } else if (price && amount === undefined) {
+      add("price", price, priceSource,
+        `El Excel no indica un importe único y válido para la oferta n.º ${ordinal}.`);
+    } else if (price && csvPrice && amount !== priceAmount(csvPrice)) {
+      add("price", price, `${priceSource} · CSV · TXT_PRECIO`,
+        `El Excel indica ${price} y el CSV indica ${csvPrice}. Confirmá qué precio corresponde.`);
+    } else if (price) {
+      add("price", price, priceSource + (pending ? " · REGLAS!B6" : ""), pending);
+    }
     const date = value.match(/\b\d{1,2}\s+de\s+\p{L}+\b|\bHOY\b/iu)?.[0];
     if (date)
       add(

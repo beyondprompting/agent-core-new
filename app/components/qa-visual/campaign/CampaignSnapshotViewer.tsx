@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, usePreloadedQuery, type Preloaded } from "convex/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { QaViewer } from "../QaViewer";
 
@@ -12,6 +12,17 @@ export function CampaignSnapshotViewer({
 }) {
   const data = usePreloadedQuery(preloaded);
   const refresh = useMutation(api.qaVisual.campaignSnapshots.refresh);
+  const prepareImages = useMutation(api.qaVisual.imageWarmup.request);
+  const importedSnapshotId = data?.snapshotId;
+  const hasPieces = Boolean(data?.pieces.length);
+
+  useEffect(() => {
+    if (importedSnapshotId && hasPieces) {
+      void prepareImages({ snapshotId: importedSnapshotId }).catch((error) => {
+        console.warn("QA Visual: no se pudieron solicitar las miniaturas", error);
+      });
+    }
+  }, [importedSnapshotId, hasPieces, prepareImages]);
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState<string>();
 
@@ -41,7 +52,7 @@ export function CampaignSnapshotViewer({
       campaignId={campaignId}
       inventory={{
         campaignName, matrix, csv, notices,
-        pieces: pieces.map(({ file }) => file),
+        pieces: pieces.map(({ file, thumbnailReady }) => ({ ...file, thumbnailReady })),
         production: Object.fromEntries(pieces.flatMap(({ file, production }) => production
           ? [[file.name.replace(/\.[^.]+$/, "").normalize("NFC").toLowerCase(), production]]
           : [])),

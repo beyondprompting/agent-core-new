@@ -51,13 +51,28 @@ export const qaVisualTables = {
     ruleVersion: v.string(),
     rules: v.array(rule),
     notices: v.array(v.string()),
+    imageWarmupJobId: v.optional(v.id("_scheduled_functions")),
+    imageWarmupComplete: v.optional(v.boolean()),
   }).index("by_campaign_fingerprint", ["campaignId", "fingerprint"]),
   qaVisualCampaignPieces: defineTable({
     snapshotId: v.id("qaVisualCampaignSnapshots"),
     order: v.number(),
     file: pieceFile,
     input,
-  }).index("by_snapshot", ["snapshotId", "order"]),
+  })
+    .index("by_snapshot", ["snapshotId", "order"])
+    .index("by_drive_version", ["snapshotId", "file.driveId", "file.driveVersion"]),
+  qaVisualImageCopies: defineTable({
+    campaign: v.string(),
+    driveId: v.string(),
+    driveVersion: v.string(),
+    lease: v.optional(v.object({ token: v.string(), expiresAt: v.number() })),
+    files: v.optional(v.object({
+      thumbnailId: v.id("_storage"),
+      analysisId: v.id("_storage"),
+      snapshot,
+    })),
+  }).index("by_version", ["campaign", "driveId", "driveVersion"]),
   qaVisualClientRequirements: defineTable({
     documentId: v.id("qaVisualSourceDocuments"),
     cell: v.optional(sourceCell),
@@ -95,6 +110,8 @@ export const qaVisualTables = {
       v.literal("finished"),
     ),
     requestId: v.string(),
+    activeBatch: v.optional(v.array(v.id("qaVisualReviews"))),
+    rollingQueue: v.optional(v.literal(true)),
   })
     .index("by_campaign_state", ["campaign", "state"])
     .index("by_campaign", ["campaign"])
@@ -106,6 +123,7 @@ export const qaVisualTables = {
     order: v.number(),
     status,
     assetId: v.optional(v.id("qaVisualAssetVersions")),
+    copyId: v.optional(v.id("qaVisualImageCopies")),
     attempts: v.array(attempt),
     findings: v.optional(v.array(finding)),
     error: v.optional(v.string()),
@@ -118,6 +136,7 @@ export const qaVisualTables = {
     ),
   })
     .index("by_run", ["runId", "order"])
+    .index("by_run_status", ["runId", "status", "order"])
     .index("by_piece", ["campaign", "input.name", "input.contextKey"])
     .index("by_piece_status", [
       "campaign",

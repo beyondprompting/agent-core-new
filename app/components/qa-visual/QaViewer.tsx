@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { CheckCircle2, ScanLine, X, AlertCircle } from "lucide-react";
-import { useTheme } from "@/app/hooks/useTheme";
 import { CampaignHeader } from "@/app/components/qa-visual/campaign/CampaignHeader";
 import { FilesPanel } from "@/app/components/qa-visual/campaign/FilesPanel";
 import { PiecePanel } from "@/app/components/qa-visual/piece/PiecePanel";
@@ -46,11 +45,9 @@ export function QaViewer({
   const { user } = useUser();
   const reviewer = user?.name || user?.email || "Revisor";
   const pieces = useMemo(() => toReviewPieces(inventory, campaignId), [inventory, campaignId]);
-  const { resolvedTheme } = useTheme();
-  const dark = resolvedTheme === "dark";
   return (
     <div className="qa-visual">
-      <div className={`workspace${dark ? " dark" : ""}`}>
+      <div className="workspace">
         {inventory.notices.length > 0 && (
           <div className="drive-notices" role="status">
             {inventory.notices.map((notice) => (
@@ -215,7 +212,12 @@ function ReviewWorkspace({
                 <span>{percentage}%</span>
               </div>
             )}
-            {phase && (
+            {!!dashboard?.preparingImages && (
+              <span className="qa-analysis-phase">
+                Preparando imágenes · {dashboard.preparedImages} de {total} listas
+              </span>
+            )}
+            {phase && phase !== "Preparando imagen" && (
               <div className="qa-analysis-detail">
                 {phase}
                 {row && "previous" in row && row.previous

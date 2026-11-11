@@ -21,9 +21,14 @@ export async function prepareDriveImage(folderId: string, id: string, version: s
   let bytes = await render(1800, 88);
   if (bytes.length > 700_000) bytes = await render(1400, 76);
   if (bytes.length > 750_000) throw new Error("La vista de análisis supera el tamaño admitido.");
+  const thumbnail = await image.clone().rotate()
+    .resize({ width: 192, height: 192, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 75 })
+    .toBuffer();
   const swapped = orientation !== undefined && orientation >= 5;
   return {
     bytes: Uint8Array.from(bytes).buffer,
+    thumbnail: Uint8Array.from(thumbnail).buffer,
     snapshot: {
       hash: createHash("sha256").update(original).digest("hex"),
       width: swapped ? height : width,
