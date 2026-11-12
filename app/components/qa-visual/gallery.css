@@ -51,22 +51,23 @@
 /* Carrusel */
 .qa-visual .qa-carousel{position:fixed;inset:0;z-index:45;display:grid;grid-template-columns:minmax(0,1fr) 372px;background:#0b0f17;color:#e5e8f1}
 .qa-visual .qa-carousel-stage{display:flex;flex-direction:column;min-width:0;min-height:0}
-.qa-visual .qa-carousel-top{display:flex;align-items:center;gap:12px;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top))}
+.qa-visual .qa-carousel-top{display:flex;flex-shrink:0;align-items:center;gap:12px;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top))}
 .qa-visual .qa-carousel-title{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.25}
 .qa-visual .qa-carousel-title b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qa-visual .qa-carousel-title span{font-size:11.5px;color:#9ca9bf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qa-visual .qa-carousel-count{font-size:12px;color:#c6cddc;padding:4px 9px;border-radius:8px;background:#ffffff14;white-space:nowrap}
 .qa-visual .qa-carousel-icon,.qa-visual .qa-carousel-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:36px;height:36px;padding:0 10px;border-radius:9px;color:#e5e8f1;background:#ffffff14;font-size:12.5px;font-weight:600;white-space:nowrap}
 .qa-visual .qa-carousel-icon:hover,.qa-visual .qa-carousel-btn:hover{background:#ffffff26}
-.qa-visual .qa-carousel-main{position:relative;flex:1;min-height:0;display:grid;place-items:center;padding:12px 76px;touch-action:pan-y}
-.qa-visual .qa-carousel-art{position:relative;max-width:100%;max-height:100%;height:100%;aspect-ratio:1/1;box-shadow:0 20px 60px #0008;background:#111}
-.qa-visual .qa-carousel-art img{width:100%;height:100%;object-fit:contain;display:block;user-select:none}
+.qa-visual .qa-carousel-main{position:relative;flex:1;min-width:0;min-height:0;container-type:size;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);place-items:center;padding:12px 76px;touch-action:pan-y}
+/* Fit both axes to the available stage; the artwork remains the coordinate space for pins. */
+.qa-visual .qa-carousel-art{position:relative;min-width:0;min-height:0;max-width:100%;height:auto;width:min(100cqw,100cqh);aspect-ratio:1/1;box-shadow:0 20px 60px #0008;background:#111}
+.qa-visual .qa-carousel-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;user-select:none}
 .qa-visual .qa-carousel-art.picking{cursor:crosshair}
 .qa-visual .qa-carousel-wait{position:absolute;inset:0;display:grid;place-items:center;color:#9ca9bf;font-size:13px;text-align:center;padding:20px}
 .qa-visual .qa-carousel-nav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:#ffffff1f;color:#fff;backdrop-filter:blur(6px)}
 .qa-visual .qa-carousel-nav:disabled{opacity:.3}
 .qa-visual .qa-carousel-nav.prev{left:18px}.qa-visual .qa-carousel-nav.next{right:18px}
-.qa-visual .qa-carousel-foot{display:flex;align-items:center;justify-content:center;gap:16px;padding:12px;color:#9ca9bf;font-size:12px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+.qa-visual .qa-carousel-foot{display:flex;flex-shrink:0;align-items:center;justify-content:center;gap:16px;padding:12px;color:#9ca9bf;font-size:12px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
 .qa-visual .qa-carousel-keys kbd{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 5px;border-radius:5px;background:#ffffff1a;color:#e5e8f1;font:700 11px ui-sans-serif,system-ui;margin-right:3px}
 .qa-visual .qa-dots{display:flex;gap:5px;align-items:center}
 .qa-visual .qa-dots i{width:6px;height:6px;border-radius:3px;background:#ffffff40}

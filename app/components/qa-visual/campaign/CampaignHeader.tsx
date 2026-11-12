@@ -28,6 +28,7 @@ export function CampaignHeader({
   pendingCount,
   failedCount = 0,
   totalCount,
+  hasPreviousAnalysis = false,
   view,
   onViewChange,
   onSendToClient,
@@ -44,6 +45,7 @@ export function CampaignHeader({
   pendingCount?: number;
   failedCount?: number;
   totalCount?: number;
+  hasPreviousAnalysis?: boolean;
   view?: CampaignView;
   onViewChange?: (view: CampaignView) => void;
   onSendToClient?: () => void;
@@ -191,11 +193,19 @@ export function CampaignHeader({
                   <em>{failedCount}</em>
                 </button>
                 <hr />
-                <button role="menuitem" onClick={() => choose("all")}>
+                <button
+                  role="menuitem"
+                  disabled={analyzing || !hasPreviousAnalysis || !totalCount}
+                  onClick={() => choose("all")}
+                >
                   <ScanLine size={14} />
                   <span>
                     <b>Reanalizar todas</b>
-                    <small>Repite el análisis aunque esté vigente. Se conservan los resultados anteriores.</small>
+                    <small>
+                      {hasPreviousAnalysis
+                        ? "Repite el análisis aunque esté vigente. Se conservan los resultados anteriores."
+                        : "Disponible después del primer análisis."}
+                    </small>
                   </span>
                   <em>{totalCount ?? "—"}</em>
                 </button>

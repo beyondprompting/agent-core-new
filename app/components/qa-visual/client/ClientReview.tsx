@@ -189,6 +189,8 @@ function ClientCarousel({
   const pins = (data?.threads ?? []).flatMap((t, i) =>
     t.anchor.kind === "point" ? [{ id: t.id, n: i + 1, x: t.anchor.x, y: t.anchor.y }] : [],
   );
+  const dimensions = data?.item.image;
+  const ratio = dimensions?.width && dimensions.height ? dimensions.width / dimensions.height : 1;
   return (
     <CarouselShell
       title={data?.item.title ?? "Pieza"}
@@ -223,11 +225,10 @@ function ClientCarousel({
       stage={
         <div
           className={`qa-carousel-art ${picking ? "picking" : ""}`}
-          style={
-            data?.item.image
-              ? { aspectRatio: `${data.item.image.width} / ${data.item.image.height}` }
-              : undefined
-          }
+          style={{
+            aspectRatio: ratio,
+            width: `min(100cqw, calc(100cqh * ${ratio}))`,
+          }}
           onClick={(e) => {
             if (!picking) return;
             const box = e.currentTarget.getBoundingClientRect();

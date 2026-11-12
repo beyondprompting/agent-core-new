@@ -186,6 +186,16 @@ function ReviewWorkspace({
   });
   const cancelled = dashboard?.cancelled ?? 0;
   const finished = (dashboard?.completed ?? 0) + failed + cancelled;
+  const hasPreviousAnalysis = Boolean(
+    dashboard?.reviews.some(
+      (row) =>
+        row &&
+        (row.status === "completed" ||
+          row.status === "stale" ||
+          row.status === "failed" ||
+          ("resultId" in row && row.resultId)),
+    ),
+  );
   // Pieces without a current result (never analyzed, outdated, failed or stopped).
   const pendingCount = dashboard
     ? pieces.filter((p) => {
@@ -226,6 +236,7 @@ function ReviewWorkspace({
         pendingCount={pendingCount}
         failedCount={dashboard?.failedPieceIds.length ?? 0}
         totalCount={pieces.length}
+        hasPreviousAnalysis={hasPreviousAnalysis}
       />
       {dashboard?.total || phase || agent.error || agent.notice ? (
         <div className="qa-analysis-bar" role="status" aria-live="polite">

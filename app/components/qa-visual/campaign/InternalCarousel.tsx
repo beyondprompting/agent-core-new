@@ -30,6 +30,7 @@ export function InternalCarousel({
   const client = internalClientState(piece.client);
   const clientThreads = (session.detail?.threads ?? []).filter((t) => t.audience === "client");
   const markers = pieceComments.filter((c) => c.pin);
+  const ratio = piece.width && piece.height ? piece.width / piece.height : 1;
   return (
     <CarouselShell
       title={piece.name}
@@ -49,7 +50,10 @@ export function InternalCarousel({
       stage={
         <div
           className="qa-carousel-art"
-          style={piece.width && piece.height ? { aspectRatio: `${piece.width} / ${piece.height}` } : undefined}
+          style={{
+            aspectRatio: ratio,
+            width: `min(100cqw, calc(100cqh * ${ratio}))`,
+          }}
         >
           {piece.image ? (
             <img src={piece.image} alt={piece.name} draggable={false} />
