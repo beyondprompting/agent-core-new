@@ -21,6 +21,7 @@ export const region = v.object({
   width: v.number(),
   height: v.number(),
 });
+export const locationStatus = v.union(v.literal("located"), v.literal("absent"), v.literal("unreadable"));
 export const finding = v.object({
   ruleId: v.string(),
   outcome,
@@ -29,6 +30,8 @@ export const finding = v.object({
   source: v.string(),
   severity: v.union(v.literal("warning"), v.literal("blocking")),
   region: v.optional(region),
+  visibleAnchor: v.optional(v.string()),
+  locationStatus: v.optional(locationStatus),
 });
 export const rule = v.object({
   id: v.string(),
@@ -68,12 +71,18 @@ export const sourceCell = v.object({
   cell: v.string(),
   text: v.string(),
 });
+export const reviewNotice = v.object({
+  id: v.string(),
+  message: v.string(),
+  source: v.string(),
+});
 export const input = v.object({
   name: v.string(),
   revision: v.number(),
   contextKey: v.string(),
   production: v.optional(production),
   requirements: v.optional(v.array(clientRequirement)),
+  notices: v.optional(v.array(reviewNotice)),
   matrixLinked: v.optional(v.boolean()),
   expected: v.record(v.string(), v.string()),
 });

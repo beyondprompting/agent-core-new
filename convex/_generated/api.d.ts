@@ -106,6 +106,8 @@ import type * as qaVisual_campaignRegistration from "../qaVisual/campaignRegistr
 import type * as qaVisual_campaignSnapshots from "../qaVisual/campaignSnapshots.js";
 import type * as qaVisual_campaignSync from "../qaVisual/campaignSync.js";
 import type * as qaVisual_campaigns from "../qaVisual/campaigns.js";
+import type * as qaVisual_commentLocalization from "../qaVisual/commentLocalization.js";
+import type * as qaVisual_commentLocations from "../qaVisual/commentLocations.js";
 import type * as qaVisual_documents from "../qaVisual/documents.js";
 import type * as qaVisual_drive from "../qaVisual/drive.js";
 import type * as qaVisual_driveAnalysis from "../qaVisual/driveAnalysis.js";
@@ -255,6 +257,8 @@ declare const fullApi: ApiFromModules<{
   "qaVisual/campaignSnapshots": typeof qaVisual_campaignSnapshots;
   "qaVisual/campaignSync": typeof qaVisual_campaignSync;
   "qaVisual/campaigns": typeof qaVisual_campaigns;
+  "qaVisual/commentLocalization": typeof qaVisual_commentLocalization;
+  "qaVisual/commentLocations": typeof qaVisual_commentLocations;
   "qaVisual/documents": typeof qaVisual_documents;
   "qaVisual/drive": typeof qaVisual_drive;
   "qaVisual/driveAnalysis": typeof qaVisual_driveAnalysis;

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { type Comment, type PieceStatus } from "@/app/lib/qa-visual/review-model";
 
 import { getAiReviewState, getHumanReviewState } from "@/app/lib/qa-visual/review-state";
 import type { ReviewFeed } from "@/app/lib/qa-visual/review-model";
 import { useReviewDecisions } from "./use-review-decisions";
+import { focusCommentElement } from "@/app/lib/qa-visual/comment-navigation";
 import type { Piece } from "@/app/lib/qa-visual/review-model";
 import { useCanvasAnnotations, type Tool } from "./use-canvas-annotations";
 import type { QaInventory } from "@/app/lib/qa-visual/source";
@@ -30,6 +31,10 @@ export function useReviewSession(
     resolved: resolvedOverrides[comment.id] ?? comment.resolved,
   }));
   const [selected, setSelected] = useState<Comment["id"] | null>(null);
+  const [commentFocus, setCommentFocus] = useState<{
+    id: Comment["id"];
+    highlight: boolean;
+  } | null>(null);
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -108,6 +113,14 @@ export function useReviewSession(
           : (statuses[`${p.id}-1`] ?? p.status) === statusFilter)),
   );
 
+  useLayoutEffect(() => {
+    if (!commentFocus) return;
+    const element = document.getElementById(`comment-${commentFocus.id}`);
+    if (!element) return;
+    const animation = focusCommentElement(element, commentFocus.highlight);
+    return () => animation?.cancel();
+  }, [commentFocus]);
+
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 3500);
@@ -126,6 +139,7 @@ export function useReviewSession(
   }, []);
 
   const choosePiece = (id: string) => {
+    setCommentFocus(null);
     setActiveId(id);
     setVersion(1);
     setSelected(
@@ -140,17 +154,15 @@ export function useReviewSession(
     setDraft("");
     setException("");
   };
-  const selectComment = (id: Comment["id"]) => {
+  const selectComment = (id: Comment["id"], options?: { highlight?: boolean }) => {
     setSelected(id);
+    setFilter("all");
     setRightTab("Comentarios");
     setRightOpen(true);
-    requestAnimationFrame(() =>
-      document
-        .getElementById(`comment-${id}`)
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
-    );
+    setCommentFocus({ id, highlight: Boolean(options?.highlight) });
   };
   const changeVersion = (v: number) => {
+    setCommentFocus(null);
     setVersion(v);
     setSelected(null);
     setPendingPin(null);
@@ -227,7 +239,7 @@ export function useReviewSession(
   };
   const download = () => {
     const a = document.createElement("a");
-    a.href = piece.image;
+    a.href = piece.originalImage ?? piece.image;
     a.download = piece.filename;
     a.click();
     setToast("Descargando el archivo original de esta pieza");

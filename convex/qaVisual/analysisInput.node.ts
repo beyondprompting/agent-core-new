@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { parseClientMatrix, matrixRequirements } from "./clientMatrix.node";
+import { parseClientMatrix, matrixReviewData } from "./clientMatrix.node";
 import type { QaInventory } from "../../app/lib/qa-visual/source";
 
 const confirmedRules = z.object({
@@ -106,16 +106,16 @@ export function prepareAnalysisInputs(
     matrixHash: matrix?.hash,
     production: inventory.production,
     names: inventory.pieces.map((file) => file.name),
-    extraction: 2,
+    extraction: 3,
   });
   const inputs = inventory.pieces.map((file) => {
     const stem = file.name.replace(/\.[^.]+$/, "");
     const production =
       inventory.production?.[stem.normalize("NFC").toLowerCase()];
     const expected: Record<string, string> = {};
-    const requirements = matrix
-      ? matrixRequirements(matrix, file.name, production)
-      : [];
+    const { requirements, notices } = matrix
+      ? matrixReviewData(matrix, file.name, production)
+      : { requirements: [], notices: [] };
     const matrixLinked = requirements.length > 0;
     for (const requirement of requirements) {
       if (!requirement.pending) expected[requirement.id] = requirement.expected;
@@ -146,6 +146,7 @@ export function prepareAnalysisInputs(
       ...(production ? { production } : {}),
       expected,
       requirements,
+      notices,
       matrixLinked,
       contextKey: digest({
         reviewPolicy: 2,

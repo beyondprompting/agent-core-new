@@ -10,7 +10,7 @@ import type { DriveFile } from "./driveClient";
 import { DriveFolderError, listDriveCampaign, loadDriveCsv, loadDriveMatrix, toQaFile } from "./driveSource.node";
 
 // Bump when changing the interpretation of a source or the stored review inputs.
-const importVersion = 2;
+const importVersion = 3;
 
 const hash = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
 

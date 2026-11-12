@@ -3,7 +3,7 @@ import { posix } from "node:path";
 import { DOMParser } from "@xmldom/xmldom";
 import JSZip from "jszip";
 import type { ProductionFields } from "../../app/lib/qa-visual/production-csv";
-import type { ClientRequirement } from "../../app/lib/qa-visual/review-model";
+import type { ClientRequirement, ReviewNotice } from "../../app/lib/qa-visual/review-model";
 
 const sheets = ["PRODUCCION", "LEYENDA", "REGLAS"] as const;
 const normalized = (s: string) =>
@@ -98,12 +98,14 @@ function priceAmount(value: string) {
   return `${whole}.${(match[2] ?? "").padEnd(2, "0")}`;
 }
 
-export function matrixRequirements(
+export function matrixReviewData(
   matrix: Matrix,
   fileName: string,
   production?: ProductionFields,
-): ClientRequirement[] {
-  if (!production) return [];
+) {
+  const requirements: ClientRequirement[] = [];
+  const notices: ReviewNotice[] = [];
+  if (!production) return { requirements, notices };
   const cells = new Map(
     matrix.cells.map((cell) => [`${cell.sheet}!${cell.cell}`, cell.text]),
   );
@@ -113,7 +115,7 @@ export function matrixRequirements(
       cell.cell.startsWith("A") &&
       normalized(cell.text) === "CAMPANA",
   );
-  if (!header) return [];
+  if (!header) return { requirements, notices };
   const format = /_CARRUSEL_/i.test(fileName)
     ? "CARRUSEL"
     : normalized(production.format);
@@ -150,11 +152,10 @@ export function matrixRequirements(
         formatLabel(normalized(cells.get(`PRODUCCION!E${row}`) ?? "")) ===
           formatLabel(format),
     );
-  if (rows.length !== 1) return [];
+  if (rows.length !== 1) return { requirements, notices };
   const row = rows[0];
   const ref = (col: string) => `PRODUCCION!${col}${row}`;
   const get = (col: string) => cells.get(ref(col)) ?? "";
-  const result: ClientRequirement[] = [];
   const add = (
     id: string,
     expected: string,
@@ -162,7 +163,7 @@ export function matrixRequirements(
     pending?: string,
   ) => {
     if (expected)
-      result.push({ id, expected, source, ...(pending ? { pending } : {}) });
+      requirements.push({ id, expected, source, ...(pending ? { pending } : {}) });
   };
   const references = (key: string) => (cells.has(key) ? ` · ${key}` : "");
   if (Number(get("I")) && Number(get("J"))) {
@@ -212,24 +213,22 @@ export function matrixRequirements(
         : !offer.includes("HOY") || day === "HOY")
     );
   });
-  const storyConflict =
-    formatLabel(format) === "STORY" &&
-    get("K") &&
-    /stories.*sin oferta/i.test(cells.get("REGLAS!B6") ?? "");
-  const pending = storyConflict
-    ? "La fila tiene oferta, pero REGLAS!B6 indica dejarla vacía para Stories."
-    : undefined;
+  if (
+    formatLabel(format) === "STORY" && get("K") &&
+    /stories.*sin oferta/i.test(cells.get("REGLAS!B6") ?? "")
+  ) {
+    notices.push({
+      id: "stories-offer-filled",
+      message: "El Excel incluye ofertas en la fila de Stories, aunque su regla indica dejar esa celda vacía. La revisión usa las ofertas indicadas en esa fila.",
+      source: `${ref("K")} · REGLAS!B6:D6${references("LEYENDA!B12")}`,
+    });
+  }
   if (offers.length === 1) {
     const { value, ordinal } = offers[0];
     const productOnly = value
       .replace(/^(?:DOMICILIO|EXPRESS|AUTORAPIDO)\s+/i, "")
       .replace(/^(?:\d{1,2}\s+de\s+\p{L}+|HOY)\s+/iu, "");
-    add(
-      "product",
-      productOnly,
-      ref("K") + (pending ? " · REGLAS!B6 · LEYENDA!B12" : ""),
-      pending,
-    );
+    add("product", productOnly, ref("K"));
     const priceCell = get("L");
     const prices = numbered(priceCell).filter((item) => item.ordinal === ordinal);
     const price = prices.length === 1 ? prices[0].value : "";
@@ -253,7 +252,7 @@ export function matrixRequirements(
       add("price", price, `${priceSource} · CSV · TXT_PRECIO`,
         `El Excel indica ${price} y el CSV indica ${csvPrice}. Confirmá qué precio corresponde.`);
     } else if (price) {
-      add("price", price, priceSource + (pending ? " · REGLAS!B6" : ""), pending);
+      add("price", price, priceSource);
     }
     const date = value.match(/\b\d{1,2}\s+de\s+\p{L}+\b|\bHOY\b/iu)?.[0];
     if (date)
@@ -261,9 +260,7 @@ export function matrixRequirements(
         "date",
         date,
         ref("K") +
-          (/fecha|vigencia|vigente/i.test(get("P")) ? ` · ${ref("P")}` : "") +
-          (pending ? " · REGLAS!B6" : ""),
-        pending,
+          (/fecha|vigencia|vigente/i.test(get("P")) ? ` · ${ref("P")}` : ""),
       );
   } else if (get("K")) {
     for (const id of ["product", "price", "date"]) {
@@ -284,5 +281,5 @@ export function matrixRequirements(
     )
     .join("\n");
   add("cta", cta, ref("P") + references("LEYENDA!C15"));
-  return result;
+  return { requirements, notices };
 }

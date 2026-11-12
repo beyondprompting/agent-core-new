@@ -44,7 +44,8 @@ export function toReviewPieces(
             ? `${product} · ${variantLabel}`
             : product,
       filename: file.name,
-      image: media,
+      image: file.thumbnailReady ? media + "&variant=analysis" : "",
+      originalImage: media,
       thumbnail: file.thumbnailReady ? media + "&variant=thumbnail" : undefined,
       width,
       height,

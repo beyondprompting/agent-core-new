@@ -4,10 +4,10 @@ import {
   ImageIcon,
   Plus,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 
 import { Artwork } from "@/app/components/qa-visual/shared/visuals";
+import { CanvasCommentMarkers } from "./CanvasCommentMarkers";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
 export function ReviewCanvas({
@@ -44,9 +44,6 @@ export function ReviewCanvas({
     dimensions.width && dimensions.height
       ? dimensions.width / dimensions.height
       : 1;
-  const region = pieceComments.find(
-    (c) => c.id === selected && !c.resolved,
-  )?.region;
   return (
     <>
       <div className="canvas-area">
@@ -114,36 +111,12 @@ export function ReviewCanvas({
                 );
               })}
             </svg>
-            {showPins &&
-              pieceComments
-                .filter((c) => c.pin && !c.resolved)
-                .map((c) => (
-                  <button
-                    key={c.marker ?? c.id}
-                    className={`image-pin ${c.kind} ${selected === c.id ? "selected" : ""}`}
-                    style={{
-                      left: `${c.pin!.x}%`,
-                      top: `${c.pin!.y}%`,
-                    }}
-                    title={`Comentario ${c.id}: ${c.author}`}
-                    onClick={() => selectComment(c.id)}
-                  >
-                    {c.kind === "agent" ? <Sparkles size={12} /> : null}
-                    {c.marker ?? c.id}
-                  </button>
-                ))}
-            {showPins && region && (
-              <div
-                className="selected-region"
-                style={{
-                  left: `${region.x}%`,
-                  top: `${region.y}%`,
-                  width: `${region.width}%`,
-                  height: `${region.height}%`,
-                  right: "auto",
-                }}
-              />
-            )}
+            <CanvasCommentMarkers
+              comments={pieceComments}
+              selected={selected}
+              visible={showPins}
+              onSelect={(id) => selectComment(id, { highlight: true })}
+            />
             {pendingPin && (
               <span
                 className="image-pin pending-pin"
@@ -166,7 +139,7 @@ export function ReviewCanvas({
               </>
             )}
             {piece.extension ?? "PNG"}
-            <span>·</span>Original recibido
+            <span>·</span>Vista de revisión
           </span>
           <span>
             <ShieldCheck size={13} />

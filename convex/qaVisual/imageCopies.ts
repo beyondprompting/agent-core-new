@@ -68,9 +68,12 @@ export const storedFiles = internalQuery({
   handler: async (ctx, { copyId }) => (await ctx.db.get(copyId))?.files ?? null,
 });
 
-export const thumbnailStorage = internalQuery({
-  args: { campaignId: v.string(), id: v.string(), version: v.string() },
-  handler: async (ctx, { campaignId, id, version }) => {
+export const mediaStorage = internalQuery({
+  args: {
+    campaignId: v.string(), id: v.string(), version: v.string(),
+    variant: v.union(v.literal("thumbnail"), v.literal("analysis")),
+  },
+  handler: async (ctx, { campaignId, id, version, variant }) => {
     await requireQaAdmin(ctx);
     const normalized = ctx.db.normalizeId("qaVisualCampaigns", campaignId);
     const campaign = normalized && await ctx.db.get(normalized);
@@ -82,6 +85,6 @@ export const thumbnailStorage = internalQuery({
       .first();
     if (!piece) return null;
     const copy = await findImageCopy(ctx, { campaign: campaign.reviewKey, id, version });
-    return copy?.files?.thumbnailId ?? null;
+    return (variant === "analysis" ? copy?.files?.analysisId : copy?.files?.thumbnailId) ?? null;
   },
 });

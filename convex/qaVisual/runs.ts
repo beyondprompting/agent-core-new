@@ -11,7 +11,8 @@ import {
 import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
 import { dispatchReady } from "./runDispatch";
-import { attempt, finding, snapshot, status } from "./validators";
+import { attempt, finding, snapshot, status, region, locationStatus } from "./validators";
+import { hasValidCommentRegion } from "./commentLocations";
 
 export const start = mutation({
   args: {
@@ -247,6 +248,8 @@ export const getWork = internalQuery({
     return asset ? {
       asset: { storageId: asset.storageId, snapshot: asset.snapshot, input: review.input },
       rules: ruleSet.rules,
+      status: review.status,
+      findings: review.findings,
     } : null;
   },
 });
@@ -276,6 +279,37 @@ export const update = internalMutation({
       ...(args.findings ? { findings: args.findings, verdict } : {}),
       ...(args.error ? { error: args.error } : {}),
     });
+  },
+});
+
+export const saveCommentLocations = internalMutation({
+  args: {
+    reviewId: v.id("qaVisualReviews"),
+    locations: v.array(v.object({
+      ruleId: v.string(), observed: v.string(), locationStatus,
+      visibleAnchor: v.optional(v.string()), region: v.optional(region),
+    })),
+  },
+  handler: async (ctx, { reviewId, locations }) => {
+    const review = await ctx.db.get(reviewId);
+    if (review?.status !== "completed" || !review.findings)
+      throw new Error("La revisión cambió antes de guardar las ubicaciones.");
+    const byId = new Map(locations.map((location) => [location.ruleId, location]));
+    if (byId.size !== locations.length) throw new Error("invalid_locations");
+    for (const location of locations) {
+      const finding = review.findings.find((item) => item.ruleId === location.ruleId);
+      if (!finding || finding.observed !== location.observed ||
+          (location.locationStatus === "located" && !hasValidCommentRegion({
+            region: location.region ?? null, visibleAnchor: location.visibleAnchor ?? null,
+          }))) throw new Error("invalid_locations");
+    }
+    await ctx.db.patch(reviewId, {
+      findings: review.findings.map((finding) => {
+        const location = byId.get(finding.ruleId);
+        return location ? { ...finding, ...location, region: location.region, visibleAnchor: location.visibleAnchor } : finding;
+      }),
+    });
+    return locations.length;
   },
 });
 
@@ -359,6 +393,7 @@ export const dashboard = query({
           previous: Boolean(result && result._id !== latest._id),
           verdict: result?.verdict,
           findings: result?.findings,
+          notices: latest.input.notices,
           resultAt: result?._creationTime,
           resultId: result?._id,
         };

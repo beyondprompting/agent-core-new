@@ -13,6 +13,7 @@ import { CompactReviewStatus } from "@/app/components/qa-visual/piece/review-sta
 import { getAiReviewState, getHumanReviewState } from "@/app/lib/qa-visual/review-state";
 import { CampaignResources } from "./CampaignResources";
 import { CampaignSummary } from "./CampaignSummary";
+import { usePieceKeyboardNavigation } from "@/app/hooks/qa-visual/use-piece-keyboard-navigation";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
 export function FilesPanel({
@@ -37,10 +38,19 @@ export function FilesPanel({
     piece,
     filteredPieces,
     choosePiece,
+    modal,
+    pendingPin,
+    drawing,
   },
 }: {
   session: ReviewSession;
 }) {
+  const listRef = usePieceKeyboardNavigation({
+    enabled: leftTab === "Archivos" && !modal && !pendingPin && !drawing,
+    activeId,
+    onChoose: choosePiece,
+  });
+
   return (
     <aside className="files-panel" aria-label="Archivos de campaña">
       <div className="panel-tabs left-tabs">
@@ -107,7 +117,7 @@ export function FilesPanel({
               </select>
             </div>
           </div>
-          <div className="file-list">
+          <div className="file-list" ref={listRef} aria-keyshortcuts="ArrowUp ArrowDown">
             {filteredPieces.map((p) => {
               const fileComments = comments.filter(
                 (c) => c.pieceId === p.id && c.version === 1,
@@ -129,6 +139,8 @@ export function FilesPanel({
               return (
                 <button
                   key={p.id}
+                  data-piece-id={p.id}
+                  aria-current={activeId === p.id ? "true" : undefined}
                   className={`file-card ${activeId === p.id ? "selected" : ""}`}
                   onClick={() => choosePiece(p.id)}
                 >

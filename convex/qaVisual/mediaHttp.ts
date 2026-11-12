@@ -34,16 +34,20 @@ export const driveMedia = httpAction(async (ctx, request) => {
       !id || !/^[a-zA-Z0-9_-]{1,150}$/.test(id) || !version || !/^\d{1,30}$/.test(version))
     return new Response(null, { status: 404, headers });
 
-  if (params.get("variant") === "thumbnail") {
-    const storageId = await ctx.runQuery(internal.qaVisual.imageCopies.thumbnailStorage, {
-      campaignId, id, version,
+  const variant = params.get("variant");
+  if (variant === "thumbnail" || variant === "analysis") {
+    const storageId = await ctx.runQuery(internal.qaVisual.imageCopies.mediaStorage, {
+      campaignId, id, version, variant,
     }).catch(() => null);
     const image = storageId && await ctx.storage.get(storageId);
     return image
-      ? new Response(image, { headers: { ...headers, "Content-Type": "image/webp" } })
+      ? new Response(image, {
+          headers: { ...headers, "Content-Type": variant === "analysis" ? "image/jpeg" : "image/webp" },
+        })
       : new Response(null, { status: 404, headers });
   }
 
+  if (variant !== null) return new Response(null, { status: 404, headers });
   const campaign = await ctx.runQuery(internal.qaVisual.campaigns.getActive, { campaignId }).catch(() => null);
   if (!campaign) return new Response(null, { status: 404, headers });
 

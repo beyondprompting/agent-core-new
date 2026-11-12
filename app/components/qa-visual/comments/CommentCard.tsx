@@ -111,7 +111,7 @@ export function CommentCard({
           >
             Responder
           </button>
-          {c.pin && (
+          {(c.pin || c.marker !== undefined) && (
             <button
               className="location-link"
               onClick={(e) => {
@@ -119,7 +119,7 @@ export function CommentCard({
                 selectComment(c.id);
               }}
             >
-              <MessageSquare size={11} /> {c.marker ?? c.id} · Ver en imagen
+              <MessageSquare size={11} /> {c.marker ?? c.id} · {c.pin ? "Ver en imagen" : "Ver referencia"}
             </button>
           )}
           {c.resolved && (

@@ -1,3 +1,9 @@
+export type ReviewNotice = {
+  id: string;
+  message: string;
+  source: string;
+};
+
 export type ClientRequirement = {
   id: string;
   expected: string;
@@ -21,6 +27,7 @@ export type Piece = {
   name: string;
   filename: string;
   image: string;
+  originalImage?: string;
   thumbnail?: string;
   campaign: string;
   formatName: string;
