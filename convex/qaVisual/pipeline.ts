@@ -93,7 +93,7 @@ export const finishPiece = internalMutation({
     if (run?.state !== "running" || !run.rollingQueue || !run.activeBatch?.includes(reviewId)) return;
 
     const review = await ctx.db.get(reviewId);
-    if (review && review.status !== "completed" && review.status !== "failed") {
+    if (review && review.status !== "completed" && review.status !== "failed" && review.status !== "cancelled") {
       await ctx.db.patch(reviewId, {
         status: "failed", error: "Se interrumpió la ejecución del análisis.",
       });
@@ -126,7 +126,7 @@ export const finishRun = internalMutation({
           context.ids.some((id, index) => id !== active[index])) return;
       for (const id of active) {
         const review = await ctx.db.get(id);
-        if (review && review.status !== "completed" && review.status !== "failed") {
+        if (review && review.status !== "completed" && review.status !== "failed" && review.status !== "cancelled") {
           await ctx.db.patch(id, {
             status: "failed", error: "Se interrumpió la ejecución del análisis.",
           });

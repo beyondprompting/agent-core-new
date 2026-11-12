@@ -175,3 +175,18 @@ export const versionMedia = internalQuery({
     );
   },
 });
+
+/** Prepared images of a creative version (linked copy or lookup by Drive version). */
+export async function versionCopy(
+  ctx: QueryCtx,
+  campaignKey: string,
+  version: { copyId?: Id<"qaVisualImageCopies">; driveFileId: string; driveVersion: string },
+) {
+  return version.copyId
+    ? await ctx.db.get(version.copyId)
+    : await findImageCopy(ctx, {
+        campaign: campaignKey,
+        id: version.driveFileId,
+        version: version.driveVersion,
+      });
+}

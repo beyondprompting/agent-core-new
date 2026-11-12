@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
-import { driveContentUrl, driveToken, folderMime, getDriveFile, imageLimit } from "./driveClient";
+import { driveContentUrl, driveToken, getDriveFile, imageLimit, isCampaignFolder } from "./driveClient";
 import { imageMime } from "./driveSource.node";
 
 export const authorizeMedia = internalAction({
@@ -12,8 +12,8 @@ export const authorizeMedia = internalAction({
     const parentId = file?.parents?.[0];
     if (!file || file.trashed || file.version !== version || !parentId) return null;
     const parent = await getDriveFile(parentId);
-    if (!parent || parent.trashed || parent.mimeType !== folderMime ||
-        parent.name !== "DESPLIEGUE" || !parent.parents?.includes(driveFolderId)) return null;
+    if (!parent || parent.trashed || !isCampaignFolder(parent, "DESPLIEGUE") ||
+        !parent.parents?.includes(driveFolderId)) return null;
 
     const mime = imageMime(file);
     const size = Number(file.size);

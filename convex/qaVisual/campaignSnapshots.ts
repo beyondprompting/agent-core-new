@@ -18,8 +18,9 @@ import { requireQaAdmin } from "./access";
 import { findImageCopy } from "./imageCopies";
 import { queueImageWarmup } from "./imageWarmup";
 import { campaignPiece, rule } from "./validators";
+import { importStage } from "./model/importProgress";
 
-async function syncIsRunning(
+export async function syncIsRunning(
   ctx: QueryCtx,
   sync: Doc<"qaVisualCampaigns">["sync"],
 ) {
@@ -48,8 +49,9 @@ export async function queueSync(
     },
   );
   await ctx.db.patch(campaignId, {
-    sync: { startedAt, jobId },
+    sync: { startedAt, jobId, stage: "listing" },
     syncError: undefined,
+    syncNeedsSources: undefined,
   });
 }
 
@@ -66,13 +68,34 @@ const syncRequest = {
   startedAt: v.number(),
 };
 
+export const progress = internalMutation({
+  args: { ...syncRequest, stage: importStage, images: v.optional(v.number()) },
+  handler: async (ctx, { campaignId, startedAt, stage, images }) => {
+    const campaign = await ctx.db.get(campaignId);
+    if (campaign?.status !== "active" || campaign.sync?.startedAt !== startedAt)
+      return false;
+    await ctx.db.patch(campaignId, {
+      sync: {
+        ...campaign.sync,
+        stage,
+        ...(images === undefined ? {} : { images }),
+      },
+    });
+    return true;
+  },
+});
+
 export const requestedCampaign = internalQuery({
   args: syncRequest,
   handler: async (ctx, { campaignId, startedAt }) => {
     const campaign = await ctx.db.get(campaignId);
     return campaign?.status === "active" &&
       campaign.sync?.startedAt === startedAt
-      ? { driveFolderId: campaign.driveFolderId, reviewKey: campaign.reviewKey }
+      ? {
+          driveFolderId: campaign.driveFolderId,
+          reviewKey: campaign.reviewKey,
+          sourceSelection: campaign.sourceSelection ?? {},
+        }
       : null;
   },
 });
@@ -103,9 +126,10 @@ export const reuse = internalMutation({
       .withIndex("by_snapshot", (q) => q.eq("snapshotId", snapshot._id))
       .collect();
     const activeIds = new Set<string>();
+    const present = new Set(pieces.map((piece) => piece.file.driveId));
     for (const piece of pieces)
       if (piece.input.policyVersion === ANALYSIS_POLICY_VERSION)
-        activeIds.add(await publishPiece(ctx, campaign, piece._id));
+        activeIds.add(await publishPiece(ctx, campaign, piece._id, present));
     const previous = await ctx.db
       .query("qaVisualPieces")
       .withIndex("by_campaign", (q) =>
@@ -146,13 +170,14 @@ export const publish = internalMutation({
       existing?._id ?? (await ctx.db.insert("qaVisualCampaignSnapshots", data));
     if (!existing) {
       const activeIds = new Set<string>();
+      const present = new Set(pieces.map((piece) => piece.file.driveId));
       for (const [order, piece] of pieces.entries()) {
         const itemId = await ctx.db.insert("qaVisualCampaignPieces", {
           snapshotId,
           order,
           ...piece,
         });
-        activeIds.add(await publishPiece(ctx, campaign, itemId));
+        activeIds.add(await publishPiece(ctx, campaign, itemId, present));
       }
       const previousPieces = await ctx.db
         .query("qaVisualPieces")
@@ -174,11 +199,19 @@ export const publish = internalMutation({
 });
 
 export const fail = internalMutation({
-  args: { ...syncRequest, error: v.string() },
-  handler: async (ctx, { campaignId, startedAt, error }) => {
+  args: {
+    ...syncRequest,
+    error: v.string(),
+    needsSources: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { campaignId, startedAt, error, needsSources }) => {
     const campaign = await ctx.db.get(campaignId);
     if (campaign?.sync?.startedAt !== startedAt) return;
-    await ctx.db.patch(campaignId, { sync: undefined, syncError: error });
+    await ctx.db.patch(campaignId, {
+      sync: undefined,
+      syncError: error,
+      syncNeedsSources: needsSources,
+    });
   },
 });
 

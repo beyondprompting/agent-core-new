@@ -1,11 +1,12 @@
 "use node";
 
 import { createHash, createSign } from "node:crypto";
+import { normalize } from "./model/normalize";
 
 const tokenUrl = "https://oauth2.googleapis.com/token";
 const driveUrl = "https://www.googleapis.com/drive/v3/files";
 const fields =
-  "id,name,mimeType,size,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren)";
+  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren)";
 export const folderMime = "application/vnd.google-apps.folder";
 export const campaignFolders = ["RECURSOS", "EDITABLES", "DESPLIEGUE"] as const;
 export const matrixLimit = 15 * 1024 * 1024;
@@ -17,6 +18,7 @@ export type DriveFile = {
   name: string;
   mimeType: string;
   size?: string;
+  createdTime?: string;
   modifiedTime?: string;
   version?: string;
   md5Checksum?: string;
@@ -154,13 +156,19 @@ export async function downloadDriveFile(file: DriveFile, maxBytes: number) {
   return bytes;
 }
 
+/** Folder names are compared without case, accents or extra spaces ("Despliegue " = "DESPLIEGUE"). */
+export function isCampaignFolder(
+  file: DriveFile,
+  name: (typeof campaignFolders)[number],
+) {
+  return file.mimeType === folderMime && normalize(file.name) === name;
+}
+
 export function findCampaignFolder(
   files: DriveFile[],
   name: (typeof campaignFolders)[number],
 ) {
-  const matches = files.filter(
-    (file) => file.mimeType === folderMime && file.name === name,
-  );
+  const matches = files.filter((file) => isCampaignFolder(file, name));
   if (matches.length !== 1)
     throw new Error(`Se esperaba una única carpeta ${name} en Google Drive.`);
   return matches[0];

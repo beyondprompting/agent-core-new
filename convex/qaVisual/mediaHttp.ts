@@ -39,8 +39,50 @@ async function openDriveImage(
   });
 }
 
+// Prepared images are immutable per creative version, so the browser may keep them.
+const immutable = {
+  "Cache-Control": "private, max-age=31536000, immutable",
+  "X-Content-Type-Options": "nosniff",
+};
+
 export const driveMedia = httpAction(async (ctx, request) => {
   const params = new URL(request.url).searchParams;
+  // Client portal image (§23.6): access is checked against the delivered item.
+  const itemId = params.get("item");
+  const itemVariant = params.get("variant");
+  if (itemId && (itemVariant === "thumbnail" || itemVariant === "analysis")) {
+    if (itemId.length > 64) return new Response(null, { status: 404, headers });
+    const storageId = await ctx
+      .runQuery(internal.qaVisual.clientPortal.itemMedia, {
+        itemId,
+        variant: itemVariant,
+      })
+      .catch(() => null);
+    const image = storageId && (await ctx.storage.get(storageId));
+    return image
+      ? new Response(image, {
+          headers: {
+            ...immutable,
+            "Content-Type":
+              itemVariant === "analysis" ? "image/jpeg" : "image/webp",
+          },
+        })
+      : new Response(null, { status: 404, headers });
+  }
+  // Voice comment playback for internal reviewers and, when visible, for the client.
+  const audioId = params.get("audio");
+  if (audioId) {
+    if (audioId.length > 64) return new Response(null, { status: 404, headers });
+    const audio = await ctx
+      .runQuery(internal.qaVisual.audio.audioMedia, { commentId: audioId })
+      .catch(() => null);
+    const blob = audio && (await ctx.storage.get(audio.storageId));
+    return blob
+      ? new Response(blob, {
+          headers: { ...immutable, "Content-Type": audio.mimeType },
+        })
+      : new Response(null, { status: 404, headers });
+  }
   const campaignId = params.get("campaign");
   const creativeVersion = params.get("version");
   const requestedVariant = params.get("variant");
@@ -60,7 +102,7 @@ export const driveMedia = httpAction(async (ctx, request) => {
     return image
       ? new Response(image, {
           headers: {
-            ...headers,
+            ...immutable,
             "Content-Type":
               requestedVariant === "analysis" ? "image/jpeg" : "image/webp",
           },

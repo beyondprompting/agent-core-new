@@ -3,6 +3,7 @@
 import { parseClientMatrix } from "./clientMatrix.node";
 import { productionByPiece } from "./model/productionCsv";
 import { PARSER_VERSION } from "./model/contracts";
+import { markDuplicateNames } from "./model/identity";
 import { createHash } from "node:crypto";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
@@ -12,11 +13,16 @@ import {
   confirmedRulesConfig,
   prepareAnalysisInputs,
 } from "./analysisInput.node";
-import type { DriveFile } from "./driveClient";
+import {
+  downloadDriveFile,
+  matrixLimit,
+  csvLimit,
+  type DriveFile,
+} from "./driveClient";
 import {
   DriveFolderError,
   listDriveCampaign,
-  loadDriveCsv,
+  parseDriveCsv,
   loadDriveMatrix,
   toQaFile,
 } from "./driveSource.node";
@@ -98,6 +104,11 @@ export const run = internalAction({
           throw new DriveFolderError(
             "No hay fuentes guardadas para reprocesar. Actualizá desde Drive.",
           );
+        await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "downloading",
+          images: stored.files.length,
+        });
         const [excelBlob, csvBlob] = await Promise.all([
           ctx.storage.get(stored.excel.storageId),
           ctx.storage.get(stored.csv.storageId),
@@ -124,6 +135,10 @@ export const run = internalAction({
           })
         )
           return;
+        await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "reading",
+        });
         const matrix = await parseClientMatrix(
           stored.excel.name,
           Buffer.from(await excelBlob.arrayBuffer()),
@@ -135,6 +150,10 @@ export const run = internalAction({
         } catch {
           text = new TextDecoder("windows-1252").decode(csvBytes);
         }
+        await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "linking",
+        });
         const prepared = prepareAnalysisInputs(
           campaign.driveFolderId,
           {
@@ -147,6 +166,10 @@ export const run = internalAction({
           matrix,
           overrides,
         );
+        await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "publishing",
+        });
         await ctx.runMutation(internal.qaVisual.campaignSnapshots.publish, {
           ...request,
           fingerprint,
@@ -156,17 +179,22 @@ export const run = internalAction({
           ruleVersion: prepared.ruleVersion,
           rules: prepared.rules,
           notices: stored.snapshot.notices,
-          pieces: stored.files.map((file, i) => ({
-            file,
-            input: prepared.inputs[i],
-          })),
+          pieces: markDuplicateNames(stored.files, prepared.inputs).map(
+            (input, i) => ({ file: stored.files[i], input }),
+          ),
         });
         return;
       }
-      const { folderId, inventory, matrix, csv, deployment } =
-        await listDriveCampaign(campaign.driveFolderId);
+      const { folderId, inventory, matrix, csv, deployment, needsSources } =
+        await listDriveCampaign(
+          campaign.driveFolderId,
+          campaign.sourceSelection,
+        );
       if (inventory.notices.length)
-        throw new DriveFolderError(inventory.notices.join(" "));
+        throw new DriveFolderError(
+          inventory.notices.join(" "),
+          needsSources ? "sources" : undefined,
+        );
       if (!matrix?.version || !csv?.version || !deployment)
         throw new DriveFolderError(
           "Faltan fuentes con una versión válida en Google Drive.",
@@ -195,10 +223,34 @@ export const run = internalAction({
       )
         return;
 
-      const [excel, csvData] = await Promise.all([
-        loadDriveMatrix(matrix),
-        loadDriveCsv(csv),
+      if (
+        !(await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "downloading",
+          images: inventory.pieces.length,
+        }))
+      )
+        return;
+      const [excelBytes, csvBytes] = await Promise.all([
+        downloadDriveFile(matrix, matrixLimit),
+        downloadDriveFile(csv, csvLimit),
       ]);
+      if (
+        !(await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "reading",
+        }))
+      )
+        return;
+      const excel = await parseClientMatrix(matrix.name, excelBytes);
+      const csvData = parseDriveCsv(csvBytes);
+      if (
+        !(await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "linking",
+        }))
+      )
+        return;
       const { rules, ruleVersion, inputs } = prepareAnalysisInputs(
         folderId,
         { ...inventory, production: csvData.production },
@@ -222,6 +274,13 @@ export const run = internalAction({
           csvData.bytes,
         ),
       ]);
+      if (
+        !(await ctx.runMutation(internal.qaVisual.campaignSnapshots.progress, {
+          ...request,
+          stage: "publishing",
+        }))
+      )
+        return;
       await ctx.runMutation(internal.qaVisual.campaignSnapshots.publish, {
         ...request,
         fingerprint,
@@ -237,10 +296,9 @@ export const run = internalAction({
             .filter((i) => i.scope === "campaign")
             .map((i) => i.message),
         ],
-        pieces: inventory.pieces.map((file, index) => ({
-          file,
-          input: inputs[index],
-        })),
+        pieces: markDuplicateNames(inventory.pieces, inputs).map(
+          (input, index) => ({ file: inventory.pieces[index], input }),
+        ),
       });
     } catch (error) {
       console.error(
@@ -250,6 +308,8 @@ export const run = internalAction({
       );
       await ctx.runMutation(internal.qaVisual.campaignSnapshots.fail, {
         ...request,
+        needsSources:
+          error instanceof DriveFolderError && error.code === "sources",
         error:
           error instanceof DriveFolderError
             ? error.message

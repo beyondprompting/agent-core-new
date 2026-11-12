@@ -3,6 +3,7 @@ import { mutation, type MutationCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requireVersion } from "./access";
 import { anchor, commentBody, validateAnchor } from "./model/collaboration";
+import { attachAudio, audioArg, claimAudio } from "./audio";
 
 const findingRef = v.object({
   reviewId: v.id("qaVisualReviews"),
@@ -124,13 +125,25 @@ export const create = mutation({
 });
 
 export const reply = mutation({
-  args: { ...targetArgs, body: v.string(), requestId: v.string() },
+  args: {
+    ...targetArgs,
+    body: v.string(),
+    requestId: v.string(),
+    // Only meaningful in client threads: "client" answers the client, otherwise it is a private note.
+    visibility: v.optional(v.union(v.literal("internal"), v.literal("client"))),
+    audio: v.optional(audioArg),
+  },
   handler: async (ctx, args) => {
     const { user, version } = await requireVersion(ctx, args.pieceVersionId);
-    const body = commentBody(args.body);
+    const body =
+      args.audio && !args.body.trim() ? "" : commentBody(args.body);
     if (args.requestId.length > 100)
       throw new ConvexError("Solicitud inválida.");
     const thread = await target(ctx, args, user);
+    const visibility =
+      thread.audience === "client" && args.visibility === "client"
+        ? ("client" as const)
+        : ("internal" as const);
     const previous = await ctx.db
       .query("qaVisualComments")
       .withIndex("by_request", (q) =>
@@ -142,13 +155,20 @@ export const reply = mutation({
         throw new ConvexError("La solicitud pertenece a otro hilo.");
       return thread._id;
     }
-    await ctx.db.insert("qaVisualComments", {
+    const claim = args.audio ? await claimAudio(ctx, user, args.audio) : null;
+    const commentId = await ctx.db.insert("qaVisualComments", {
       threadId: thread._id,
       pieceVersionId: version._id,
       authorId: user,
       body,
       requestId: args.requestId,
+      visibility,
+      authorKind: "internal",
+      ...(claim
+        ? { audio: claim.clip, transcript: { status: "pending" as const } }
+        : {}),
     });
+    if (claim) await attachAudio(ctx, claim.uploadId, commentId);
     await ctx.db.patch(thread._id, {
       commentCount: thread.commentCount + 1,
       lastActivityAt: Date.now(),

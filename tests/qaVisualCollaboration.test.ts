@@ -100,7 +100,7 @@ async function setup() {
       input,
     });
     const campaign = (await ctx.db.get(campaignId))!;
-    const pieceId = await publishPiece(ctx, campaign, itemId);
+    const pieceId = await publishPiece(ctx, campaign, itemId, new Set(["image"]));
     const pieceVersionId = (await ctx.db.get(pieceId))!.currentVersionId!;
     const ruleSetId = await ctx.db.insert("qaVisualRuleSets", {
       campaign: "campaign",
@@ -280,7 +280,12 @@ test("a new image gets a new version with no inherited approval; renaming preser
           contextKey: hash === "image-1" ? "input-1" : "input-2",
         },
       });
-      return publishPiece(ctx, (await ctx.db.get(s.campaignId))!, itemId);
+      return publishPiece(
+        ctx,
+        (await ctx.db.get(s.campaignId))!,
+        itemId,
+        new Set([driveId]),
+      );
     });
   assert.equal(await publish("renamed.png", "image-1", "2"), s.pieceId);
   assert.equal(

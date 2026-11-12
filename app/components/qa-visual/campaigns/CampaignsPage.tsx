@@ -1,86 +1,166 @@
 "use client";
 
-import { useState, type MouseEvent } from "react";
-import { useQuery } from "convex/react";
-import { FolderOpen, LoaderCircle, Plus, ScanLine } from "lucide-react";
-import { Button } from "@/app/components/ui/Button";
+import { useState } from "react";
+import { usePaginatedQuery, useQuery } from "convex/react";
+import {
+  Archive,
+  FolderOpen,
+  LoaderCircle,
+  Plus,
+  ScanLine,
+} from "lucide-react";
 import { api } from "@/convex/_generated/api";
+import type { CampaignCardData } from "@/app/lib/qa-visual/campaign-model";
 import { CampaignCard } from "./CampaignCard";
 import { CampaignForm } from "./CampaignForm";
+import "./campaigns.css";
 
 export function CampaignsPage() {
-  const campaigns = useQuery(api.qaVisual.campaigns.list, {});
-  const [adding, setAdding] = useState(false);
+  const [tab, setTab] = useState<"active" | "archived">("active");
+  const {
+    results: campaigns,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.qaVisual.campaigns.list,
+    { status: tab },
+    { initialNumItems: 12 },
+  );
+  const counts = useQuery(api.qaVisual.campaigns.counts, {});
+  const [dialog, setDialog] = useState<"new" | CampaignCardData | null>(null);
   const [notice, setNotice] = useState("");
+  const adding = dialog === "new";
 
-  function openForm(event: MouseEvent<HTMLButtonElement>) {
-    event.currentTarget.focus();
+  function openForm() {
     setNotice("");
-    setAdding(true);
-  }
-
-  function closeForm() {
-    setAdding(false);
+    setDialog("new");
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-background text-foreground">
-      <header className="border-b border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-6">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-              <ScanLine className="size-4" aria-hidden />
-              QA Visual
-            </div>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight">Campañas</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Abrí una campaña para revisar sus piezas y resultados.</p>
+    <div className="qa-campaigns">
+      <header className="qc-page-header">
+        <div>
+          <div className="qc-eyebrow">
+            <ScanLine size={14} aria-hidden />
+            QA Visual
           </div>
-          <Button
-            onClick={openForm}
-            aria-haspopup="dialog"
-          >
-            <Plus aria-hidden />
-            Agregar campaña
-          </Button>
+          <h1>Campañas</h1>
+          <p>Abrí una campaña para revisar sus piezas y resultados.</p>
         </div>
+        <button
+          className="qc-button primary"
+          onClick={openForm}
+          aria-haspopup="dialog"
+        >
+          <Plus size={16} aria-hidden />
+          Agregar campaña
+        </button>
       </header>
-      <div className="px-6 py-7">
-        {notice && <p role="status" className="mb-5 text-sm text-foreground">{notice}</p>}
-        {campaigns === undefined ? (
-          <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" aria-hidden />
+      <main className="qc-page-body">
+        {notice && (
+          <p role="status" className="qc-page-notice">
+            {notice}
+          </p>
+        )}
+        <div
+          className="qc-segmented"
+          role="group"
+          aria-label="Estado de las campañas"
+        >
+          {(["active", "archived"] as const).map((value) => (
+            <button
+              key={value}
+              aria-pressed={tab === value}
+              onClick={() => setTab(value)}
+            >
+              {value === "active" ? "Activas" : "Archivadas"} ·{" "}
+              {counts
+                ? `${counts[value].value}${counts[value].more ? "+" : ""}`
+                : "…"}
+            </button>
+          ))}
+        </div>
+        {status === "LoadingFirstPage" ? (
+          <p role="status" className="qc-loading">
+            <LoaderCircle size={16} className="qc-spin" aria-hidden />
             Cargando campañas…
           </p>
         ) : campaigns.length ? (
-          <section aria-labelledby="qa-campaign-list">
-            <h2 id="qa-campaign-list" className="mb-4 text-sm font-semibold">
-              Campañas activas <span className="ml-1 text-muted-foreground">{campaigns.length}</span>
-            </h2>
-            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {campaigns.map(({ _id, name }) => <CampaignCard key={_id} id={_id} name={name} />)}
-            </ul>
-          </section>
+          <ul
+            className="qc-cards"
+            aria-label={
+              tab === "active" ? "Campañas activas" : "Campañas archivadas"
+            }
+          >
+            {campaigns.map((campaign) => (
+              <CampaignCard
+                key={campaign._id}
+                campaign={campaign}
+                onChooseSources={setDialog}
+              />
+            ))}
+          </ul>
         ) : (
-          <section className="flex flex-col items-center rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
-            <span className="grid size-12 place-items-center rounded-xl bg-primary/10 text-primary">
-              <FolderOpen className="size-5" aria-hidden />
+          <section className="qc-empty">
+            <span className="qc-folder-icon">
+              {tab === "active" ? (
+                <FolderOpen size={22} aria-hidden />
+              ) : (
+                <Archive size={22} aria-hidden />
+              )}
             </span>
-            <h2 className="mt-4 text-base font-semibold">Todavía no hay campañas</h2>
-            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              Agregá una carpeta de Google Drive para empezar a revisar sus piezas.
+            <h2>
+              {tab === "active"
+                ? "Todavía no hay campañas activas"
+                : "No hay campañas archivadas"}
+            </h2>
+            <p>
+              {tab === "active"
+                ? "Agregá una carpeta de Google Drive para empezar a revisar sus piezas."
+                : "Las campañas archivadas aparecerán acá."}
             </p>
-            <Button onClick={openForm} aria-haspopup="dialog" variant="outline" className="mt-5">
-              Agregar primera campaña
-            </Button>
+            {tab === "active" && (
+              <button
+                className="qc-button secondary"
+                onClick={openForm}
+                aria-haspopup="dialog"
+              >
+                Agregar primera campaña
+              </button>
+            )}
           </section>
         )}
-      </div>
-      {adding && (
+        {(status === "CanLoadMore" || status === "LoadingMore") && (
+          <div className="qc-load-more">
+            <button
+              className="qc-button secondary"
+              disabled={status === "LoadingMore"}
+              onClick={() => loadMore(12)}
+            >
+              {status === "LoadingMore" ? (
+                <>
+                  <LoaderCircle size={16} className="qc-spin" aria-hidden />
+                  Cargando…
+                </>
+              ) : (
+                "Ver más campañas"
+              )}
+            </button>
+          </div>
+        )}
+      </main>
+      {dialog && (
         <CampaignForm
-          onClose={closeForm}
+          campaign={typeof dialog === "object" ? dialog : undefined}
+          onClose={() => setDialog(null)}
           onCreated={(name) => {
-            setNotice(`Se agregó la campaña ${name}.`);
-            closeForm();
+            setNotice(
+              adding
+                ? `Se agregó la campaña ${name}. La importación está en curso.`
+                : `Se guardaron las fuentes de ${name}. La importación está en curso.`,
+            );
+            setTab("active");
+            setDialog(null);
           }}
         />
       )}

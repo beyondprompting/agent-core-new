@@ -1,6 +1,7 @@
 import { anchor, exception } from "./model/collaboration";
 import { result } from "./model/contracts";
 import { defineTable } from "convex/server";
+import { importStage } from "./model/importProgress";
 import { v } from "convex/values";
 import {
   attempt,
@@ -15,7 +16,83 @@ import {
   status,
 } from "./validators";
 
+const audience = v.union(v.literal("internal"), v.literal("client"));
+const audioClip = v.object({
+  storageId: v.id("_storage"),
+  mimeType: v.string(),
+  durationMs: v.number(),
+  bytes: v.number(),
+});
+const clientState = v.union(
+  v.literal("sent"),
+  v.literal("viewed"),
+  v.literal("changesRequested"),
+  v.literal("approved"),
+);
+
 export const qaVisualTables = {
+  // Third review (§23): a delivery round publishes approved versions to the client.
+  qaVisualDeliveries: defineTable({
+    campaignId: v.id("qaVisualCampaigns"),
+    number: v.number(),
+    status: v.union(v.literal("published"), v.literal("withdrawn")),
+    message: v.optional(v.string()),
+    createdBy: v.id("users"),
+    publishedAt: v.number(),
+    itemCount: v.number(),
+    requestId: v.string(),
+  })
+    .index("by_campaign_number", ["campaignId", "number"])
+    .index("by_request", ["createdBy", "requestId"]),
+  qaVisualDeliveryItems: defineTable({
+    deliveryId: v.id("qaVisualDeliveries"),
+    campaignId: v.id("qaVisualCampaigns"),
+    pieceId: v.id("qaVisualPieces"),
+    pieceVersionId: v.id("qaVisualPieceVersions"),
+    order: v.number(),
+    clientVersion: v.number(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("superseded"),
+      v.literal("withdrawn"),
+    ),
+    // Frozen when published: the client always sees what this version was compared with.
+    brief: v.object({
+      title: v.string(),
+      format: v.string(),
+      fields: v.array(
+        v.object({ key: v.string(), label: v.string(), value: v.string() }),
+      ),
+      requirementsHash: v.optional(v.string()),
+    }),
+    image: v.optional(v.object({ width: v.number(), height: v.number() })),
+    clientState,
+    currentDecisionId: v.optional(v.id("qaVisualClientDecisions")),
+    firstViewedAt: v.optional(v.number()),
+    firstViewedBy: v.optional(v.id("users")),
+    publishedAt: v.number(),
+  })
+    .index("by_campaign_status_order", ["campaignId", "status", "order"])
+    .index("by_piece", ["pieceId", "clientVersion"])
+    .index("by_delivery", ["deliveryId", "order"])
+    .index("by_version", ["pieceVersionId"]),
+  qaVisualClientDecisions: defineTable({
+    campaignId: v.id("qaVisualCampaigns"),
+    deliveryItemId: v.id("qaVisualDeliveryItems"),
+    pieceId: v.id("qaVisualPieces"),
+    decision: v.union(v.literal("approved"), v.literal("changesRequested")),
+    note: v.optional(v.string()),
+    decidedBy: v.id("users"),
+    supersedesId: v.optional(v.id("qaVisualClientDecisions")),
+  }).index("by_item", ["deliveryItemId"]),
+  // Each uploaded audio can be attached to one comment only.
+  qaVisualUploads: defineTable({
+    storageId: v.id("_storage"),
+    userId: v.id("users"),
+    commentId: v.optional(v.id("qaVisualComments")),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_user", ["userId"]),
   qaVisualPieces: defineTable({
     campaignId: v.id("qaVisualCampaigns"),
     key: v.string(),
@@ -63,6 +140,9 @@ export const qaVisualTables = {
     ),
     anchor,
     status: v.union(v.literal("open"), v.literal("resolved")),
+    // Missing = internal. Client threads are the only ones visible in the client portal.
+    audience: v.optional(audience),
+    deliveryItemId: v.optional(v.id("qaVisualDeliveryItems")),
     createdBy: v.id("users"),
     resolvedBy: v.optional(v.id("users")),
     resolvedAt: v.optional(v.number()),
@@ -72,6 +152,7 @@ export const qaVisualTables = {
   })
     .index("by_version", ["pieceVersionId", "status"])
     .index("by_finding", ["origin.reviewId", "origin.ruleId"])
+    .index("by_item", ["deliveryItemId", "status"])
     .index("by_request", ["createdBy", "requestId"]),
   qaVisualComments: defineTable({
     threadId: v.id("qaVisualThreads"),
@@ -82,6 +163,20 @@ export const qaVisualTables = {
     deletedAt: v.optional(v.number()),
     requestId: v.optional(v.string()),
     event: v.optional(v.union(v.literal("resolved"), v.literal("reopened"))),
+    // Missing = internal. Inside a client thread an internal comment is a private note.
+    visibility: v.optional(audience),
+    authorKind: v.optional(audience),
+    audio: v.optional(audioClip),
+    transcript: v.optional(
+      v.object({
+        status: v.union(
+          v.literal("pending"),
+          v.literal("done"),
+          v.literal("failed"),
+        ),
+        text: v.optional(v.string()),
+      }),
+    ),
   })
     .index("by_thread", ["threadId"])
     .index("by_version", ["pieceVersionId"])
@@ -130,10 +225,32 @@ export const qaVisualTables = {
       v.object({
         startedAt: v.number(),
         jobId: v.id("_scheduled_functions"),
+        stage: v.optional(importStage),
+        images: v.optional(v.number()),
       }),
     ),
     lastSyncedAt: v.optional(v.number()),
     syncError: v.optional(v.string()),
+    syncNeedsSources: v.optional(v.boolean()),
+    sourceSelection: v.optional(
+      v.object({
+        excelFileId: v.optional(v.string()),
+        csvFileId: v.optional(v.string()),
+      }),
+    ),
+    client: v.optional(
+      v.object({
+        clientId: v.id("corClients"),
+        brandId: v.optional(v.id("clientBrands")),
+      }),
+    ),
+    clientReview: v.optional(
+      v.object({
+        enabled: v.boolean(),
+        agencyLabel: v.string(),
+        approverIds: v.optional(v.array(v.id("users"))),
+      }),
+    ),
   })
     .index("by_review_key", ["reviewKey"])
     .index("by_drive_folder", ["driveFolderId"])
@@ -233,6 +350,9 @@ export const qaVisualTables = {
     requestId: v.string(),
     activeBatch: v.optional(v.array(v.id("qaVisualReviews"))),
     rollingQueue: v.optional(v.literal(true)),
+    scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
+    cancelledAt: v.optional(v.number()),
+    cancelledBy: v.optional(v.id("users")),
   })
     .index("by_campaign_state", ["campaign", "state"])
     .index("by_campaign", ["campaign"])

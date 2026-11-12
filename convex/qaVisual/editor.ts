@@ -90,7 +90,7 @@ export const piece = query({
         ?.verdict,
       review: completed ?? latest,
       running:
-        latest && !["completed", "failed"].includes(latest.status)
+        latest && !["completed", "failed", "cancelled"].includes(latest.status)
           ? latest.status
           : null,
       moreReviews: reviewHistory.length > 100,

@@ -1,7 +1,7 @@
-import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { pieceKey } from "./model/normalize";
+import { chooseByName, newPieceKey } from "./model/identity";
 import { findImageCopy } from "./imageCopies";
 
 /** Called inside snapshot publication. Identity and the published pointer change together. */
@@ -9,6 +9,7 @@ export async function publishPiece(
   ctx: MutationCtx,
   campaign: Doc<"qaVisualCampaigns">,
   importPieceId: Id<"qaVisualCampaignPieces">,
+  presentDriveIds: ReadonlySet<string>,
 ) {
   const item = (await ctx.db.get(importPieceId))!;
   const key = pieceKey(item.file.name);
@@ -17,27 +18,24 @@ export async function publishPiece(
     .withIndex("by_campaign_drive", (q) =>
       q.eq("campaignId", campaign._id).eq("driveFileId", item.file.driveId),
     )
-    .unique();
+    .first();
+  let duplicate = false;
   if (!piece) {
     const matches = await ctx.db
       .query("qaVisualPieces")
       .withIndex("by_campaign_file_key", (q) =>
         q.eq("campaignId", campaign._id).eq("fileKey", key),
       )
-      .collect();
-    const active = matches.filter((p) => p.status === "active");
-    const candidates = active.length ? active : matches;
-    if (candidates.length > 1)
-      throw new ConvexError(
-        "Hay más de una pieza asociada al nombre del archivo; se necesita confirmar su identidad.",
-      );
-    piece = candidates[0] ?? null;
+      .take(100);
+    const choice = chooseByName(matches, presentDriveIds);
+    if (choice.kind === "version") piece = await ctx.db.get(choice.pieceId);
+    else duplicate = choice.duplicate;
   }
   const pieceId =
     piece?._id ??
     (await ctx.db.insert("qaVisualPieces", {
       campaignId: campaign._id,
-      key: `${key}:${item.file.driveId}`,
+      key: newPieceKey(item.file.name, item.file.driveId, duplicate),
       fileKey: key,
       driveFileId: item.file.driveId,
       status: "active",

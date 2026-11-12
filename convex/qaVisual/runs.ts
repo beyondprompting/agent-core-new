@@ -10,13 +10,14 @@ import {
 } from "./model/contracts";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import {
   internalMutation,
   internalQuery,
   query,
   mutation,
   type MutationCtx,
+  type QueryCtx,
 } from "../_generated/server";
 import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
@@ -38,15 +39,19 @@ export const start = mutation({
     snapshotId: v.id("qaVisualCampaignSnapshots"),
     names: v.optional(v.array(v.string())),
     kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
+    // batch only: "pending" (default) skips pieces with a current completed analysis.
+    scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
   },
   handler: async (
     ctx,
     args,
-  ): Promise<{ runId: Id<"qaVisualRuns"> } | { error: string }> => {
+  ): Promise<
+    { runId: Id<"qaVisualRuns">; queued?: number } | { error: string }
+  > => {
     const requestedBy = await requireQaAdmin(ctx);
     if (
       !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) ||
-      (args.names?.length ?? 0) > 200
+      (args.names?.length ?? 0) > MAX_RUN_PIECES
     )
       return { error: "Solicitud de análisis inválida." };
 
@@ -90,18 +95,33 @@ export const start = mutation({
           "Actualizá desde Drive antes de analizar: hay nuevos criterios de revisión.",
       };
     const names = new Set(args.names);
-    const selected = pieces.filter(
+    const scope = args.kind === "batch" ? (args.scope ?? "pending") : "all";
+    const requested = pieces.filter(
       (piece) => args.kind === "batch" || names.has(piece.input.name),
     );
     if (
-      !selected.length ||
-      selected.length > 200 ||
-      (args.kind !== "batch" && selected.length !== names.size) ||
-      (args.kind === "piece" && selected.length !== 1)
+      !requested.length ||
+      requested.length > MAX_RUN_PIECES ||
+      (args.kind !== "batch" && requested.length !== names.size) ||
+      (args.kind === "piece" && requested.length !== 1)
     )
       return {
+        error: `La selección no coincide con las piezas importadas o supera el límite de ${MAX_RUN_PIECES} piezas.`,
+      };
+    const selected =
+      scope === "all"
+        ? requested
+        : (
+            await Promise.all(
+              requested.map(async (piece) =>
+                (await hasCurrentResult(ctx, piece)) ? null : piece,
+              ),
+            )
+          ).filter((piece) => piece !== null);
+    if (!selected.length)
+      return {
         error:
-          "La selección no coincide con las piezas importadas o supera el límite de 200 piezas.",
+          "Todas las piezas tienen un análisis vigente. Usá «Reanalizar todas» si querés repetirlo.",
       };
 
     for (const state of ["preparing", "running"] as const) {
@@ -111,7 +131,50 @@ export const start = mutation({
           q.eq("campaign", campaign).eq("state", state),
         )
         .first();
-      if (active) return { runId: active._id };
+      if (!active) continue;
+      if (args.kind !== "piece" || !active.rollingQueue)
+        return {
+          error:
+            "Ya hay un análisis en curso. Podés detenerlo o esperar a que termine.",
+        };
+      // A single piece joins the running queue in front of the remaining pieces.
+      const piece = selected[0];
+      const busy = await ctx.db
+        .query("qaVisualReviews")
+        .withIndex("by_run", (q) => q.eq("runId", active._id))
+        .collect();
+      if (
+        busy.some(
+          (row) =>
+            row.pieceVersionId === piece.pieceVersionId &&
+            !["completed", "failed", "cancelled"].includes(row.status),
+        )
+      )
+        return { error: "Esta pieza ya se está analizando." };
+      const first = busy.reduce((min, row) => Math.min(min, row.order), 0);
+      const reviewId = await ctx.db.insert("qaVisualReviews", {
+        runId: active._id,
+        campaign,
+        campaignId: args.campaignId,
+        pieceId: piece.pieceId,
+        pieceVersionId: piece.pieceVersionId,
+        input: piece.input,
+        order: first - 1,
+        status: "preparing",
+        attempts: [],
+      });
+      await ctx.scheduler.runAfter(0, internal.qaVisual.stageDriveRun.prepare, {
+        runId: active._id,
+        folderId: data.deploymentFolderId,
+        items: [
+          {
+            reviewId,
+            id: piece.file.driveId,
+            version: piece.file.driveVersion,
+          },
+        ],
+      });
+      return { runId: active._id, queued: 1 };
     }
     const previous = await ctx.db
       .query("qaVisualRuleSets")
@@ -137,6 +200,7 @@ export const start = mutation({
       activeBatch: [],
       rollingQueue: true,
       requestId: args.requestId,
+      ...(args.kind === "batch" ? { scope } : {}),
     });
     const ids = await Promise.all(
       selected.map(({ input, pieceId, pieceVersionId }, order) =>
@@ -167,7 +231,71 @@ export const start = mutation({
         version: file.driveVersion,
       })),
     });
-    return { runId };
+    return { runId, queued: selected.length };
+  },
+});
+
+const MAX_RUN_PIECES = 1000;
+
+async function hasCurrentResult(
+  ctx: QueryCtx,
+  piece: Doc<"qaVisualCampaignPieces">,
+) {
+  if (!piece.pieceVersionId) return false;
+  const completed = await ctx.db
+    .query("qaVisualReviews")
+    .withIndex("by_version_input", (q) =>
+      q
+        .eq("pieceVersionId", piece.pieceVersionId)
+        .eq("input.contextKey", piece.input.contextKey)
+        .eq("status", "completed"),
+    )
+    .first();
+  return Boolean(
+    completed && isCurrentReview(completed.input, piece.input.contextKey),
+  );
+}
+
+/** Stops dispatching new pieces. Pieces already being analyzed finish and keep their result. */
+export const cancel = mutation({
+  args: { campaignId: v.id("qaVisualCampaigns") },
+  handler: async (ctx, { campaignId }) => {
+    const user = await requireQaAdmin(ctx);
+    const registered = await ctx.db.get(campaignId);
+    if (registered?.status !== "active") return 0;
+    let stopped = 0;
+    for (const state of ["preparing", "running"] as const) {
+      const runs = await ctx.db
+        .query("qaVisualRuns")
+        .withIndex("by_campaign_state", (q) =>
+          q.eq("campaign", registered.reviewKey).eq("state", state),
+        )
+        .take(10);
+      for (const run of runs) {
+        for (const status of ["queued", "preparing"] as const) {
+          const rows = await ctx.db
+            .query("qaVisualReviews")
+            .withIndex("by_run_status", (q) =>
+              q.eq("runId", run._id).eq("status", status),
+            )
+            .collect();
+          for (const row of rows) {
+            await ctx.db.patch(row._id, {
+              status: "cancelled",
+              error: "Análisis detenido antes de empezar.",
+            });
+            stopped++;
+          }
+        }
+        const busy = (run.activeBatch ?? []).length > 0;
+        await ctx.db.patch(run._id, {
+          cancelledAt: Date.now(),
+          cancelledBy: user,
+          ...(busy ? {} : { state: "finished" as const, activeBatch: [] }),
+        });
+      }
+    }
+    return stopped;
   },
 });
 
@@ -327,7 +455,12 @@ export const update = internalMutation({
   },
   handler: async (ctx, args) => {
     const review = await ctx.db.get(args.reviewId);
-    if (!review || review.status === "completed" || review.status === "failed")
+    if (
+      !review ||
+      review.status === "completed" ||
+      review.status === "failed" ||
+      review.status === "cancelled"
+    )
       return;
     const result = args.findings
       ? reviewResult(
@@ -568,7 +701,13 @@ export const dashboard = query({
     );
     return {
       active: Boolean(preparing || running),
+      cancelling: Boolean((preparing ?? running)?.cancelledAt),
+      runKind: run?.kind,
       total: batch.length,
+      cancelled: batch.filter((row) => row.status === "cancelled").length,
+      running: batch.filter((row) =>
+        ["analyzing", "retrying"].includes(row.status),
+      ).length,
       preparedImages: batch.filter((row) => row.copyId || row.assetId).length,
       preparingImages: batch.filter((row) => row.status === "preparing").length,
       validated: currentCompleted.filter((row) => row.verdict === "validated")

@@ -9,6 +9,7 @@ export const status = v.union(
   v.literal("retrying"),
   v.literal("completed"),
   v.literal("failed"),
+  v.literal("cancelled"),
 );
 export const outcome = v.union(
   v.literal("pass"),

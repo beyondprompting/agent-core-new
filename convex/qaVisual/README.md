@@ -1,6 +1,8 @@
 # QA Visual
 
-Configurá `QA_VISUAL_GOOGLE_SERVICE_ACCOUNT_JSON` en el despliegue de Convex. Compartí cada carpeta de campaña con la cuenta de servicio como lectora. En **QA Visual → Agregar campaña**, pegá el enlace de la carpeta. Cada campaña queda registrada en `qaVisualCampaigns`. Convex lee la matriz XLSX de `RECURSOS`, el CSV de producción de `EDITABLES` y las imágenes PNG o JPEG de `DESPLIEGUE`.
+Configurá `QA_VISUAL_GOOGLE_SERVICE_ACCOUNT_JSON` en el despliegue de Convex. Compartí cada carpeta de campaña con la cuenta de servicio como lectora. En **QA Visual → Agregar campaña**, pegá el enlace y elegí **Verificar carpeta**. La verificación es de solo lectura: muestra las fuentes, permite elegir entre matrices o CSV candidatos y señala las carpetas faltantes. **Agregar campaña** se habilita cuando la verificación es válida; al confirmar se vuelve a comprobar la carpeta y se fijan las fuentes elegidas. Cada campaña queda registrada en `qaVisualCampaigns`. Convex lee la matriz XLSX de `RECURSOS`, el CSV de producción de `EDITABLES` y las imágenes PNG o JPEG de `DESPLIEGUE`.
+
+La pantalla **Campañas** separa activas y archivadas y carga las tarjetas por páginas. Cada tarjeta muestra las etapas reales de importación y el resumen de las versiones actuales: piezas, validaciones vigentes, hallazgos y aprobaciones internas correspondientes al pedido actual. Si la actualización falla, conserva el acceso a la última revisión publicada y ofrece **Reintentar** o **Elegir fuentes**, según el problema.
 
 Al agregar una campaña, Convex importa en segundo plano los originales del Excel y el CSV y guarda el inventario, los campos de producción y los requisitos por pieza. El editor lee la última importación lista. **Actualizar desde Drive** comprueba si las fuentes cambiaron y publica una importación nueva solo cuando termina correctamente.
 
