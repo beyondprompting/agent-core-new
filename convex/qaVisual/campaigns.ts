@@ -1,3 +1,5 @@
+import { publishedId, readImport } from "./importRead";
+import { importId } from "./model/importContracts";
 import { ConvexError, v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { internalMutation, internalQuery, query } from "../_generated/server";
@@ -27,14 +29,17 @@ export const list = query({
         result.page.map(async (campaign) => {
           const syncing =
             campaign.status === "active" &&
-            (await syncIsRunning(ctx, campaign.sync));
+            (Boolean(campaign.activeImportId) ||
+              (await syncIsRunning(ctx, campaign.sync)));
           const syncError =
             campaign.syncError ??
             (campaign.sync && !syncing && campaign.status === "active"
               ? "Se interrumpió la importación de Drive. Intentá actualizar de nuevo."
               : undefined);
-          const snapshot = campaign.currentSnapshotId
-            ? await ctx.db.get(campaign.currentSnapshotId)
+          const currentId = publishedId(campaign);
+          const snapshot = currentId ? await readImport(ctx, currentId) : null;
+          const importing = campaign.activeImportId
+            ? await ctx.db.get(campaign.activeImportId)
             : null;
           const activeRuns =
             campaign.status === "active"
@@ -55,15 +60,23 @@ export const list = query({
             status: campaign.status,
             createdAt: campaign._creationTime,
             lastSyncedAt: campaign.lastSyncedAt,
-            imported: Boolean(campaign.currentSnapshotId),
+            imported: Boolean(currentId),
             syncing,
             syncError,
-            snapshotId: campaign.currentSnapshotId,
+            snapshotId: currentId,
             needsSources:
               campaign.syncNeedsSources ??
               Boolean(syncError?.includes("Elegir fuentes")),
-            importStage: syncing ? (campaign.sync?.stage ?? "listing") : null,
-            importImages: syncing ? campaign.sync?.images : undefined,
+            importStage: syncing
+              ? importing?.stage === "parsing"
+                ? "reading"
+                : importing?.stage === "writing"
+                  ? "publishing"
+                  : (importing?.stage ?? campaign.sync?.stage ?? "listing")
+              : null,
+            importImages: syncing
+              ? (importing?.counts.images ?? campaign.sync?.images)
+              : undefined,
             sourceSelection: campaign.sourceSelection ?? {},
             folderUrl: `https://drive.google.com/drive/folders/${campaign.driveFolderId}`,
             noticeKeys: (snapshot?.notices ?? []).map(
@@ -96,7 +109,7 @@ export const counts = query({
 export const pieceSummaries = query({
   args: {
     campaignId: v.id("qaVisualCampaigns"),
-    snapshotId: v.optional(v.id("qaVisualCampaignSnapshots")),
+    snapshotId: v.optional(importId),
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, { campaignId, paginationOpts }) => {
@@ -227,7 +240,7 @@ export const setSources = internalMutation({
   args: { campaignId: v.id("qaVisualCampaigns"), sourceSelection },
   handler: async (ctx, { campaignId, sourceSelection }) => {
     const { campaign } = await requireCampaign(ctx, campaignId);
-    if (await syncIsRunning(ctx, campaign.sync))
+    if (campaign.activeImportId || (await syncIsRunning(ctx, campaign.sync)))
       throw new ConvexError(
         "Esperá a que termine la importación antes de cambiar las fuentes.",
       );

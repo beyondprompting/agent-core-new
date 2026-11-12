@@ -67,6 +67,7 @@ export function buildClientBrief(input: {
   production?: { product?: string; format?: string; width?: number; height?: number };
   image?: { width: number; height: number };
   requirementsHash?: string;
+  allowedFields?: string[];
 }) {
   const fields: { key: string; label: string; value: string }[] = [];
   for (const key of ["product", "price", "date"]) {
@@ -92,7 +93,9 @@ export function buildClientBrief(input: {
   return {
     title: pieceTitle(input.fileName, input.production),
     format: pieceFormat(input.fileName, input.production, input.image),
-    fields: fields.slice(0, 12),
+    fields: fields
+      .filter((f) => !input.allowedFields || input.allowedFields.includes(f.key))
+      .slice(0, 12),
     ...(input.requirementsHash ? { requirementsHash: input.requirementsHash } : {}),
   };
 }
@@ -100,13 +103,25 @@ export function buildClientBrief(input: {
 export type ClientState = "sent" | "viewed" | "changesRequested" | "approved";
 
 /** Why an internal version cannot be sent yet. Undefined means it is eligible. */
+export const BRIEF_FIELDS = [
+  { key: "product", label: "Producto" },
+  { key: "price", label: "Precio" },
+  { key: "date", label: "Vigencia" },
+  { key: "channel", label: "Canal" },
+  { key: "format", label: "Formato" },
+  { key: "cta", label: "Llamado a la acción" },
+] as const;
+
 export function deliveryBlocker(input: {
   pieceStatus: string;
   approved: boolean;
   alreadySent: boolean;
+  unresolvedDuplicate?: boolean;
 }) {
   if (input.pieceStatus !== "active") return "La pieza ya no está en Drive";
   if (input.alreadySent) return "Esta versión ya se envió al cliente";
+  if (input.unresolvedDuplicate)
+    return "Archivo duplicado sin resolver: marcá la entrega definitiva en Detalles";
   if (!input.approved) return "Sin aprobación interna";
   return undefined;
 }

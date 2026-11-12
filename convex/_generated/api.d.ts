@@ -101,6 +101,18 @@ import type * as messaging_chat from "../messaging/chat.js";
 import type * as messaging_chatGenerate from "../messaging/chatGenerate.js";
 import type * as messaging_threadTitle from "../messaging/threadTitle.js";
 import type * as messaging_threads from "../messaging/threads.js";
+import type * as qaVisual_importJob from "../qaVisual/importJob.js";
+import type * as qaVisual_importPool from "../qaVisual/importPool.js";
+import type * as qaVisual_model_retryPolicy from "../qaVisual/model/retryPolicy.js";
+import type * as qaVisual_qaModels from "../qaVisual/qaModels.js";
+import type * as qaVisual_runner from "../qaVisual/runner.js";
+import type * as qaVisual_analyzeJob from "../qaVisual/analyzeJob.js";
+import type * as qaVisual_analysisPool from "../qaVisual/analysisPool.js";
+import type * as qaVisual_imagePool from "../qaVisual/imagePool.js";
+import type * as qaVisual_importRead from "../qaVisual/importRead.js";
+import type * as qaVisual_imports from "../qaVisual/imports.js";
+import type * as qaVisual_sourceFiles from "../qaVisual/sourceFiles.js";
+import type * as qaVisual_model_importContracts from "../qaVisual/model/importContracts.js";
 import type * as qaVisual_access from "../qaVisual/access.js";
 import type * as qaVisual_audio from "../qaVisual/audio.js";
 import type * as qaVisual_campaignRegistration from "../qaVisual/campaignRegistration.js";
@@ -274,6 +286,18 @@ declare const fullApi: ApiFromModules<{
   "messaging/chatGenerate": typeof messaging_chatGenerate;
   "messaging/threadTitle": typeof messaging_threadTitle;
   "messaging/threads": typeof messaging_threads;
+  "qaVisual/importJob": typeof qaVisual_importJob;
+  "qaVisual/importPool": typeof qaVisual_importPool;
+  "qaVisual/model/retryPolicy": typeof qaVisual_model_retryPolicy;
+  "qaVisual/qaModels": typeof qaVisual_qaModels;
+  "qaVisual/runner": typeof qaVisual_runner;
+  "qaVisual/analyzeJob": typeof qaVisual_analyzeJob;
+  "qaVisual/analysisPool": typeof qaVisual_analysisPool;
+  "qaVisual/imagePool": typeof qaVisual_imagePool;
+  "qaVisual/importRead": typeof qaVisual_importRead;
+  "qaVisual/imports": typeof qaVisual_imports;
+  "qaVisual/sourceFiles": typeof qaVisual_sourceFiles;
+  "qaVisual/model/importContracts": typeof qaVisual_model_importContracts;
   "qaVisual/access": typeof qaVisual_access;
   "qaVisual/audio": typeof qaVisual_audio;
   "qaVisual/campaignRegistration": typeof qaVisual_campaignRegistration;
@@ -375,6 +399,9 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
+  qaVisualImportPool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"qaVisualImportPool">;
+  qaVisualImagePool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"qaVisualImagePool">;
+  qaVisualAnalysisPool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"qaVisualAnalysisPool">;
   agent: {
     apiKeys: {
       destroy: FunctionReference<

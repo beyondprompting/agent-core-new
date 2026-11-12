@@ -11,7 +11,7 @@ import {
   requireClientWriter,
 } from "./clientAccess";
 import { anchor, validateAnchor } from "./model/collaboration";
-import { versionCopy } from "./imageCopies";
+import { imageVariant, variantStorage, versionCopy } from "./imageCopies";
 
 /**
  * Client portal (§23.6). Every function reads only delivered items, client threads and
@@ -534,7 +534,7 @@ export const decide = mutation({
 export const itemMedia = internalQuery({
   args: {
     itemId: v.string(),
-    variant: v.union(v.literal("thumbnail"), v.literal("analysis")),
+    variant: imageVariant,
   },
   handler: async (ctx, { itemId, variant }) => {
     const id = ctx.db.normalizeId("qaVisualDeliveryItems", itemId);
@@ -544,7 +544,7 @@ export const itemMedia = internalQuery({
       const version = await ctx.db.get(item.pieceVersionId);
       if (!version) return null;
       const copy = await versionCopy(ctx, campaign.reviewKey, version);
-      return (variant === "analysis" ? copy?.files?.analysisId : copy?.files?.thumbnailId) ?? null;
+      return variantStorage(copy?.files, variant);
     } catch {
       return null;
     }

@@ -5,11 +5,8 @@ import { z } from "zod";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalAction } from "../_generated/server";
-import {
-  geminiConfig,
-  openaiConfig,
-  type LLMProvider,
-} from "../lib/llmFallback";
+import type { LLMProvider } from "../lib/llmFallback";
+import { qaModel } from "./qaModels";
 import {
   commentLocationOutputSchema,
   completeCommentLocations,
@@ -23,7 +20,7 @@ export async function requestCommentLocations(
   provider: LLMProvider,
   abortSignal: AbortSignal,
 ) {
-  const config = provider === "gemini" ? geminiConfig : openaiConfig;
+  const config = qaModel(provider);
   const result = await generateText({
     model: config.model,
     providerOptions:

@@ -12,16 +12,13 @@ export async function ensureImageCopies(
   version: string,
 ): Promise<Id<"qaVisualImageCopies">> {
   const token = randomUUID();
-  const deadline = Date.now() + 95_000;
-  while (Date.now() < deadline) {
+  {
     const claim = await ctx.runMutation(internal.qaVisual.imageCopies.claim, {
       campaign, id, version, token,
     });
     if (claim.state === "ready") return claim.copyId;
-    if (claim.state === "busy") {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      continue;
-    }
+    // Another job is preparing the same file: the caller retries later instead of waiting here.
+    if (claim.state === "busy") throw new ImageBusyError();
 
     const { copyId } = claim;
     const uploaded: Id<"_storage">[] = [];
@@ -31,16 +28,19 @@ export async function ensureImageCopies(
       uploaded.push(thumbnailId);
       const analysisId = await ctx.storage.store(new Blob([image.bytes], { type: "image/jpeg" }));
       uploaded.push(analysisId);
+      const previewId = await ctx.storage.store(new Blob([image.preview], { type: "image/webp" }));
+      uploaded.push(previewId);
       if (await ctx.runMutation(internal.qaVisual.imageCopies.finish, {
-        copyId, token, files: { thumbnailId, analysisId, snapshot: image.snapshot },
+        copyId, token, files: { thumbnailId, analysisId, previewId, snapshot: image.snapshot },
       })) return copyId;
       throw new Error("La reserva de la imagen expiró.");
     } catch (error) {
       const stored = await ctx.runQuery(internal.qaVisual.imageCopies.storedFiles, { copyId })
         .catch(() => undefined);
       if (stored !== undefined) {
+        const kept = new Set([stored?.thumbnailId, stored?.analysisId, stored?.previewId]);
         await Promise.allSettled(uploaded
-          .filter((storageId) => storageId !== stored?.thumbnailId && storageId !== stored?.analysisId)
+          .filter((storageId) => !kept.has(storageId))
           .map((storageId) => ctx.storage.delete(storageId)));
       }
       if (stored?.analysisId) return copyId;
@@ -48,5 +48,10 @@ export async function ensureImageCopies(
       throw error;
     }
   }
-  throw new Error("La preparación de la imagen tardó demasiado.");
+}
+
+export class ImageBusyError extends Error {
+  constructor() {
+    super("image_busy");
+  }
 }

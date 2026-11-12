@@ -7,6 +7,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
+import { AudioMessage } from "@/app/components/qa-visual/voice/AudioMessage";
 import type { Comment } from "@/app/lib/qa-visual/review-model";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
@@ -29,7 +30,7 @@ export function CommentCard({
   return (
     <article
       id={`comment-${c.id}`}
-      className={`comment-card ${c.kind === "source" ? "source-notice" : ""} ${session.selected === c.id ? "selected" : ""} ${c.resolved ? "resolved" : ""}`}
+      className={`comment-card ${c.kind === "source" ? "source-notice" : ""} ${c.audience === "client" ? "client-thread" : ""} ${session.selected === c.id ? "selected" : ""} ${c.resolved ? "resolved" : ""}`}
       onClick={() => session.setSelected(c.id)}
     >
       <div className="comment-heading">
@@ -42,6 +43,11 @@ export function CommentCard({
           <div className="comment-author">
             {c.author}
             {c.kind === "agent" && <span className="agent-label">AGENTE</span>}
+            {c.audience === "client" && (
+              <span className="qa-tag-client" title="Esta conversación la ve el cliente">
+                {c.role === "Cliente" ? "CLIENTE" : "VISIBLE PARA EL CLIENTE"}
+              </span>
+            )}
           </div>
           <span className="comment-time">
             {c.role}
@@ -78,6 +84,13 @@ export function CommentCard({
           canEdit={Boolean(first?.canEdit)}
           session={session}
         />
+        {c.audio && (
+          <AudioMessage
+            src={c.audio.url}
+            durationMs={c.audio.durationMs}
+            transcript={c.audio.transcript}
+          />
+        )}
         {c.expected && c.kind === "agent" && (
           <div className="evidence-box">
             <div>
@@ -161,18 +174,32 @@ export function CommentCard({
         )}
         {!!c.replies?.length && (
           <div className="thread-replies">
-            {c.replies.map((reply) => (
-              <div key={reply.id}>
-                <strong>{reply.author}</strong>
-                <small> · {reply.time}</small>
-                <EditableComment
-                  id={reply.id}
-                  body={reply.body}
-                  canEdit={reply.canEdit}
-                  session={session}
-                />
-              </div>
-            ))}
+            {c.replies.map((reply) => {
+              const note = c.audience === "client" && reply.visibility === "internal" && !reply.fromClient;
+              return (
+                <div key={reply.id} className={note ? "qa-note" : undefined}>
+                  {note && <span className="qa-note-label">Nota interna · el cliente no la ve</span>}
+                  <strong>{reply.author}</strong>
+                  {reply.fromClient && <span className="qa-tag-client">CLIENTE</span>}
+                  <small> · {reply.time}</small>
+                  {reply.body && (
+                    <EditableComment
+                      id={reply.id}
+                      body={reply.body}
+                      canEdit={reply.canEdit}
+                      session={session}
+                    />
+                  )}
+                  {reply.audio && (
+                    <AudioMessage
+                      src={reply.audio.url}
+                      durationMs={reply.audio.durationMs}
+                      transcript={reply.audio.transcript}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         <div className="comment-bottom">

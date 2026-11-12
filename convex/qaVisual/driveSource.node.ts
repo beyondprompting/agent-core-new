@@ -8,9 +8,10 @@ import { productionByPiece } from "./model/productionCsv";
 import { parseClientMatrix } from "./clientMatrix.node";
 import {
   campaignFolders,
+  DriveRequestError,
+  resolveFolderShortcut,
   csvLimit,
   downloadDriveFile,
-  findCampaignFolder,
   folderMime,
   isCampaignFolder,
   getDriveFile,
@@ -29,31 +30,44 @@ export function toQaFile(file: DriveFile): QaFile {
 }
 
 export function imageMime(file: DriveFile) {
-  if (file.mimeType === "image/png" && /\.png$/i.test(file.name))
+  if (
+    ["image/png", "image/jpeg"].includes(file.mimeType) &&
+    /\.png$/i.test(file.name)
+  )
     return "image/png";
-  if (file.mimeType === "image/jpeg" && /\.jpe?g$/i.test(file.name))
+  if (
+    ["image/png", "image/jpeg"].includes(file.mimeType) &&
+    /\.jpe?g$/i.test(file.name)
+  )
     return "image/jpeg";
   return null;
 }
 
 async function readCampaignRoot(id: string) {
-  const root = await getDriveFile(id);
-  if (
-    !root ||
-    root.trashed ||
-    root.mimeType !== folderMime ||
-    !root.capabilities?.canListChildren
-  )
-    throw new DriveFolderError(
-      "No se pudo abrir la carpeta. Compartila como Lector con la cuenta de servicio de QA Visual.",
+  const root = await resolveFolderShortcut(await getDriveFile(id));
+  if (!root)
+    throw new DriveRequestError(
+      "No tenemos acceso a la carpeta. Compartila como Lector con la cuenta de servicio de QA Visual.",
+      404,
     );
-  return { root, children: await listDriveFolder(id) };
+  if (root.trashed)
+    throw new DriveFolderError("La carpeta está en la papelera de Drive.");
+  if (root.mimeType !== folderMime)
+    throw new DriveFolderError(
+      "El enlace es de un archivo; pegá el de la carpeta de la campaña.",
+    );
+  if (!root.capabilities?.canListChildren)
+    throw new DriveRequestError(
+      "No tenemos acceso a la carpeta. Compartila como Lector con la cuenta de servicio de QA Visual.",
+      403,
+    );
+  return { root, children: await listDriveFolder(root.id) };
 }
 
 export class DriveFolderError extends Error {
   constructor(
     message: string,
-    readonly code?: "sources",
+    readonly code?: "sources" | "csv_missing",
   ) {
     super(message);
   }
@@ -64,6 +78,13 @@ export type SourceSelection = { excelFileId?: string; csvFileId?: string };
 function matrixCandidates(files: DriveFile[]) {
   return files.filter(
     (file) => !file.name.startsWith("~$") && /\.xlsx$/i.test(file.name),
+  );
+}
+function unsupportedMatrix(files: DriveFile[]) {
+  return files.some(
+    (f) =>
+      /\.xls$/i.test(f.name) ||
+      f.mimeType === "application/vnd.google-apps.spreadsheet",
   );
 }
 function csvCandidatesOf(files: DriveFile[]) {
@@ -81,6 +102,24 @@ function pick(candidates: DriveFile[], chosen?: string) {
   if (chosen) return candidates.find((file) => file.id === chosen) ?? null;
   if (candidates.length === 1) return candidates[0];
   return null;
+}
+
+function pickCsv(candidates: DriveFile[], chosen?: string) {
+  if (chosen || candidates.length <= 1) return pick(candidates, chosen);
+  const versions = candidates.map((file) => ({
+    file,
+    match: file.name.match(/^(.*_CONVERTED)(?:_v(\d+))?\.csv$/i),
+  }));
+  if (
+    versions.some((v) => !v.match) ||
+    new Set(versions.map((v) => v.match![1].toLowerCase())).size !== 1
+  )
+    return null;
+  versions.sort((a, b) => Number(b.match![2] ?? 0) - Number(a.match![2] ?? 0));
+  return Number(versions[0].match![2] ?? 0) ===
+    Number(versions[1].match![2] ?? 0)
+    ? null
+    : versions[0].file;
 }
 
 export type FolderCheck = {
@@ -118,6 +157,12 @@ export async function inspectDriveFolder(
   } catch (error) {
     if (error instanceof DriveFolderError)
       return { ok: false, error: error.message };
+    if (error instanceof DriveRequestError && [403, 404].includes(error.status))
+      return {
+        ok: false,
+        error:
+          "No tenemos acceso. Compartí la carpeta como Lector con la cuenta de servicio de QA Visual.",
+      };
     throw error;
   }
   const checks: FolderCheck[] = [
@@ -131,7 +176,18 @@ export async function inspectDriveFolder(
   const listings = new Map<string, DriveFile[]>();
   for (const name of campaignFolders) {
     const matches = children.filter((file) => isCampaignFolder(file, name));
-    if (matches.length !== 1 || !matches[0].capabilities?.canListChildren) {
+    let accessible: DriveFile | null = null;
+    try {
+      accessible =
+        matches.length === 1 ? await resolveFolderShortcut(matches[0]) : null;
+    } catch {
+      /* Show the affected subfolder in the checklist. */
+    }
+    if (
+      matches.length !== 1 ||
+      !accessible?.capabilities?.canListChildren ||
+      accessible.trashed
+    ) {
       checks.push({
         key: name,
         status: "missing",
@@ -149,7 +205,7 @@ export async function inspectDriveFolder(
       continue;
     }
     try {
-      listings.set(name, await listDriveFolder(matches[0].id));
+      listings.set(name, await listDriveFolder(accessible!.id));
     } catch {
       checks.push({
         key: name,
@@ -170,7 +226,9 @@ export async function inspectDriveFolder(
             key: "RECURSOS",
             status: "missing",
             title: "RECURSOS · falta la matriz Excel",
-            detail: "Subí la matriz del cliente en formato .xlsx.",
+            detail: unsupportedMatrix(listings.get("RECURSOS") ?? [])
+              ? "Formato no admitido: convertí la matriz a .xlsx."
+              : "Subí la matriz del cliente en formato .xlsx.",
           }
         : pick(matrices, selection.excelFileId)
           ? {
@@ -198,12 +256,12 @@ export async function inspectDriveFolder(
             detail:
               "Subí el CSV de producción (idealmente con sufijo _CONVERTED).",
           }
-        : pick(csvs, selection.csvFileId)
+        : pickCsv(csvs, selection.csvFileId)
           ? {
               key: "EDITABLES",
               status: "ok",
               title: "EDITABLES · CSV de producción",
-              detail: pick(csvs, selection.csvFileId)!.name,
+              detail: pickCsv(csvs, selection.csvFileId)!.name,
             }
           : {
               key: "EDITABLES",
@@ -259,8 +317,8 @@ export async function inspectDriveFolder(
       ...(pick(matrices, selection.excelFileId)
         ? { excelFileId: pick(matrices, selection.excelFileId)!.id }
         : {}),
-      ...(pick(csvs, selection.csvFileId)
-        ? { csvFileId: pick(csvs, selection.csvFileId)!.id }
+      ...(pickCsv(csvs, selection.csvFileId)
+        ? { csvFileId: pickCsv(csvs, selection.csvFileId)!.id }
         : {}),
     },
   };
@@ -305,12 +363,29 @@ export async function validateDriveFolder(url: string) {
 export async function listDriveCampaign(
   id: string,
   selection: SourceSelection = {},
+  strict = false,
 ) {
   const { root, children } = await readCampaignRoot(id);
   const notices: string[] = [];
   const results = await Promise.allSettled(
     campaignFolders.map(async (name) => {
-      const folder = findCampaignFolder(children, name);
+      const matches = children.filter((file) => isCampaignFolder(file, name));
+      if (matches.length !== 1)
+        throw new DriveFolderError(
+          matches.length
+            ? `Hay ${matches.length} carpetas ${name}; dejá una sola.`
+            : `Falta la carpeta ${name}.`,
+        );
+      const folder = await resolveFolderShortcut(matches[0]);
+      if (!folder?.capabilities?.canListChildren)
+        throw new DriveRequestError(
+          `No se puede leer ${name}. Revisá el acceso en Drive.`,
+          403,
+        );
+      if (folder.trashed)
+        throw new DriveFolderError(
+          `La carpeta ${name} está en la papelera de Drive.`,
+        );
       const files = await listDriveFolder(folder.id);
       return {
         folderId: folder.id,
@@ -320,6 +395,7 @@ export async function listDriveCampaign(
   );
   const [resources, editables, deployment] = results.map((result, index) => {
     if (result.status === "fulfilled") return result.value;
+    if (strict) throw result.reason;
     console.warn(`QA Visual: ${campaignFolders[index]}`, result.reason);
     notices.push(`No se pudo leer ${campaignFolders[index]} en Google Drive.`);
     return null;
@@ -328,14 +404,16 @@ export async function listDriveCampaign(
   const matrices = matrixCandidates(resources?.files ?? []);
   const csvCandidates = csvCandidatesOf(editables?.files ?? []);
   const matrix = pick(matrices, selection.excelFileId);
-  const csv = pick(csvCandidates, selection.csvFileId);
+  const csv = pickCsv(csvCandidates, selection.csvFileId);
   if (resources && !matrix)
     notices.push(
       matrices.length
         ? selection.excelFileId
           ? "La matriz elegida ya no está en RECURSOS. Elegí cuál usar desde «Elegir fuentes»."
           : "Hay más de una matriz Excel en RECURSOS. Elegí cuál usar desde «Elegir fuentes»."
-        : "No se encontró una matriz Excel en RECURSOS.",
+        : unsupportedMatrix(resources.files)
+          ? "Formato no admitido: convertí la matriz a .xlsx."
+          : "No se encontró una matriz Excel en RECURSOS.",
     );
   if (editables && !csv)
     notices.push(
@@ -346,31 +424,12 @@ export async function listDriveCampaign(
         : "No se encontró el CSV de producción en EDITABLES.",
     );
 
-  const pieces: QaPieceFile[] = [];
-  // Same-name files are kept (§6.1): the oldest keeps the base identity.
-  const images = (deployment?.files ?? [])
-    .filter((file) => file.version && imageMime(file))
-    .sort(
-      (a, b) =>
-        a.name.localeCompare(b.name, "es") ||
-        (Date.parse(a.createdTime ?? "") || 0) -
-          (Date.parse(b.createdTime ?? "") || 0) ||
-        a.id.localeCompare(b.id),
+  if (strict && editables && !csvCandidates.length)
+    throw new DriveFolderError(
+      "No se encontró el CSV de producción en EDITABLES.",
+      "csv_missing",
     );
-  for (const file of images) {
-    if (!file.version) continue;
-    const contentHash =
-      file.md5Checksum ??
-      createHash("sha256")
-        .update(await downloadDriveFile(file, imageLimit))
-        .digest("hex");
-    pieces.push({
-      ...toQaFile(file),
-      driveId: file.id,
-      driveVersion: file.version,
-      contentHash,
-    });
-  }
+  const pieces = await deploymentPieces(deployment?.files ?? []);
 
   const inventory: QaInventory = {
     campaignName: root.name,
@@ -385,6 +444,15 @@ export async function listDriveCampaign(
   );
   return {
     folderId: root.id,
+    ignoredFiles: (deployment?.files ?? [])
+      .filter((file) => !imageMime(file))
+      .map((file) => ({
+        name: file.name,
+        reason:
+          file.mimeType === folderMime
+            ? "Subcarpeta: no se recorren sus archivos."
+            : "Solo se analizan PNG y JPEG.",
+      })),
     inventory,
     matrix,
     csv,
@@ -415,4 +483,41 @@ export async function loadDriveMatrix(matrix: DriveFile) {
     matrix.name,
     await downloadDriveFile(matrix, matrixLimit),
   );
+}
+
+export async function deploymentPieces(files: DriveFile[]) {
+  const pieces: QaPieceFile[] = [];
+  // Same-name files are kept (§6.1): the oldest keeps the base identity.
+  const images = files
+    .filter((file) => file.version && imageMime(file))
+    .sort(
+      (a, b) =>
+        a.name.localeCompare(b.name, "es") ||
+        (Date.parse(a.createdTime ?? "") || 0) -
+          (Date.parse(b.createdTime ?? "") || 0) ||
+        a.id.localeCompare(b.id),
+    );
+  if (images.length > 1000)
+    throw new DriveFolderError("La campaña supera el límite de 1000 piezas.");
+  for (const file of images) {
+    if (!file.version) continue;
+    const contentHash =
+      file.md5Checksum ??
+      (Number(file.size) > imageLimit
+        ? `oversized:${file.id}:${file.version}`
+        : undefined) ??
+      createHash("sha256")
+        .update(await downloadDriveFile(file, imageLimit))
+        .digest("hex");
+    pieces.push({
+      ...toQaFile(file),
+      createdAt: Date.parse(file.createdTime ?? "") || 0,
+      mimeType: file.mimeType,
+      driveId: file.id,
+      driveVersion: file.version,
+      contentHash,
+    });
+  }
+
+  return pieces;
 }

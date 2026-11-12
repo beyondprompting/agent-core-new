@@ -2,9 +2,10 @@ import { cache } from "react";
 import { convexAuthNextjsToken } from "@convex-dev/auth/nextjs/server";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
+import { qaVisualEnabled } from "./enabled";
 
 export const canAccessQa = cache(async () => {
-  if (process.env.NODE_ENV !== "development") return false;
+  if (!qaVisualEnabled()) return false;
   const token = await convexAuthNextjsToken();
   if (!token) return false;
   const profile = await fetchQuery(api.data.userAccess.viewerAccessProfile, {}, { token });

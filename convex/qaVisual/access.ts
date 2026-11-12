@@ -5,7 +5,13 @@ import type { QueryCtx } from "../_generated/server";
 import { internalQuery } from "../_generated/server";
 import { isExternalRoleTarget } from "../lib/userRoles";
 
+/** Backend switch: QA_VISUAL_ENABLED=false in a Convex deployment turns every QA function off. */
+export function qaVisualDisabled() {
+  return process.env.QA_VISUAL_ENABLED === "false";
+}
+
 export async function requireQaAdmin(ctx: QueryCtx) {
+  if (qaVisualDisabled()) throw new Error("QA Visual no está habilitado");
   const user = await getAuthUserId(ctx);
   if (!user) throw new Error("Acceso denegado");
   const role = await ctx.db
@@ -44,7 +50,7 @@ export async function requireVersion(
   pieceVersionId: Id<"qaVisualPieceVersions">,
 ) {
   const version = await ctx.db.get(pieceVersionId);
-  if (!version)
+  if (!version || version.status === "staged")
     throw new ConvexError({
       code: "version_unavailable",
       message: "La versión ya no está disponible.",

@@ -25,10 +25,15 @@ export async function prepareDriveImage(folderId: string, id: string, version: s
     .resize({ width: 192, height: 192, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 75 })
     .toBuffer();
+  const preview = await image.clone().rotate()
+    .resize({ width: 640, height: 640, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 80 })
+    .toBuffer();
   const swapped = orientation !== undefined && orientation >= 5;
   return {
     bytes: Uint8Array.from(bytes).buffer,
     thumbnail: Uint8Array.from(thumbnail).buffer,
+    preview: Uint8Array.from(preview).buffer,
     snapshot: {
       hash: createHash("sha256").update(original).digest("hex"),
       width: swapped ? height : width,

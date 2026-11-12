@@ -17,7 +17,7 @@ Las diez decisiones que más cambian el sistema:
 3. **Los avisos de fuente pasan a ser datos estructurados** (código, alcance y controles afectados). Se agrupan por causa y no por texto, y nunca se presentan como hallazgos visuales.
 4. **Identidad estable de pieza y versión creativa.** `qaVisualPieces` y `qaVisualPieceVersions` reemplazan la identidad por nombre de archivo. Las aprobaciones humanas se asocian a la versión.
 5. **El hash de entrada se calcula por pieza.** Hoy agregar una imagen a la campaña invalida los análisis de todas las demás. El nuevo `inputHash` depende solo de la imagen, de los requisitos de esa pieza y de la versión de política.
-6. **Una sola cola de trabajo con `@convex-dev/workpool`** y una máquina de estados guardada en `qaVisualReviews`. Así se eliminan la cola propia con `activeBatch`, los workflows por pieza, la espera activa con `setTimeout`, el vencimiento a diez minutos y el código de compatibilidad. El límite es de cuatro piezas por corrida y además hay un límite global para todas las campañas.
+6. **Una sola cola de trabajo con `@convex-dev/workpool`** y una máquina de estados guardada en `qaVisualReviews`. Así se eliminan la cola propia con `activeBatch`, los workflows por pieza, la espera activa con `setTimeout`, el vencimiento a diez minutos y el código de compatibilidad. El límite es de cuatro piezas por corrida y además hay un límite global configurable para todas las campañas, dimensionado según cuotas y capacidad medidas (§10.1).
 7. **El modelo observa y el código compara.** El LLM lee los textos visibles y sus coordenadas. El precio, la fecha, el formato y las dimensiones se comparan con código determinista. Si falla la localización, la conclusión se conserva y el comentario pasa a ser general.
 8. **El dictamen y la cobertura se muestran por separado.** "Validada por IA" exige las ocho condiciones de §9.5: resultado vigente, todos los controles solicitados ejecutados y cumplidos contra el pedido del cliente, sin conflictos ni avisos de advertencia, y los controles visuales pasados por el modelo. Una revisión solo técnica, con conflictos o desactualizada nunca aparece en verde.
 9. **La colaboración humana se guarda en Convex:** hilos, respuestas, anotaciones, resolución y decisiones por versión, con autor, fecha, control de concurrencia e historial derivado.
@@ -161,7 +161,7 @@ Severidad: **Crítico** (produce resultados incorrectos o pérdida de datos), **
                    qaVisualCampaigns.currentImportId   qaVisualPieces (+ proyección de tarjeta)
                                                             │
                      runs.start ──► qaVisualRuns ──► qaVisualReviews (máquina de estados)
-                                                     │  analysisPool (global máx. 8, por corrida máx. 4)
+                                                     │  analysisPool (global configurable, por corrida máx. 4; §10.1)
                                                      ▼
                                     analyzeJob: controles deterministas + modelo + localización
                                                      │
@@ -240,7 +240,7 @@ Se registran en `convex/convex.config.ts` con nombre propio. Así QA no comparte
 ```ts
 app.use(workpool, { name: "qaVisualImportPool" });   // maxParallelism: 2
 app.use(workpool, { name: "qaVisualImagePool" });    // maxParallelism: 4
-app.use(workpool, { name: "qaVisualAnalysisPool" }); // maxParallelism: 8 (global, ajustable)
+app.use(workpool, { name: "qaVisualAnalysisPool" }); // maxParallelism: configurable según capacidad medida (§10.1)
 ```
 
 `@convex-dev/workpool` ya figura en `package.json`. QA deja de usar `@convex-dev/workflow`, aunque se mantiene para los otros agentes.
@@ -880,11 +880,19 @@ Cada intento guarda: proveedor, modelo, `ANALYSIS_POLICY_VERSION`, tiempo en col
 
 ### 10.1 Pools
 
+> **Comentario de decisión — 12 de noviembre de 2026. Implementado en la etapa 4 (`analysisPool.ts`, variable `QA_VISUAL_ANALYSIS_CONCURRENCY`); falta fijar el valor con mediciones.** Se reemplaza el tope global propuesto de **ocho análisis simultáneos** por una concurrencia global **configurable por entorno y dimensionada con mediciones**. Se mantiene Workpool como ejecutor exclusivo de los análisis de QA. No se acuerda otro número fijo ni una ejecución sin límites; esta decisión no cambia el cupo de cuatro piezas por corrida ni los límites de importación e imágenes.
+>
+> **Justificación:** la captura de cuotas aportada muestra 20.000 solicitudes por minuto y 20 millones de tokens de entrada por minuto para Gemini 3.8 Flash. Esas cuotas, por sí solas, no justifican el tope de ocho; mantenerlo sin medir puede provocar esperas innecesarias entre usuarios. Los requests de usuarios distintos comparten la cuota del proyecto. Además, RPM y TPM miden consumo por minuto, no cantidad de trabajos simultáneos, por lo que no se convierten directamente en un valor de `maxParallelism`. La configuración revisada usa Gemini 3.7 Flash: antes de dimensionar hay que comprobar las cuotas del modelo y proyecto que QA utilizará efectivamente.
+>
+> **Aplicación del cambio:** elegir y documentar el valor global durante la etapa 4 a partir de la capacidad del despliegue de Convex, las cuotas de Gemini y del proveedor de respaldo, la duración de las llamadas y los tokens y llamadas por pieza, incluidos reintentos y localización. Validarlo con campañas concurrentes, midiendo tiempo en cola, latencia y errores de cuota; comprobar que todas las campañas avanzan. El límite global y el cupo por corrida son controles de concurrencia, no una garantía automática de reparto equitativo.
+>
+> **Experiencia de uso:** conservar la entrega progresiva de resultados: cada pieza aparece al terminar, sin esperar a toda la campaña. Workpool se apoya en el scheduler y permite iniciar trabajos en cuanto hay capacidad; sustituirlo por el scheduler no elimina los límites de Convex ni aporta por sí solo reintentos y recuperación. El cambio de proveedor ante fallos es independiente del límite de concurrencia.
+
 | Pool | Paralelismo | Reintento propio de Workpool | Uso |
 | --- | --- | --- | --- |
 | `qaVisualImportPool` | 2 | 3 intentos, espera exponencial desde 2 s | Importaciones y reprocesamientos. |
 | `qaVisualImagePool` | 4 | 3 intentos | Una tarea por versión de imagen sin preparar. |
-| `qaVisualAnalysisPool` | 8 (global, variable de entorno) | Ninguno: la política está en `retryPolicy` | Un intento de análisis por tarea. |
+| `qaVisualAnalysisPool` | Global configurable por entorno, según cuotas y capacidad medidas (comentario de decisión anterior) | Ninguno: la política está en `retryPolicy` | Un intento de análisis por tarea. |
 
 ### 10.2 Ciclo de una corrida
 
@@ -907,7 +915,7 @@ Cada intento guarda: proveedor, modelo, `ANALYSIS_POLICY_VERSION`, tiempo en col
    }
    if (!running.length && !next.length) await finishRun(ctx, runId);
    ```
-   Así hay como máximo cuatro piezas por corrida y como máximo ocho en total. Una campaña no puede ocupar todo el pool: con dos corridas activas, cada una avanza a su ritmo.
+   Así hay como máximo cuatro piezas por corrida y el total queda limitado por la concurrencia global configurada según §10.1. El avance de varias campañas debe verificarse con carga concurrente; esos límites no garantizan por sí solos un reparto equitativo.
 3. `analyzeJob.attempt` (acción). Si la imagen no está lista, la prepara en el mismo intento. Después ejecuta los controles deterministas y, si hay controles visuales, llama al modelo y localiza. **No lanza excepciones por errores esperados**: devuelve `{ kind: "done", findings, attempt }`, `{ kind: "retryable", code, attempt, retryAfterMs? }` o `{ kind: "fatal", code, message, attempt? }`.
 4. `runs.onAttemptComplete` (mutación de Workpool):
    - Ignora la llamada si el ítem no está en `running` o si su `workId` no coincide. Eso la hace idempotente.
@@ -1136,7 +1144,7 @@ Cada etapa se puede publicar por separado y deja el sistema funcionando.
 | **1. Dominio puro y vinculación** | `model/`: `normalize`, `offers` (código actual), `linking` por niveles, `requirements` con estado, `issues`, `verdict` con cobertura, `hashing` por pieza, `workbook` (celdas combinadas y fechas) y `productionCsv` (BOM, `;`, duplicados). Pruebas de §8.8. | Las pruebas pasan. La pieza 16 vincula con la oferta 7 y emite un aviso. Agregar una imagen no cambia el `inputHash` de otra. |
 | **2. Datos e importación** | Tablas nuevas, `importPool`, importación por lotes, publicación atómica, identidad de pieza y versión, selección de fuentes, reprocesamiento desde Storage, alta en dos pasos y todos los casos de §7.6. | Importar Semana de Locura da 61 piezas. Repetir sin cambios no escribe nada. Reemplazar una imagen crea v2 solo en esa pieza. Una carpeta incompleta muestra la lista de verificación correcta. |
 | **3. Imágenes y medios** | `imagePool`, imágenes por versión y caché `immutable`. | Al volver a entrar, ninguna imagen se descarga de nuevo (verificado en la pestaña Network). Una imagen de 25 MB falla solo en su pieza. |
-| **4. Análisis y orquestación** | `analysisPool`, máquina de estados, `retryPolicy`, el modelo lee y el código compara, localización sin bloqueo, evidencia cruda, cancelación, pieza al frente de la cola, cron de vigilancia y configuración LLM propia. | Hay como máximo 4 piezas por corrida y 8 en total. Matar una acción no deja piezas colgadas. Un fallo de localización conserva la conclusión. La pieza 16 pasa por Gemini. |
+| **4. Análisis y orquestación** | `analysisPool`, máquina de estados, `retryPolicy`, el modelo lee y el código compara, localización sin bloqueo, evidencia cruda, cancelación, pieza al frente de la cola, cron de vigilancia y configuración LLM propia. | Hay como máximo 4 piezas por corrida y se respeta el límite global configurable, cuyo valor se documenta y valida con carga concurrente según §10.1. Matar una acción no deja piezas colgadas. Un fallo de localización conserva la conclusión. La pieza 16 pasa por Gemini. |
 | **5. UI sobre los datos nuevos** | Hooks nuevos, tarjetas con proyección, detalle con requisitos y cadena de origen, avisos agrupados, progreso con desglose, menú de **Analizar piezas**, banner de importación, campañas con estado, enlace profundo. | Se cumplen los casos de §21 relacionados con la UI. El diseño en ambos temas coincide con el aprobado. |
 | **6. Colaboración guardada** | Hilos, comentarios, anclas, resolución, decisiones con excepción y control de concurrencia, versiones e historial. | Al recargar, todo sigue ahí. Dos personas que deciden a la vez reciben el aviso de conflicto. Una versión nueva empieza en Pendiente. |
 | **7. Evaluación y producción** | Dataset de evaluación, métricas, alertas, bandera de producción, credenciales por entorno y migración final (§17). | Se alcanzan las metas acordadas de precisión e IoU. La lista de verificación de §14 está completa. |
@@ -1225,7 +1233,7 @@ El archivo [`DISENO_QA_VISUAL.html`](./DISENO_QA_VISUAL.html) muestra las propue
 | Actualizar con fuentes nuevas | Importación nueva y motivo de desactualización por pieza (§6). |
 | Cambiar el algoritmo de extracción | `PARSER_VERSION` en el `fingerprint` y reprocesamiento automático desde Storage (§7.7). |
 | Originales pesados | Miniatura WebP e imagen de análisis con caché `immutable` (§13). |
-| Analizar campaña | Máximo 4 piezas por corrida y 8 en total. Los resultados aparecen a medida que termina cada pieza (§10). |
+| Analizar campaña | Máximo 4 piezas por corrida y concurrencia global configurable según §10.1. Los resultados aparecen a medida que termina cada pieza (§10). |
 | Falla una pieza o un proveedor | `retryPolicy` y resultados parciales conservados. |
 | Reintentar una pieza | Corrida `piece` o ítem al frente de la cola. La revisión anterior se conserva. |
 | El cliente no exige CTA | `notRequested` → `notApplicable`. No afecta la cobertura. |
@@ -1264,7 +1272,7 @@ Cada punto incluye la opción recomendada, que se puede aplicar mientras el equi
 | 8 | Carruseles | Agrupar los slides por prefijo de nombre como una pieza con varias imágenes. Requiere ejemplos reales. Queda fuera de v1. |
 | 9 | Retención | Conservar todas las importaciones referenciadas por corridas. Purgar las importaciones `failed` y `superseded` sin referencias después de 90 días. Las imágenes viven mientras exista su versión. |
 | 10 | ¿Sincronización automática con Drive? | Manual en v1. Más adelante, un cron diario que solo lista y compara el `fingerprint`, sin descargar si nada cambió. |
-| 11 | Límite global de análisis y presupuesto | `maxParallelism` de 8 y una alerta de costo por corrida. Ajustarlo con las cuotas reales de Gemini. |
+| 11 | Valor del límite global de análisis y presupuesto | La política ya está decidida (§10.1): concurrencia global configurable según cuotas y capacidad medidas, sin fijar ocho como requisito. Queda por determinar y validar el valor operativo en la etapa 4. Se mantiene la alerta de costo por corrida. |
 | 12 | ¿Revisar la importación antes de analizar? | No como paso obligatorio. La pestaña Resumen ya muestra los avisos de campaña y las piezas bloqueadas antes de presionar **Analizar piezas**. |
 
 ---
@@ -1647,3 +1655,98 @@ Los envíos usan Workpool con reintentos y siguen el patrón de estados de email
 | C6 | ¿El cliente puede descargar el original? | Desactivado por defecto. Se habilita por campaña. |
 | C7 | ¿Se puede usar la IA para verificar que una versión nueva atendió los comentarios del cliente? | Sí, como mejora posterior: un control "Cambios pedidos en V1" que compara las transcripciones y comentarios con la imagen nueva. No reemplaza a la revisión interna. |
 | C8 | ¿Cuánto tiempo se conservan los audios? | Mientras exista la campaña. Al archivarla, se aplica la misma retención que al resto (§22, punto 9). |
+
+---
+
+## 24 Estado de implementación en el código
+
+**Revisión: 12 de noviembre de 2026, rama `feat/qa-visual`.** Este inventario refleja el código presente en el directorio de trabajo, incluidos los cambios locales de la etapa 2 todavía sin commit/push. No representa el estado del despliegue. Las pantallas de Campañas y Agregar campaña ya fueron probadas por el usuario; la nueva importación de la etapa 2 todavía requiere publicación y validación en el entorno correspondiente. Se mantiene la indicación de no desplegar por ahora.
+
+Las casillas marcadas identifican funcionalidades implementadas dentro del alcance descrito. Una etapa con avances parciales sigue pendiente hasta completar sus contratos y criterios de aceptación; la existencia de tablas o funciones no equivale a un flujo completo para el usuario.
+
+### 24.1 Funcionalidades completas en el código actual
+
+- [x] **Diseños 1 y 2: Campañas y Agregar campaña, conectados con Convex.** Listado paginado de activas y archivadas, tarjetas con estado y resumen, verificación de carpeta antes de confirmar, selección de fuentes ambiguas, registro y actualización desde Drive. Código: `app/components/qa-visual/campaigns/`, `campaignRegistration.ts` y `campaigns.ts`.
+- [x] **Vinculación y requisitos de la etapa 1.** Lectura de Excel con celdas combinadas y fechas, CSV con BOM y separadores, asociación de oferta y precio por numeral, coincidencias exactas y por conectores, ambigüedades explícitas y confirmaciones manuales. Cada requisito conserva estado, base y procedencia; el hash se calcula por pieza. Código: `convex/qaVisual/model/`, `clientMatrix.node.ts`, `analysisInput.node.ts` y `overrides.ts`. La extracción conserva algunos archivos anteriores; su reorganización final sigue pendiente.
+- [x] **Dictamen con cobertura y vigencia.** La política `qa-visual-4` exige referencias del cliente, controles solicitados cumplidos y evidencia del modelo para los visuales. Conflictos, advertencias relevantes y controles sin verificar impiden el verde. Un resultado anterior cuyo hash o política cambió aparece desactualizado. Código: `model/verdict.ts`, `worker.ts`, `runs.ts`, `editor.ts` y `decisions.ts`.
+- [x] **Datos e importación de la etapa 2, implementados localmente.** Tablas `qaVisualSourceFiles`, `qaVisualImports` y `qaVisualImportPieces`; originales e interpretación guardados en Storage; `qaVisualImportPool` exclusivo, con dos importaciones simultáneas y reintentos. Los lotes de hasta 50 piezas y 650 KB preparan datos privados y piezas/versiones `staged`. La publicación cambia lo visible en una sola transacción. Código: `tables.ts`, `sourceFiles.ts`, `importPool.ts`, `importJob.ts` e `imports.ts`.
+- [x] **Reutilización, reprocesamiento y recuperación de importaciones.** La huella permite reutilizar una importación sin duplicar piezas ni versiones. Las confirmaciones reprocesan las fuentes guardadas en Storage. Los lotes toleran reintentos, los trabajadores vencidos quedan invalidados antes de limpiar y una importación fallida conserva la última revisión publicada. Hay un cron de recuperación de importaciones y una operación paginada para actualizar campañas al nuevo parser. Código: `imports.ts`, `importJob.ts`, `sourceFiles.ts` y `convex/crons.ts`.
+- [x] **Identidad, versiones y resolución de duplicados.** Se busca primero por ID de Drive; un reemplazo crea una versión y dos archivos simultáneos producen piezas separadas. Renombrar conserva identidad. Desde Detalles se puede marcar la entrega definitiva, fusionar como versiones y revocar la confirmación, conservando decisiones e historial. Una imagen nueva empieza sin aprobación heredada. Código: `model/identity.ts`, `imports.ts`, `overrides.ts` y `app/components/qa-visual/piece/DuplicateResolution.tsx`.
+- [x] **Análisis de contenido y localización tolerante a fallos.** El modelo lee precio y vigencia y el código compara; formato y dimensiones se verifican de forma determinista. Los hallazgos conservan la conclusión si falla la localización y se muestran como comentarios generales. Código: `worker.ts`, `model/controls.ts`, `commentLocations.ts` y `commentLocalization.ts`. Esto ya funciona con el ejecutor anterior; no implica que la etapa 4 esté terminada.
+- [x] **Persistencia de la revisión humana interna.** Comentarios, respuestas, anclas, resolución/reapertura, decisiones y versiones están guardados en Convex e integrados con el editor. Se controla la autoría, el conflicto entre decisiones y la aprobación con excepción cuando no existe una validación vigente. Código: `threads.ts`, `decisions.ts`, `editor.ts`, `use-piece-review.ts` y `use-review-session.ts`. El historial visible tiene límites de carga; su paginación sigue pendiente.
+- [x] **Controles de acceso internos y lectura de Drive.** QA exige un administrador interno, excluye perfiles externos y usa acceso de solo lectura a Drive. Código: `access.ts`, `driveClient.ts` y `app/lib/qa-visual/server/access.ts`. La habilitación general para producción todavía no está implementada.
+- [x] **Pruebas automatizadas de estas funcionalidades.** Hay pruebas de dominio, cobertura, precios, localización, colaboración, campañas e importaciones, incluidas publicación atómica, reintentos, duplicados, 1000 piezas y registro del componente Workpool. Código: `tests/qaVisual*.test.ts`; comando: `npm run test:qa-visual`. Las 61 piezas del ensayo de importación son sintéticas: no sustituyen la evaluación con imágenes reales y proveedores reales.
+
+### 24.2 Etapas 3 a 11: implementadas en esta tanda
+
+**Actualización del 12 de noviembre de 2026 (segunda tanda).** Todo lo de esta sección está en el directorio de trabajo, sin commit ni despliegue. Compila con `tsc --noEmit` y la suite `npm run test:qa-visual` pasa (93 pruebas). Las pruebas nuevas son solo dos puntuales: la política de reintentos y el cupo de 4 piezas por corrida en el pool. Falta la validación real en Convex Dev con una carpeta, Gemini y el respaldo.
+
+- [x] **Etapa 3: imágenes.**
+  - Nuevo `qaVisualImagePool` (4 en paralelo, 4 intentos con espera exponencial). Cada imagen es un trabajo; `imageWarmup.enqueuePage` encola de a 100 piezas con una mutación que se reprograma.
+  - Se eliminó la espera activa: si otra tarea tiene la reserva, la acción falla con `image_busy` y el pool la reintenta.
+  - Tercera variante: vista previa WebP de 640 px para galería y portal (las copias anteriores usan la imagen de análisis como respaldo).
+  - Las imágenes se sirven con `ETag` y responden 304. El proxy de Next conserva `immutable` y reenvía `If-None-Match`, así la segunda visita no descarga nada.
+  - Un error definitivo queda en la copia (`error`) y la pieza muestra el motivo en lugar de "Preparando imagen…". `imageWarmup.retryImage` permite reintentarlo.
+  - Código: `imagePool.ts`, `imageWarmup.ts`, `prepareImages.ts`, `imagePreparation.node.ts`, `preview.node.ts`, `imageCopies.ts`, `mediaHttp.ts`, `app/lib/qa-visual/server/media-proxy.ts`.
+- [x] **Etapa 4: análisis con Workpool y el límite global de §10.1.**
+  - `qaVisualAnalysisPool` con concurrencia global configurable por entorno: `QA_VISUAL_ANALYSIS_CONCURRENCY` (entero de 1 a 100; si no se define, 24). El valor por defecto solo evita esperas mientras se mide. Hay que ajustarlo con las cuotas reales, como pide §10.1. El cupo de 4 piezas por corrida se mantiene.
+  - Máquina de estados en `qaVisualReviews` (`runner.ts`): `queued → preparing/analyzing → retrying* → completed | failed | cancelled`. `fillSlots` arranca piezas a medida que se liberan lugares y cada resultado se guarda apenas termina la pieza.
+  - `onAttemptComplete` es idempotente: ignora callbacks de un `workId` que ya no es el vigente.
+  - `model/retryPolicy.ts` implementa §10.3: 3 intentos con Gemini y 2 con el respaldo, `Retry-After` en 429, errores de entrada fatales y errores de configuración o seguridad que pasan directo al respaldo.
+  - La pieza individual entra al frente de la corrida en curso (§10.4). **Detener** cancela lo que está en cola y cancela en el pool lo que está corriendo.
+  - Cron `recover qa visual analysis` cada 10 minutos (`runner.sweep`).
+  - Modelos exclusivos de QA en `qaModels.ts`: `QA_VISUAL_GEMINI_MODEL` (por defecto `gemini-3.7-flash`) y `QA_VISUAL_OPENAI_MODEL` (por defecto `gpt-6-luna`). La configuración compartida del agente de brief no se tocó.
+  - Las corridas iniciadas con el ejecutor anterior (workflow) terminan con su código, que se conserva solo para esa transición.
+- [x] **Etapa 5: editor.**
+  - **Analizar piezas** es un botón dividido: pendientes y desactualizadas (con su cantidad), reintentar fallidas y reanalizar todas.
+  - La barra de progreso tiene **Detener** y cuenta las piezas detenidas.
+  - El bloque de IA tiene **Volver a analizar esta versión**.
+  - Enlaces profundos `?pieza=&v=&hilo=` y `?vista=galeria`.
+  - La barra del visor muestra un tercer estado, Cliente, cuando la pieza ya se envió.
+- [x] **Etapa 7 (parcial): bandera de habilitación.**
+  - Next habilita QA en desarrollo o con `QA_VISUAL_ENABLED=true`.
+  - En Convex, `QA_VISUAL_ENABLED=false` apaga todas las funciones de QA.
+- [x] **Etapa 8: galería y carrusel internos.**
+  - Selector Revisión/Galería en el header.
+  - `InternalGallery`, con los tres estados por pieza, filtros por IA, interna y cliente, y selección de versiones aprobadas para enviar.
+  - `InternalCarousel`, con ← → para navegar, Esc para cerrar y deslizamiento táctil, sin tira de miniaturas. Muestra los tres estados, las conversaciones con el cliente y los accesos a aprobar y a la revisión detallada.
+- [x] **Etapa 9: entregas.**
+  - `SendToClientDialog`: configuración del cliente (cliente, marca, etiqueta de agencia, aprobadores y campos de la ficha), piezas elegibles y bloqueadas con su motivo, mensaje y publicación idempotente.
+  - Backend nuevo: duplicados sin resolver bloqueados, `withdrawRound`, `updateBrief` y `briefFields`.
+  - Estado del cliente en tarjetas, galería y visor, más el filtro "Revisión del cliente" en la lista.
+- [x] **Etapa 10: portal del cliente.**
+  - Rutas: `/workspace/reviews` (lista de campañas), `/workspace/reviews/[campaignId]` (galería por pestañas y carrusel) y `/workspace/reviews/media`.
+  - El carrusel incluye la ficha, las versiones V1/V2 (las anteriores en modo lectura), "Lo que pediste en la versión anterior", comentarios generales o sobre un punto de la imagen, respuestas, y las acciones Solicitar cambios y Aprobar pieza.
+  - En pantallas angostas el panel pasa a hoja inferior.
+  - Un `super_admin` puede abrir la vista previa en modo lectura ("Ver como el cliente").
+- [x] **Etapa 11 (parcial): voz.**
+  - Grabadora con `MediaRecorder` (webm/opus o mp4), onda en vivo, corte a los 3:00 y escucha previa.
+  - Subida a Storage; si el comentario falla, el audio subido se reutiliza al reintentar.
+  - Reproductor con transcripción en el portal y en el editor.
+  - Respuestas internas por voz y el selector **Nota interna / Responder al cliente** en hilos del cliente.
+
+### 24.3 Pendiente
+
+- **Validación real:** publicar en Convex Dev (esquema, funciones y los dos componentes Workpool nuevos) y probar el flujo completo con una carpeta real: importar, analizar, aprobar, enviar al cliente, revisar como usuario externo y comentar por voz. Después, medir cuotas y latencias para fijar `QA_VISUAL_ANALYSIS_CONCURRENCY` (§10.1).
+- **Etapa 4:** guardar la respuesta cruda del modelo en Storage por intento (`rawId`).
+- **Etapa 6:** historial paginado y actualizaciones optimistas.
+- **Etapa 7:** dataset de evaluación con piezas reales, métricas, alertas y migración final de las tablas y ejecutores anteriores (§17).
+- **Etapa 11:**
+  - Pool de transcripción con recuperación (hoy se lanza con el scheduler y, si falla, queda "No se pudo transcribir" sin perder el audio).
+  - Notificaciones de QA por app y email.
+  - Limpieza de audios subidos y no usados. **No se implementó a propósito**: identificarlos exige recorrer `_storage`, donde también hay archivos de otras funcionalidades, y no se debe arriesgar a borrarlos. Hace falta registrar la subida antes de que exista el `storageId`, o un prefijo propio.
+  - Pruebas de grabación en iOS Safari y Chrome Android.
+- **Acceso del cliente desde el email:** la ruta `/workspace/reviews` funciona con sesión iniciada. Hoy el login externo redirige a `/workspace` al terminar, así que el enlace del email no lleva directo a la revisión si no había sesión. Ajustarlo requiere tocar el flujo de login compartido, que quedó fuera de este alcance.
+- **Etapa 12:** PWA.
+
+### 24.4 Variables de entorno nuevas
+
+| Variable | Dónde | Valor |
+| --- | --- | --- |
+| `QA_VISUAL_ANALYSIS_CONCURRENCY` | Convex | Concurrencia global de análisis (1–100; por defecto 24). |
+| `QA_VISUAL_GEMINI_MODEL` | Convex | Modelo principal de QA (por defecto `gemini-3.7-flash`). |
+| `QA_VISUAL_OPENAI_MODEL` | Convex | Modelo de respaldo de QA (por defecto `gpt-6-luna`). |
+| `QA_VISUAL_ENABLED` | Next | `true` habilita QA fuera de desarrollo. |
+| `QA_VISUAL_ENABLED` | Convex | `false` desactiva todas las funciones de QA. |
+
+Las transcripciones usan `SPEECH_KEY` y `SPEECH_REGION`, que la app ya tiene configuradas para Azure.

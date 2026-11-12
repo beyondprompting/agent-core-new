@@ -254,3 +254,48 @@ html.dark .qa-visual .workspace{--primary-color:#a49aff;--primary-soft:#2c2850;-
 .qa-visual .source-choice{display:grid;gap:8px;margin-top:10px}
 .qa-visual .comment-edit-actions{display:flex;gap:10px;margin-top:6px;font-size:10px;color:var(--primary-color)}
 .qa-visual .qa-analysis-track > .qa-analysis-track-stale { background: var(--subtle); }
+
+/* Import-stage confirmations, scoped to the existing detail panel. */
+.qa-visual .qa-duplicate-resolution { padding: 12px; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12px; }
+.qa-visual .qa-duplicate-resolution p { margin: 6px 0; color: var(--muted-text); }
+.qa-visual .qa-duplicate-resolution label { display: block; margin: 8px 0; }
+.qa-visual .qa-duplicate-resolution select, .qa-visual .qa-duplicate-resolution textarea { display: block; width: 100%; padding: 7px; margin-top: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
+.qa-visual .qa-duplicate-resolution [role=alert] { color: var(--danger); }
+
+.qa-visual .qa-import-resource-list { margin-block: 24px; }
+.qa-visual .qa-import-resource-list h4 { margin-bottom: 8px; }
+.qa-visual .qa-import-resource-list p, .qa-visual .qa-import-resource-list li span { color: var(--muted-text); font-size: 12px; }
+.qa-visual .qa-import-resource-list ul { list-style: none; padding: 0; max-height: 320px; overflow-y: auto; }
+.qa-visual .qa-import-resource-list li { display: flex; flex-direction: column; gap: 4px; padding-block: 8px; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
+.qa-visual .qa-import-resource-list li strong { font-size: 12px; font-weight: 500; }
+
+/* ── Etapa 5: menú de análisis, vista, envío al cliente y reanálisis por pieza ── */
+.qa-visual .qa-view-toggle{display:inline-flex;padding:3px;border-radius:8px;background:var(--surface-muted);border:1px solid var(--line);gap:2px}
+.qa-visual .qa-view-toggle button{height:27px;display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:6px;font-size:12px;font-weight:600;color:var(--muted-text)}
+.qa-visual .qa-view-toggle button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 2px #0000001f}
+.qa-visual .qa-count-badge{display:inline-grid;place-items:center;min-width:19px;height:17px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:700;background:var(--primary-soft);color:var(--primary-color)}
+.qa-visual .qa-count-badge.on-primary{background:#ffffff33;color:inherit}
+.qa-visual .qa-send-client{color:var(--client,#0e7c86)}
+.qa-visual .qa-split{position:relative;display:inline-flex}
+.qa-visual .qa-split .qa-split-main{border-radius:6px 0 0 6px}
+.qa-visual .qa-split .qa-split-caret{border-radius:0 6px 6px 0;padding:0 8px;margin-left:1px}
+.qa-visual .qa-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:40;width:330px;padding:6px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.qa-visual .qa-menu button{display:flex;align-items:flex-start;gap:10px;width:100%;padding:9px 10px;border-radius:8px;text-align:left;color:var(--text)}
+.qa-visual .qa-menu button:hover:not(:disabled){background:var(--surface-hover)}
+.qa-visual .qa-menu button>svg{margin-top:2px;color:var(--muted-text)}
+.qa-visual .qa-menu span{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.qa-visual .qa-menu b{font-size:12.5px;font-weight:650}
+.qa-visual .qa-menu small{font-size:11px;color:var(--muted-text);line-height:1.35}
+.qa-visual .qa-menu em{font-style:normal;font-size:12px;font-weight:700;color:var(--muted-text)}
+.qa-visual .qa-menu hr{border:0;border-top:1px solid var(--line);margin:5px 4px}
+.qa-visual .ai-state-wrap{position:relative;display:flex;min-width:0}
+.qa-visual .ai-state-wrap>.review-state-card{flex:1;padding-right:34px}
+.qa-visual .qa-reanalyze{position:absolute;top:7px;right:7px;z-index:1;width:24px;height:24px;display:grid;place-items:center;border-radius:6px;color:var(--muted-text);background:var(--surface-muted);border:1px solid var(--line)}
+.qa-visual .qa-reanalyze:hover:not(:disabled){color:var(--primary-color);border-color:var(--primary-medium)}
+.qa-visual .qa-image-error{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:320px;text-align:center;color:var(--muted-text);font-size:12.5px}
+.qa-visual .workspace{--client:#0e7c86;--client-bg:#e4f5f6}
+html.dark .qa-visual .workspace,.dark .qa-visual .workspace{--client:#72d2da;--client-bg:#15343a}
+.qa-visual .review-status-strip.with-client{grid-template-columns:repeat(3,minmax(0,1fr))}
+.qa-visual .client-state-card{background:var(--tone-bg,var(--surface));border-color:transparent}
+.qa-visual .client-state-card .review-identity{color:var(--tone,var(--subtle));display:grid;place-items:center;width:34px}
+.qa-visual .client-state-card .review-state-title{color:var(--tone,var(--text))}

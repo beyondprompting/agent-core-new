@@ -20,6 +20,7 @@ export function usePieceReview(
   const edit = useMutation(api.qaVisual.threads.edit);
   const remove = useMutation(api.qaVisual.threads.remove);
   const linkOffer = useMutation(api.qaVisual.overrides.linkOffer);
+  const uploadUrl = useMutation(api.qaVisual.audio.generateUploadUrl);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const sending = useRef(false);
@@ -58,5 +59,6 @@ export function usePieceReview(
     edit,
     remove,
     linkOffer,
+    uploadUrl,
   };
 }

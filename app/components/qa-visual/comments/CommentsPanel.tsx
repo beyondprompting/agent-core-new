@@ -1,7 +1,9 @@
 import { CommentCard } from "./CommentCard";
-import { MessageSquare, Send, Settings2, Sparkles, X } from "lucide-react";
+import { Building2, Lock, MessageSquare, Send, Settings2, Sparkles, X } from "lucide-react";
 
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
+import { VoiceRecorder } from "@/app/components/qa-visual/voice/VoiceRecorder";
+import { useVoiceRecorder } from "@/app/hooks/qa-visual/use-voice-recorder";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
 export function CommentsPanel(sessionProps: { session: ReviewSession }) {
@@ -26,6 +28,9 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
     publish,
     openAiReview,
   } = session;
+  const recorder = useVoiceRecorder();
+  const replyingToClient =
+    Boolean(replyTo) && pieceComments.find((c) => c.id === replyTo)?.audience === "client";
   return (
     <>
       <button
@@ -52,6 +57,7 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           <option value="agent">Solo agentes</option>
           <option value="source">Avisos de fuente</option>
           <option value="human">Solo personas</option>
+          <option value="client">Conversaciones con el cliente</option>
           <option value="open">Sin resolver</option>
         </select>
         <span>{visibleComments.length}</span>
@@ -95,12 +101,36 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
       <div className="comment-composer">
         {replyTo && (
           <div className="composer-context">
-            <span>{"Respuesta a un comentario"}</span>
+            <span>
+              {replyingToClient
+                ? "Respuesta en una conversación con el cliente"
+                : "Respuesta a un comentario"}
+            </span>
             <button
               aria-label="Cancelar respuesta"
               onClick={() => setReplyTo(null)}
             >
               <X size={12} />
+            </button>
+          </div>
+        )}
+        {replyingToClient && (
+          <div className="qa-reply-modes" role="radiogroup" aria-label="Destino de la respuesta">
+            <button
+              role="radio"
+              aria-checked={session.replyVisibility === "internal"}
+              className={session.replyVisibility === "internal" ? "on" : ""}
+              onClick={() => session.setReplyVisibility("internal")}
+            >
+              <Lock size={11} /> Nota interna
+            </button>
+            <button
+              role="radio"
+              aria-checked={session.replyVisibility === "client"}
+              className={session.replyVisibility === "client" ? "on client" : ""}
+              onClick={() => session.setReplyVisibility("client")}
+            >
+              <Building2 size={11} /> Responder al cliente
             </button>
           </div>
         )}
@@ -122,7 +152,16 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
             }}
           />
         </div>
+        {replyTo && (recorder.state !== "idle" || recorder.error) && (
+          <div style={{ padding: "0 10px 8px" }}>
+            <VoiceRecorder recorder={recorder} />
+            {recorder.error && <p className="qa-error">{recorder.error}</p>}
+          </div>
+        )}
         <div className="composer-actions">
+          {replyTo && recorder.state === "idle" && (
+            <VoiceRecorder recorder={recorder} disabled={!canReview || saving} />
+          )}
           <button
             className={tool === "pin" ? "active" : ""}
             title="Marcar un punto en la imagen"
@@ -136,8 +175,14 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           </button>
           <button
             className="publish-button"
-            disabled={!draft.trim() || saving || !canReview}
-            onClick={publish}
+            disabled={
+              (recorder.state === "ready" ? false : !draft.trim()) || saving || !canReview || recorder.state === "recording"
+            }
+            onClick={async () => {
+              if (recorder.state === "ready" && recorder.recording) {
+                if (await session.publishVoice(recorder.recording)) recorder.discard();
+              } else publish();
+            }}
           >
             Publicar
             <Send size={12} />

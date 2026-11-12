@@ -75,10 +75,14 @@ export function CampaignSnapshotViewer({
         matrix,
         csv,
         notices,
+        ignoredFiles: data.ignoredFiles,
+        missingImages: data.missingImages,
         pieces: pieces.map(
           ({
             file,
             thumbnailReady,
+            imageError,
+            client,
             pieceId,
             pieceVersionId,
             version,
@@ -89,6 +93,8 @@ export function CampaignSnapshotViewer({
           }) => ({
             ...file,
             thumbnailReady,
+            imageError,
+            client,
             pieceId,
             pieceVersionId,
             currentVersion: version,

@@ -3,7 +3,12 @@ import type { Doc } from "../_generated/dataModel";
 import { mutation, query, type QueryCtx } from "../_generated/server";
 import { requireCampaign } from "./access";
 import { assignedToCampaignClient } from "./clientAccess";
-import { buildClientBrief, deliveryBlocker, pieceTitle } from "./model/clientBrief";
+import {
+  BRIEF_FIELDS,
+  buildClientBrief,
+  deliveryBlocker,
+  pieceTitle,
+} from "./model/clientBrief";
 import { structuredRequirements } from "./model/contracts";
 import { versionCopy } from "./imageCopies";
 
@@ -72,6 +77,9 @@ export const settings = query({
       enabled: Boolean(campaign.clientReview?.enabled),
       agencyLabel: campaign.clientReview?.agencyLabel ?? "PTO99",
       approverIds: campaign.clientReview?.approverIds ?? [],
+      briefFields:
+        campaign.clientReview?.briefFields ?? BRIEF_FIELDS.map((f) => f.key),
+      availableFields: BRIEF_FIELDS.map((f) => ({ key: f.key, label: f.label })),
       client: client
         ? { id: client._id, name: client.name, brandId: brand?._id, brandName: brand?.name }
         : null,
@@ -101,9 +109,13 @@ export const configure = mutation({
     enabled: v.boolean(),
     agencyLabel: v.string(),
     approverIds: v.optional(v.array(v.id("users"))),
+    briefFields: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { campaign } = await requireCampaign(ctx, args.campaignId);
+    const briefFields = args.briefFields?.filter((key) =>
+      BRIEF_FIELDS.some((f) => f.key === key),
+    );
     if (!(await ctx.db.get(args.clientId)))
       throw new ConvexError("Elegí un cliente válido.");
     if (args.brandId) {
@@ -123,10 +135,18 @@ export const configure = mutation({
         enabled: args.enabled,
         agencyLabel,
         ...(approverIds.length ? { approverIds } : {}),
+        ...(briefFields ? { briefFields } : {}),
       },
     });
   },
 });
+
+/** A duplicate is resolved by a human confirmation; until then the notice stays on the piece. */
+function hasUnresolvedDuplicate(
+  item: { input: { issues?: { code: string }[] } } | null,
+) {
+  return Boolean(item?.input.issues?.some((i) => i.code === "file_duplicate_name"));
+}
 
 async function currentImportPiece(ctx: QueryCtx, version: Doc<"qaVisualPieceVersions">) {
   return ctx.db.get(version.currentImportPieceId);
@@ -162,6 +182,7 @@ export const deliveryPreview = query({
         pieceStatus: piece.status,
         approved: decision?.decision === "approved",
         alreadySent: sent.some((i) => i.status !== "withdrawn"),
+        unresolvedDuplicate: hasUnresolvedDuplicate(item),
       });
       const row = {
         pieceId: piece._id,
@@ -247,6 +268,9 @@ export const publishDelivery = mutation({
           pieceStatus: piece.status,
           approved: decision?.decision === "approved",
           alreadySent: sent.some((i) => i.status !== "withdrawn"),
+          unresolvedDuplicate: hasUnresolvedDuplicate(
+            await ctx.db.get(version.currentImportPieceId),
+          ),
         })
       )
         throw new ConvexError({
@@ -277,6 +301,7 @@ export const publishDelivery = mutation({
           production: importPiece?.input.production,
           image,
           requirementsHash: importPiece?.input.requirementsHash,
+          allowedFields: campaign.clientReview.briefFields,
         }),
         ...(image ? { image: { width: image.width, height: image.height } } : {}),
         clientState: "sent",
@@ -343,3 +368,58 @@ export const deliveries = query({
 });
 
 export type PieceClientStatus = NonNullable<Awaited<ReturnType<typeof pieceClientStatus>>>;
+
+/** Withdraws every item of a round that the client has not decided yet. */
+export const withdrawRound = mutation({
+  args: { deliveryId: v.id("qaVisualDeliveries") },
+  handler: async (ctx, { deliveryId }) => {
+    const round = await ctx.db.get(deliveryId);
+    if (!round) throw new ConvexError("La ronda ya no existe.");
+    await requireCampaign(ctx, round.campaignId);
+    const items = await ctx.db
+      .query("qaVisualDeliveryItems")
+      .withIndex("by_delivery", (q) => q.eq("deliveryId", deliveryId))
+      .take(1001);
+    let withdrawn = 0;
+    for (const item of items) {
+      if (item.status === "withdrawn" || item.clientState === "approved" || item.clientState === "changesRequested")
+        continue;
+      await ctx.db.patch(item._id, { status: "withdrawn" });
+      withdrawn++;
+      if (item.status !== "active") continue;
+      const previous = (
+        await ctx.db
+          .query("qaVisualDeliveryItems")
+          .withIndex("by_piece", (q) => q.eq("pieceId", item.pieceId).lt("clientVersion", item.clientVersion))
+          .order("desc")
+          .take(20)
+      ).find((i) => i.status === "superseded");
+      if (previous) await ctx.db.patch(previous._id, { status: "active" });
+    }
+    if (withdrawn === items.length) await ctx.db.patch(round._id, { status: "withdrawn" });
+    return withdrawn;
+  },
+});
+
+/** Freezes the brief again with the current order of the same version (§23.4 «Actualizar ficha»). */
+export const updateBrief = mutation({
+  args: { itemId: v.id("qaVisualDeliveryItems") },
+  handler: async (ctx, { itemId }) => {
+    const item = await ctx.db.get(itemId);
+    if (!item || item.status === "withdrawn") throw new ConvexError("El envío ya no existe.");
+    const { campaign } = await requireCampaign(ctx, item.campaignId);
+    const version = await ctx.db.get(item.pieceVersionId);
+    const importPiece = version && (await ctx.db.get(version.currentImportPieceId));
+    if (!version || !importPiece) throw new ConvexError("La pieza ya no está disponible.");
+    await ctx.db.patch(item._id, {
+      brief: buildClientBrief({
+        fileName: version.fileName,
+        requirements: structuredRequirements(importPiece.input),
+        production: importPiece.input.production,
+        image: item.image,
+        requirementsHash: importPiece.input.requirementsHash,
+        allowedFields: campaign.clientReview?.briefFields,
+      }),
+    });
+  },
+});

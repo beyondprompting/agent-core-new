@@ -1,3 +1,4 @@
+import { publishedId } from "./importRead";
 import { v } from "convex/values";
 import {
   internalMutation,
@@ -7,6 +8,28 @@ import {
 import type { Id } from "../_generated/dataModel";
 import { requireQaAdmin } from "./access";
 import { snapshot } from "./validators";
+
+export const imageVariant = v.union(
+  v.literal("thumbnail"),
+  v.literal("preview"),
+  v.literal("analysis"),
+);
+export type ImageVariant = "thumbnail" | "preview" | "analysis";
+export function variantStorage(
+  files:
+    | { thumbnailId: Id<"_storage">; analysisId: Id<"_storage">; previewId?: Id<"_storage"> }
+    | undefined,
+  variant: ImageVariant,
+) {
+  if (!files) return null;
+  return variant === "analysis"
+    ? files.analysisId
+    : variant === "preview"
+      ? (files.previewId ?? files.analysisId)
+      : files.thumbnailId;
+}
+export const variantMime = (variant: ImageVariant) =>
+  variant === "analysis" ? "image/jpeg" : "image/webp";
 
 const key = { campaign: v.string(), id: v.string(), version: v.string() };
 const leaseMs = 90_000;
@@ -61,6 +84,7 @@ export const finish = internalMutation({
     files: v.object({
       thumbnailId: v.id("_storage"),
       analysisId: v.id("_storage"),
+      previewId: v.optional(v.id("_storage")),
       snapshot,
     }),
   },
@@ -68,7 +92,7 @@ export const finish = internalMutation({
     const copy = await ctx.db.get(copyId);
     if (copy?.files?.analysisId === files.analysisId) return true;
     if (copy?.lease?.token !== token) return false;
-    await ctx.db.patch(copyId, { files, lease: undefined });
+    await ctx.db.patch(copyId, { files, lease: undefined, error: undefined });
     const campaign = await ctx.db
       .query("qaVisualCampaigns")
       .withIndex("by_review_key", (q) => q.eq("reviewKey", copy.campaign))
@@ -115,23 +139,31 @@ export const mediaStorage = internalQuery({
     await requireQaAdmin(ctx);
     const normalized = ctx.db.normalizeId("qaVisualCampaigns", campaignId);
     const campaign = normalized && (await ctx.db.get(normalized));
-    if (
-      !campaign ||
-      campaign.status !== "active" ||
-      !campaign.currentSnapshotId
-    )
+    if (!campaign || campaign.status !== "active" || !publishedId(campaign))
       return null;
-    const snapshotId = campaign.currentSnapshotId;
-    const piece = await ctx.db
-      .query("qaVisualCampaignPieces")
-      .withIndex("by_drive_version", (q) =>
-        q
-          .eq("snapshotId", snapshotId)
-          .eq("file.driveId", id)
-          .eq("file.driveVersion", version),
-      )
-      .first();
-    if (!piece) return null;
+    const snapshotId = publishedId(campaign)!;
+    const newId = ctx.db.normalizeId("qaVisualImports", snapshotId);
+    const piece = newId
+      ? await ctx.db
+          .query("qaVisualImportPieces")
+          .withIndex("by_drive_version", (q) =>
+            q
+              .eq("importId", newId)
+              .eq("file.driveId", id)
+              .eq("file.driveVersion", version),
+          )
+          .first()
+      : await ctx.db
+          .query("qaVisualCampaignPieces")
+          .withIndex("by_drive_version", (q) =>
+            q
+              .eq("snapshotId", snapshotId as Id<"qaVisualCampaignSnapshots">)
+              .eq("file.driveId", id)
+              .eq("file.driveVersion", version),
+          )
+          .first();
+    if (!piece || ("disposition" in piece && piece.disposition !== "active"))
+      return null;
     const copy = await findImageCopy(ctx, {
       campaign: campaign.reviewKey,
       id,
@@ -149,7 +181,7 @@ export const versionMedia = internalQuery({
   args: {
     campaignId: v.id("qaVisualCampaigns"),
     pieceVersionId: v.id("qaVisualPieceVersions"),
-    variant: v.union(v.literal("thumbnail"), v.literal("analysis")),
+    variant: imageVariant,
   },
   handler: async (ctx, args) => {
     await requireQaAdmin(ctx);
@@ -158,7 +190,8 @@ export const versionMedia = internalQuery({
     if (
       !campaign ||
       campaign.status !== "active" ||
-      version?.campaignId !== campaign._id
+      version?.campaignId !== campaign._id ||
+      version.status === "staged"
     )
       return null;
     const copy = version.copyId
@@ -168,11 +201,7 @@ export const versionMedia = internalQuery({
           id: version.driveFileId,
           version: version.driveVersion,
         });
-    return (
-      (args.variant === "analysis"
-        ? copy?.files?.analysisId
-        : copy?.files?.thumbnailId) ?? null
-    );
+    return variantStorage(copy?.files, args.variant);
   },
 });
 
@@ -180,7 +209,11 @@ export const versionMedia = internalQuery({
 export async function versionCopy(
   ctx: QueryCtx,
   campaignKey: string,
-  version: { copyId?: Id<"qaVisualImageCopies">; driveFileId: string; driveVersion: string },
+  version: {
+    copyId?: Id<"qaVisualImageCopies">;
+    driveFileId: string;
+    driveVersion: string;
+  },
 ) {
   return version.copyId
     ? await ctx.db.get(version.copyId)

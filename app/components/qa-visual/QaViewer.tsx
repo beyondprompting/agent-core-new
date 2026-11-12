@@ -1,7 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
-import { CheckCircle2, ScanLine, X, AlertCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { InternalGallery } from "@/app/components/qa-visual/campaign/InternalGallery";
+import { InternalCarousel } from "@/app/components/qa-visual/campaign/InternalCarousel";
+import { SendToClientDialog } from "@/app/components/qa-visual/deliveries/SendToClientDialog";
+import type { CampaignView } from "@/app/components/qa-visual/campaign/CampaignHeader";
+import "./gallery.css";
+import { CheckCircle2, ScanLine, X, AlertCircle, Square } from "lucide-react";
 import { CampaignHeader } from "@/app/components/qa-visual/campaign/CampaignHeader";
 import { FilesPanel } from "@/app/components/qa-visual/campaign/FilesPanel";
 import { PiecePanel } from "@/app/components/qa-visual/piece/PiecePanel";
@@ -157,7 +165,48 @@ function ReviewWorkspace({
   const dashboard = agent.dashboard;
   const total = dashboard?.total ?? 0;
   const failed = dashboard?.failed ?? 0;
-  const finished = (dashboard?.completed ?? 0) + failed;
+  const [view, setView] = useState<CampaignView>(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("vista") === "galeria"
+      ? "gallery"
+      : "review",
+  );
+  const [carousel, setCarousel] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [selection, setSelection] = useState<Set<string>>(() => new Set());
+  const changeView = (next: CampaignView) => {
+    setView(next);
+    const url = new URL(window.location.href);
+    if (next === "gallery") url.searchParams.set("vista", "galeria");
+    else url.searchParams.delete("vista");
+    window.history.replaceState(window.history.state, "", url);
+  };
+  const deliveryPreview = useQuery(api.qaVisual.clientReview.deliveryPreview, {
+    campaignId: campaignId as Id<"qaVisualCampaigns">,
+  });
+  const cancelled = dashboard?.cancelled ?? 0;
+  const finished = (dashboard?.completed ?? 0) + failed + cancelled;
+  // Pieces without a current result (never analyzed, outdated, failed or stopped).
+  const pendingCount = dashboard
+    ? pieces.filter((p) => {
+        const row = dashboard.reviews.find((r) => r?.name === p.filename);
+        return (
+          !row ||
+          ["pending", "stale", "failed", "cancelled"].includes(row.status)
+        );
+      }).length
+    : undefined;
+  const analyze = (scope: "pending" | "all" | "retry") =>
+    scope === "retry"
+      ? void agent.launch(
+          "retry",
+          dashboard?.failedNames,
+          dashboard?.failedPieceIds,
+        )
+      : void agent.launch("batch", undefined, undefined, scope);
+  const reanalyzePiece = piece.pieceId
+    ? () => void agent.launch("piece", [piece.filename], [piece.pieceId!])
+    : undefined;
   const percentage = total ? Math.round((finished / total) * 100) : 0;
   const complete = total > 0 && finished === total && !agent.busy;
   return (
@@ -169,11 +218,16 @@ function ReviewWorkspace({
         analyzing={agent.busy}
         onRefresh={onRefresh}
         refreshing={refreshing}
-        onAnalyze={
-          agent.available ? () => void agent.launch("batch") : undefined
-        }
+        onAnalyze={agent.available ? analyze : undefined}
+        view={view}
+        onViewChange={changeView}
+        onSendToClient={() => setSending(true)}
+        sendCount={deliveryPreview?.eligible.length}
+        pendingCount={pendingCount}
+        failedCount={dashboard?.failedPieceIds.length ?? 0}
+        totalCount={pieces.length}
       />
-      {dashboard?.total || phase || agent.error ? (
+      {dashboard?.total || phase || agent.error || agent.notice ? (
         <div className="qa-analysis-bar" role="status" aria-live="polite">
           <div
             className={`qa-analysis-icon ${complete ? (failed || dashboard?.findings || dashboard?.partial ? "has-errors" : dashboard?.stale ? "" : "is-complete") : ""}`}
@@ -271,14 +325,38 @@ function ReviewWorkspace({
             {agent.error && (
               <div className="qa-analysis-detail">{agent.error}</div>
             )}
+            {agent.notice && !agent.error && (
+              <div className="qa-analysis-detail">{agent.notice}</div>
+            )}
+            {!!cancelled && (
+              <div className="qa-analysis-detail">
+                {cancelled} {cancelled === 1 ? "pieza detenida" : "piezas detenidas"} antes de empezar
+              </div>
+            )}
           </div>
+          {dashboard?.active && (
+            <div className="qa-analysis-actions">
+              <button
+                className="button secondary"
+                disabled={dashboard.cancelling}
+                onClick={() => void agent.cancel()}
+              >
+                <Square size={13} />
+                {dashboard.cancelling ? "Deteniendo…" : "Detener"}
+              </button>
+            </div>
+          )}
           {agent.available && !!dashboard?.failedNames.length && (
             <div className="qa-analysis-actions">
               <button
                 className="button secondary"
                 disabled={agent.busy}
                 onClick={() =>
-                  void agent.launch("retry", dashboard.failedNames)
+                  void agent.launch(
+                    "retry",
+                    dashboard.failedNames,
+                    dashboard.failedPieceIds,
+                  )
                 }
               >
                 Reintentar fallidas
@@ -292,13 +370,37 @@ function ReviewWorkspace({
           {session.saveError}
         </div>
       )}
+      {view === "gallery" ? (
+        <InternalGallery
+          session={session}
+          onOpen={(id) => {
+            session.choosePiece(id);
+            setCarousel(true);
+          }}
+          selected={selection}
+          onToggle={(versionId) =>
+            setSelection((prev) => {
+              const next = new Set(prev);
+              if (next.has(versionId)) next.delete(versionId);
+              else next.add(versionId);
+              return next;
+            })
+          }
+          onClearSelection={() => setSelection(new Set())}
+          onSend={() => setSending(true)}
+        />
+      ) : (
       <section
         aria-label="Revisión visual"
         className={`review-layout ${!leftOpen ? "hide-left" : ""} ${!rightOpen ? "hide-right" : ""}`}
       >
         {leftOpen && <FilesPanel session={session} />}
         <section className="viewer" aria-label="Visor de pieza">
-          <ViewerToolbar session={session} />
+          <ViewerToolbar
+            session={session}
+            onReanalyze={agent.available ? reanalyzePiece : undefined}
+            reanalyzing={Boolean(row && ["queued", "preparing", "analyzing", "retrying"].includes(row.status))}
+          />
           <ReviewCanvas session={session} />
         </section>
         {rightOpen && (
@@ -308,6 +410,30 @@ function ReviewWorkspace({
           />
         )}
       </section>
+      )}
+      {carousel && (
+        <InternalCarousel
+          session={session}
+          onClose={() => setCarousel(false)}
+          onOpenDetailed={() => {
+            setCarousel(false);
+            changeView("review");
+          }}
+          onReanalyze={agent.available ? reanalyzePiece : undefined}
+          reanalyzing={Boolean(row && ["queued", "preparing", "analyzing", "retrying"].includes(row.status))}
+        />
+      )}
+      {sending && (
+        <SendToClientDialog
+          campaignId={campaignId as Id<"qaVisualCampaigns">}
+          preselected={[...selection]}
+          onClose={() => setSending(false)}
+          onSent={(message) => {
+            setSelection(new Set());
+            session.setToast(message);
+          }}
+        />
+      )}
       {pendingPin && (
         <ImageCommentPopover
           anchor={artboardRef}

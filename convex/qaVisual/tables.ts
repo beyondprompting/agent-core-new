@@ -16,6 +16,19 @@ import {
   status,
 } from "./validators";
 
+import {
+  importId,
+  importPieceId,
+  sourceFileId,
+  importTrigger,
+  importBuildStage,
+  importError,
+  importCounts,
+  display,
+  manifestEntry,
+  disposition,
+} from "./model/importContracts";
+
 const audience = v.union(v.literal("internal"), v.literal("client"));
 const audioClip = v.object({
   storageId: v.id("_storage"),
@@ -31,6 +44,92 @@ const clientState = v.union(
 );
 
 export const qaVisualTables = {
+  qaVisualSourceFiles: defineTable({
+    campaignId: v.id("qaVisualCampaigns"),
+    kind: sourceKind,
+    driveFileId: v.string(),
+    driveVersion: v.string(),
+    md5: v.optional(v.string()),
+    sha256: v.string(),
+    name: v.string(),
+    mimeType: v.string(),
+    bytes: v.number(),
+    modifiedAt: v.number(),
+    storageId: v.id("_storage"),
+    parsedId: v.optional(v.id("_storage")),
+    parserVersion: v.string(),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_parsed", ["parsedId"])
+    .index("by_campaign_drive", ["campaignId", "driveFileId", "driveVersion"])
+    .index("by_campaign_sha", ["campaignId", "kind", "sha256"]),
+  qaVisualImports: defineTable({
+    campaignId: v.id("qaVisualCampaigns"),
+    requestedBy: v.optional(v.id("users")),
+    trigger: importTrigger,
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("building"),
+      v.literal("ready"),
+      v.literal("failed"),
+      v.literal("superseded"),
+    ),
+    stage: v.optional(importBuildStage),
+    fingerprint: v.optional(v.string()),
+    parserVersion: v.string(),
+    templateVersion: v.string(),
+    excelFileId: v.optional(v.id("qaVisualSourceFiles")),
+    csvFileId: v.optional(v.id("qaVisualSourceFiles")),
+    deploymentFolderId: v.optional(v.string()),
+    driveFolderName: v.optional(v.string()),
+    ruleVersion: v.optional(v.string()),
+    rules: v.array(rule),
+    notices: v.array(v.string()),
+    counts: importCounts,
+    manifest: v.array(manifestEntry),
+    receipts: v.array(
+      v.object({ offset: v.number(), count: v.number(), hash: v.string() }),
+    ),
+    ignoredFiles: v.array(v.object({ name: v.string(), reason: v.string() })),
+    missingImages: v.array(v.object({ key: v.string(), csvLine: v.number() })),
+    excludedPieceIds: v.array(v.id("qaVisualPieces")),
+    error: v.optional(importError),
+    workId: v.optional(v.string()),
+    epoch: v.number(),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    cleanedAt: v.optional(v.number()),
+    planStorageId: v.optional(v.id("_storage")),
+    imageWarmupJobId: v.optional(v.id("_scheduled_functions")),
+    imageWarmupComplete: v.optional(v.boolean()),
+  })
+    .index("by_plan", ["planStorageId"])
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_fingerprint", ["campaignId", "fingerprint", "status"])
+    .index("by_status_updated", ["status", "updatedAt"])
+    .index("by_cleanup", ["status", "cleanedAt"]),
+  qaVisualImportPieces: defineTable({
+    importId: v.id("qaVisualImports"),
+    order: v.number(),
+    file: pieceFile,
+    input,
+    display,
+    disposition,
+    pieceId: v.optional(v.id("qaVisualPieces")),
+    pieceVersionId: v.optional(v.id("qaVisualPieceVersions")),
+    requirementsHash: v.string(),
+    inputHash: v.string(),
+  })
+    .index("by_import_order", ["importId", "order"])
+    .index("by_import_visible", ["importId", "disposition", "order"])
+    .index("by_import_piece", ["importId", "pieceId"])
+    .index("by_drive_version", [
+      "importId",
+      "file.driveId",
+      "file.driveVersion",
+    ]),
   // Third review (§23): a delivery round publishes approved versions to the client.
   qaVisualDeliveries: defineTable({
     campaignId: v.id("qaVisualCampaigns"),
@@ -98,25 +197,41 @@ export const qaVisualTables = {
     key: v.string(),
     fileKey: v.string(),
     driveFileId: v.string(),
-    status: v.union(v.literal("active"), v.literal("removed")),
+    status: v.union(
+      v.literal("staged"),
+      v.literal("active"),
+      v.literal("removed"),
+      v.literal("excluded"),
+    ),
+    baseKey: v.optional(v.string()),
+    duplicateOf: v.optional(v.id("qaVisualPieces")),
+    stagedImportId: v.optional(v.id("qaVisualImports")),
+    order: v.optional(v.number()),
+    display: v.optional(display),
     currentVersionId: v.optional(v.id("qaVisualPieceVersions")),
-    currentImportPieceId: v.optional(v.id("qaVisualCampaignPieces")),
+    currentImportPieceId: v.optional(importPieceId),
     versionCount: v.number(),
   })
     .index("by_campaign_file_key", ["campaignId", "fileKey", "status"])
     .index("by_campaign_key", ["campaignId", "key"])
     .index("by_campaign_drive", ["campaignId", "driveFileId"])
-    .index("by_campaign", ["campaignId", "status"]),
+    .index("by_campaign", ["campaignId", "status"])
+    .index("by_campaign_order", ["campaignId", "status", "order"])
+    .index("by_staged_import", ["stagedImportId"]),
   qaVisualPieceVersions: defineTable({
     pieceId: v.id("qaVisualPieces"),
+    originalPieceId: v.optional(v.id("qaVisualPieces")),
     campaignId: v.id("qaVisualCampaigns"),
     number: v.number(),
+    status: v.optional(v.union(v.literal("staged"), v.literal("active"))),
+    stagedImportId: v.optional(v.id("qaVisualImports")),
+    driveCreatedAt: v.optional(v.number()),
     contentHash: v.string(),
     driveFileId: v.string(),
     driveVersion: v.string(),
     fileName: v.string(),
     currentInputHash: v.string(),
-    currentImportPieceId: v.id("qaVisualCampaignPieces"),
+    currentImportPieceId: importPieceId,
     currentDecisionId: v.optional(v.id("qaVisualDecisions")),
     copyId: v.optional(v.id("qaVisualImageCopies")),
     humanActivity: v.optional(v.boolean()),
@@ -125,7 +240,10 @@ export const qaVisualTables = {
   })
     .index("by_piece", ["pieceId", "number"])
     .index("by_piece_content", ["pieceId", "contentHash"])
-    .index("by_drive_version", ["campaignId", "driveFileId", "driveVersion"]),
+    .index("by_campaign", ["campaignId"])
+    .index("by_drive_version", ["campaignId", "driveFileId", "driveVersion"])
+    .index("by_staged_import", ["stagedImportId"])
+    .index("by_piece_status", ["pieceId", "status", "number"]),
   qaVisualThreads: defineTable({
     campaignId: v.id("qaVisualCampaigns"),
     pieceId: v.id("qaVisualPieces"),
@@ -204,7 +322,17 @@ export const qaVisualTables = {
   }).index("by_version", ["pieceVersionId"]),
   qaVisualLinkOverrides: defineTable({
     campaignId: v.id("qaVisualCampaigns"),
-    kind: v.union(v.literal("productAlias"), v.literal("offerLink")),
+    kind: v.union(
+      v.literal("productAlias"),
+      v.literal("offerLink"),
+      v.literal("keepDuplicate"),
+      v.literal("mergeAsVersion"),
+    ),
+    baseKey: v.optional(v.string()),
+    keepDriveFileId: v.optional(v.string()),
+    olderDriveFileId: v.optional(v.string()),
+    newerDriveFileId: v.optional(v.string()),
+    revokedBy: v.optional(v.id("users")),
     pieceKey: v.optional(v.string()),
     from: v.optional(v.string()),
     to: v.optional(v.string()),
@@ -221,6 +349,9 @@ export const qaVisualTables = {
     status: v.union(v.literal("active"), v.literal("archived")),
     createdBy: v.id("users"),
     currentSnapshotId: v.optional(v.id("qaVisualCampaignSnapshots")),
+    currentImportId: v.optional(v.id("qaVisualImports")),
+    activeImportId: v.optional(v.id("qaVisualImports")),
+    driveFolderName: v.optional(v.string()),
     sync: v.optional(
       v.object({
         startedAt: v.number(),
@@ -249,6 +380,8 @@ export const qaVisualTables = {
         enabled: v.boolean(),
         agencyLabel: v.string(),
         approverIds: v.optional(v.array(v.id("users"))),
+        // Keys of the client brief shown in the portal (§23.16 C2). Missing = all.
+        briefFields: v.optional(v.array(v.string())),
       }),
     ),
   })
@@ -307,9 +440,14 @@ export const qaVisualTables = {
       v.object({
         thumbnailId: v.id("_storage"),
         analysisId: v.id("_storage"),
+        // 640 px WebP for gallery and carousel thumbnails (§23.9). Older copies fall back to analysis.
+        previewId: v.optional(v.id("_storage")),
         snapshot,
       }),
     ),
+    // Image pool job in flight and last terminal failure (§13).
+    job: v.optional(v.object({ workId: v.string(), at: v.number() })),
+    error: v.optional(v.string()),
   }).index("by_version", ["campaign", "driveId", "driveVersion"]),
   qaVisualClientRequirements: defineTable({
     documentId: v.id("qaVisualSourceDocuments"),
@@ -321,7 +459,7 @@ export const qaVisualTables = {
     campaign: v.string(),
     version: v.string(),
     rules: v.array(rule),
-    sourceDocumentId: v.optional(v.id("qaVisualSourceDocuments")),
+    sourceDocumentId: v.optional(sourceFileId),
   }).index("by_campaign_version", ["campaign", "version"]),
   qaVisualAssetVersions: defineTable({
     campaign: v.string(),
@@ -339,7 +477,7 @@ export const qaVisualTables = {
   qaVisualRuns: defineTable({
     campaign: v.string(),
     requestedBy: v.id("users"),
-    snapshotId: v.optional(v.id("qaVisualCampaignSnapshots")),
+    snapshotId: v.optional(importId),
     ruleSetId: v.id("qaVisualRuleSets"),
     kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
     state: v.union(
@@ -353,7 +491,11 @@ export const qaVisualTables = {
     scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
     cancelledAt: v.optional(v.number()),
     cancelledBy: v.optional(v.id("users")),
+    // "pool": stage 4 runner (qaVisualAnalysisPool). Missing: legacy workflow runner.
+    runner: v.optional(v.literal("pool")),
+    finishedAt: v.optional(v.number()),
   })
+    .index("by_state", ["state"])
     .index("by_campaign_state", ["campaign", "state"])
     .index("by_campaign", ["campaign"])
     .index("by_request", ["requestedBy", "requestId"]),
@@ -368,6 +510,8 @@ export const qaVisualTables = {
     status,
     assetId: v.optional(v.id("qaVisualAssetVersions")),
     copyId: v.optional(v.id("qaVisualImageCopies")),
+    workId: v.optional(v.string()),
+    startedAt: v.optional(v.number()),
     attempts: v.array(attempt),
     findings: v.optional(v.array(finding)),
     result: v.optional(result),

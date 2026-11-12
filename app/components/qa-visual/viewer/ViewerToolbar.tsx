@@ -47,8 +47,12 @@ export function ViewerToolbar({
     openAiReview,
     download,
   },
+  onReanalyze,
+  reanalyzing,
 }: {
   session: ReviewSession;
+  onReanalyze?: () => void;
+  reanalyzing?: boolean;
 }) {
   return (
     <>
@@ -199,6 +203,9 @@ export function ViewerToolbar({
         version={version}
         onOpenAi={openAiReview}
         onOpenHuman={() => setModal("approval")}
+        onReanalyze={onReanalyze}
+        reanalyzing={reanalyzing}
+        client={piece.client}
       />
     </>
   );

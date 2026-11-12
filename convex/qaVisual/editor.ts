@@ -16,11 +16,12 @@ export const piece = query({
   args: { pieceId: v.id("qaVisualPieces"), version: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const piece = await ctx.db.get(args.pieceId);
-    if (!piece) return null;
+    if (!piece || piece.status === "staged") return null;
     const { campaign, user } = await requireCampaign(ctx, piece.campaignId);
     const versions = await ctx.db
       .query("qaVisualPieceVersions")
       .withIndex("by_piece", (q) => q.eq("pieceId", piece._id))
+      .filter((q) => q.neq(q.field("status"), "staged"))
       .order("desc")
       .take(201);
     const version = args.version
@@ -33,7 +34,12 @@ export const piece = query({
       : piece.currentVersionId
         ? await ctx.db.get(piece.currentVersionId)
         : null;
-    if (!version) return null;
+    if (
+      !version ||
+      version.status === "staged" ||
+      version.pieceId !== piece._id
+    )
+      return null;
     const item = await ctx.db.get(version.currentImportPieceId);
     const { latest, completed } = await versionReview(ctx, version);
     const reviewHistory = await ctx.db

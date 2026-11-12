@@ -59,6 +59,8 @@ export function toReviewPieces(
             ? `${product} · ${variantLabel}`
             : product,
       filename: file.name,
+      imageError: file.imageError,
+      client: file.client ?? null,
       image: file.thumbnailReady ? preparedMedia + "&variant=analysis" : "",
       originalImage: media,
       thumbnail: file.thumbnailReady

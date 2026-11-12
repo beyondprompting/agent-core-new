@@ -6,7 +6,7 @@ import { normalize } from "./model/normalize";
 const tokenUrl = "https://oauth2.googleapis.com/token";
 const driveUrl = "https://www.googleapis.com/drive/v3/files";
 const fields =
-  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren)";
+  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren),shortcutDetails(targetId,targetMimeType)";
 export const folderMime = "application/vnd.google-apps.folder";
 export const campaignFolders = ["RECURSOS", "EDITABLES", "DESPLIEGUE"] as const;
 export const matrixLimit = 15 * 1024 * 1024;
@@ -25,6 +25,7 @@ export type DriveFile = {
   parents?: string[];
   trashed?: boolean;
   capabilities?: { canListChildren?: boolean };
+  shortcutDetails?: { targetId: string; targetMimeType: string };
 };
 type ServiceAccount = { client_email: string; private_key: string };
 
@@ -94,6 +95,15 @@ async function request(url: string) {
   });
 }
 
+export class DriveRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 async function check(response: Response) {
   if (response.ok) return;
   const body = await response.json().catch(() => null);
@@ -102,7 +112,10 @@ async function check(response: Response) {
     typeof reason === "string" && /^[a-zA-Z0-9_]+$/.test(reason)
       ? ` · ${reason}`
       : "";
-  throw new Error(`Google Drive respondió HTTP ${response.status}${detail}.`);
+  throw new DriveRequestError(
+    `Google Drive respondió HTTP ${response.status}${detail}.`,
+    response.status,
+  );
 }
 
 export function driveContentUrl(id: string) {
@@ -161,7 +174,11 @@ export function isCampaignFolder(
   file: DriveFile,
   name: (typeof campaignFolders)[number],
 ) {
-  return file.mimeType === folderMime && normalize(file.name) === name;
+  return (
+    (file.mimeType === folderMime ||
+      file.shortcutDetails?.targetMimeType === folderMime) &&
+    normalize(file.name) === name
+  );
 }
 
 export function findCampaignFolder(
@@ -172,4 +189,21 @@ export function findCampaignFolder(
   if (matches.length !== 1)
     throw new Error(`Se esperaba una única carpeta ${name} en Google Drive.`);
   return matches[0];
+}
+
+export async function resolveFolderShortcut(file: DriveFile | null) {
+  const seen = new Set<string>();
+  while (file?.mimeType === "application/vnd.google-apps.shortcut") {
+    if (
+      file.trashed ||
+      !file.shortcutDetails ||
+      file.shortcutDetails.targetMimeType !== folderMime ||
+      seen.has(file.id) ||
+      seen.size >= 4
+    )
+      return null;
+    seen.add(file.id);
+    file = await getDriveFile(file.shortcutDetails.targetId);
+  }
+  return file;
 }

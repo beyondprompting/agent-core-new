@@ -63,6 +63,7 @@ function drive(t: TestContext) {
     deployment: [image],
   };
   const calls: string[] = [];
+  const metadata: Record<string, DriveFile> = { root };
   t.mock.method(
     globalThis,
     "fetch",
@@ -82,13 +83,14 @@ function drive(t: TestContext) {
         "inspection must not download file contents",
       );
       calls.push(request.pathname);
-      if (request.pathname.endsWith("/root")) return Response.json(root);
+      const id = request.pathname.split("/").at(-1)!;
+      if (metadata[id]) return Response.json(metadata[id]);
       const parent = request.searchParams.get("q")?.match(/^'([^']+)'/)?.[1];
       assert.ok(parent && parent in listings, "unexpected Drive request");
       return Response.json({ files: listings[parent] });
     },
   );
-  return { listings, calls };
+  return { listings, calls, metadata };
 }
 
 test("folder inspection is read-only, accepts normalized names and pins the selected sources", async (t) => {
@@ -510,4 +512,73 @@ test("a failed import preserves the published snapshot and stale callbacks are i
       for (const job of jobs) await ctx.scheduler.cancel(job._id);
     });
   }
+});
+
+test("converted CSV auto-selection compares versions only within the same base name", async (t) => {
+  const d = drive(t);
+  d.listings.editables = [
+    csv,
+    { ...csv, id: "csv-2", name: "PEDIDO_CONVERTED_v2.csv" },
+    { ...csv, id: "csv-10", name: "PEDIDO_CONVERTED_v10.csv" },
+  ];
+  let inspected = await inspectDriveFolder(url);
+  assert.ok("selection" in inspected);
+  assert.equal(inspected.selection.csvFileId, "csv-10");
+  inspected = await inspectDriveFolder(url, { csvFileId: "csv-2" });
+  assert.ok("selection" in inspected);
+  assert.equal(inspected.selection.csvFileId, "csv-2");
+  d.listings.editables.push({
+    ...csv,
+    id: "other",
+    name: "OTRO_CONVERTED_v20.csv",
+  });
+  inspected = await inspectDriveFolder(url);
+  assert.ok("checks" in inspected);
+  assert.equal(
+    inspected.checks.find((c) => c.key === "EDITABLES")?.status,
+    "choose",
+  );
+});
+
+test("root and subfolder shortcuts resolve to readable folders and unsupported matrices give a conversion instruction", async (t) => {
+  const d = drive(t);
+  d.metadata.alias = {
+    id: "alias",
+    name: "Acceso",
+    mimeType: "application/vnd.google-apps.shortcut",
+    shortcutDetails: { targetId: "root", targetMimeType: folderMime },
+  };
+  d.metadata.target = folder("target", "Recursos reales");
+  d.listings.root[0] = {
+    id: "resources-shortcut",
+    name: "RECURSOS",
+    mimeType: "application/vnd.google-apps.shortcut",
+    shortcutDetails: { targetId: "target", targetMimeType: folderMime },
+  };
+  d.listings.target = [excel];
+  const resolved = await inspectDriveFolder(
+    "https://drive.google.com/drive/folders/alias",
+  );
+  assert.ok("folder" in resolved && resolved.ok);
+  assert.equal(resolved.folder.id, "root");
+  d.listings.target = [
+    {
+      id: "sheet",
+      name: "Matriz",
+      mimeType: "application/vnd.google-apps.spreadsheet",
+    },
+  ];
+  const unsupported = await inspectDriveFolder(url);
+  assert.ok("checks" in unsupported && !unsupported.ok);
+  assert.match(
+    unsupported.checks.find((c) => c.key === "RECURSOS")!.detail!,
+    /convertí.*xlsx/,
+  );
+  d.metadata.target = { ...d.metadata.target, trashed: true };
+  const trashed = await inspectDriveFolder(url);
+  assert.ok("checks" in trashed && !trashed.ok);
+  assert.equal(
+    trashed.checks.find((c) => c.key === "RECURSOS")!.status,
+    "missing",
+  );
 });

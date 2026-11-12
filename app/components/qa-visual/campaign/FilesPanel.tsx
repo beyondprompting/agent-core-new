@@ -15,6 +15,7 @@ import {
   getHumanReviewState,
 } from "@/app/lib/qa-visual/review-state";
 import { CampaignResources } from "./CampaignResources";
+import { internalClientState } from "@/app/lib/qa-visual/client-state";
 import { CampaignSummary } from "./CampaignSummary";
 import { usePieceKeyboardNavigation } from "@/app/hooks/qa-visual/use-piece-keyboard-navigation";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
@@ -114,6 +115,12 @@ export function FilesPanel({
                   <option value="Cambios solicitados">Humana · Cambios</option>
                   <option value="Aprobada">Humana · Aprobada</option>
                 </optgroup>
+                <optgroup label="Revisión del cliente">
+                  <option value="client:none">Cliente · Sin enviar</option>
+                  <option value="client:sent">Cliente · Por revisar</option>
+                  <option value="client:changesRequested">Cliente · Pidió cambios</option>
+                  <option value="client:approved">Cliente · Aprobada</option>
+                </optgroup>
               </select>
             </div>
           </div>
@@ -170,6 +177,14 @@ export function FilesPanel({
                     <strong title={p.name}>{p.name}</strong>
                     <div className="file-meta-row">
                       <span className="file-format">{p.format}</span>
+                      {p.client && (
+                        <span
+                          className={`qa-client-chip tone-${internalClientState(p.client).tone}`}
+                          title={internalClientState(p.client).detail}
+                        >
+                          Cliente · {internalClientState(p.client).short}
+                        </span>
+                      )}
                       {conversationCount > 0 && (
                         <span
                           className="file-comment-count"

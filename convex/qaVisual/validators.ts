@@ -122,6 +122,8 @@ export const snapshot = v.object({
 
 export const sourceKind = v.union(v.literal("excel"), v.literal("csv"));
 export const pieceFile = v.object({
+  createdAt: v.optional(v.number()),
+  mimeType: v.optional(v.string()),
   name: v.string(),
   bytes: v.number(),
   updatedAt: v.number(),

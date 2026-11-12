@@ -36,4 +36,7 @@ crons.interval("send external task status emails", { minutes: 1 }, internal.data
 
 crons.daily("reconcile analytics changes", { hourUTC: 5, minuteUTC: 10 }, internal.analytics.jobs.nightly, {});
 
+crons.interval("recover qa visual imports", { minutes: 10 }, internal.qaVisual.imports.sweep, {});
+crons.interval("recover qa visual analysis", { minutes: 10 }, internal.qaVisual.runner.sweep, {});
+
 export default crons;

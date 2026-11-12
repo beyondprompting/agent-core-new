@@ -13,6 +13,7 @@ import {
   type Mark,
 } from "./use-canvas-annotations";
 import { usePieceReview } from "./use-piece-review";
+import { uploadRecording, type Recording } from "./use-voice-recorder";
 import type { QaInventory } from "@/app/lib/qa-visual/source";
 import type { Anchor } from "@/convex/qaVisual/model/collaboration";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -26,8 +27,24 @@ export function useReviewSession(
   reviewer: string,
   campaignId: string,
 ) {
-  const [activeId, setActiveId] = useState(pieces[0].id);
-  const [selectedVersion, setVersion] = useState<number>();
+  // Deep link (§19.3): ?pieza=<pieceId>&v=<version>&hilo=<threadId>
+  const [link] = useState(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    return {
+      piece: params.get("pieza"),
+      version: Number(params.get("v")) || undefined,
+      thread: params.get("hilo"),
+    };
+  });
+  const [activeId, setActiveId] = useState(
+    () =>
+      pieces.find((p) => link?.piece && p.pieceId === link.piece)?.id ??
+      pieces[0].id,
+  );
+  const [selectedVersion, setVersion] = useState<number | undefined>(
+    link?.version,
+  );
   const currentPiece = pieces.find((p) => p.id === activeId) ?? pieces[0];
   const version = selectedVersion ?? currentPiece.currentVersion ?? 1;
   const persisted = usePieceReview(currentPiece.pieceId, version);
@@ -43,7 +60,13 @@ export function useReviewSession(
     [query, setQuery] = useState(""),
     [statusFilter, setStatusFilter] = useState("all");
   const [draft, setDraft] = useState("");
-  const [replyTo, setReplyTo] = useState<Comment["id"] | null>(null);
+  const [replyTo, setReplyToState] = useState<Comment["id"] | null>(null);
+  // In client threads a reply is a private note unless the reviewer chooses to answer the client.
+  const [replyVisibility, setReplyVisibility] = useState<"internal" | "client">("internal");
+  const setReplyTo = (id: Comment["id"] | null) => {
+    setReplyToState(id);
+    setReplyVisibility("internal");
+  };
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -122,6 +145,29 @@ export function useReviewSession(
       return () => animation?.cancel();
     }
   }, [commentFocus]);
+  const linkedThread = useRef(link?.thread ?? null);
+  useEffect(() => {
+    const thread = linkedThread.current;
+    if (!thread || !data) return;
+    linkedThread.current = null;
+    if (data.threads.some((t) => t._id === thread)) {
+      setSelected(thread);
+      setRightTab("Comentarios");
+      setRightOpen(true);
+      setCommentFocus({ id: thread, highlight: true });
+    }
+  }, [data]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentPiece.pieceId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("pieza", currentPiece.pieceId);
+    if (selectedVersion) url.searchParams.set("v", String(selectedVersion));
+    else url.searchParams.delete("v");
+    const thread = comments.find((c) => c.id === selected)?.threadId;
+    if (thread) url.searchParams.set("hilo", thread);
+    else url.searchParams.delete("hilo");
+    window.history.replaceState(window.history.state, "", url);
+  }, [currentPiece.pieceId, selectedVersion, selected, comments]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 3500);
@@ -207,6 +253,7 @@ export function useReviewSession(
             ...ref,
             body: text,
             requestId,
+            ...(comment?.audience === "client" ? { visibility: replyVisibility } : {}),
           })
         : persisted.create({
             pieceVersionId: data.versionId,
@@ -232,6 +279,29 @@ export function useReviewSession(
       setDraft("");
       setReplyTo(null);
     }
+  };
+  /** Voice reply (§23.7): uploads the recording and attaches it to the reply. */
+  const publishVoice = async (recording: Recording) => {
+    if (!data || !replyTo) return false;
+    const comment = comments.find((c) => c.id === replyTo);
+    const ref = comment && target(comment);
+    if (!ref) return false;
+    const saved = await persisted.save(async () => {
+      const audio = await uploadRecording(() => persisted.uploadUrl({}), recording);
+      return persisted.reply({
+        pieceVersionId: data.versionId,
+        ...ref,
+        body: draft,
+        requestId: crypto.randomUUID(),
+        audio: { storageId: audio.storageId as Id<"_storage">, durationMs: audio.durationMs },
+        ...(comment?.audience === "client" ? { visibility: replyVisibility } : {}),
+      });
+    });
+    if (!saved) return false;
+    setDraft("");
+    setReplyTo(null);
+    setToast("Audio guardado en la conversación");
+    return true;
   };
   const cancelImageComment = () => {
     setPendingPin(null);
@@ -382,6 +452,9 @@ export function useReviewSession(
     publishImageComment,
     query,
     replyTo,
+    replyVisibility,
+    setReplyVisibility,
+    publishVoice,
     requiresException,
     rightOpen,
     rightTab,

@@ -80,8 +80,18 @@ export function Artwork({
       }}
     >
       {!src || (thumbnail && failedImage === src) ? (
-        <span className="artwork-unavailable" aria-hidden="true">
-          {thumbnail ? <ImageIcon size={16} /> : "Preparando imagen…"}
+        <span
+          className="artwork-unavailable"
+          aria-hidden={thumbnail ? "true" : undefined}
+          title={piece.imageError}
+        >
+          {thumbnail ? (
+            <ImageIcon size={16} />
+          ) : piece.imageError ? (
+            piece.imageError
+          ) : (
+            "Preparando imagen…"
+          )}
         </span>
       ) : failedImage === src ? (
         <span className="artwork-unavailable">Imagen no disponible</span>

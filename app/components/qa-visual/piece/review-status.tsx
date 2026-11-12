@@ -7,6 +7,8 @@ import {
   Eye,
   LoaderCircle,
   UserRound,
+  RotateCcw,
+  Building2,
 } from "lucide-react";
 import type {
   AiReviewState,
@@ -14,6 +16,8 @@ import type {
   ReviewTone,
 } from "@/app/lib/qa-visual/review-state";
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
+import { internalClientState } from "@/app/lib/qa-visual/client-state";
+import type { PieceClientStatus } from "@/convex/qaVisual/clientReview";
 
 function StateIcon({
   tone,
@@ -98,6 +102,9 @@ export function ReviewStatusBar({
   version,
   onOpenAi,
   onOpenHuman,
+  onReanalyze,
+  reanalyzing = false,
+  client,
 }: {
   ai: AiReviewState;
   human: HumanReviewState;
@@ -105,12 +112,29 @@ export function ReviewStatusBar({
   version: number;
   onOpenAi: () => void;
   onOpenHuman: () => void;
+  onReanalyze?: () => void;
+  reanalyzing?: boolean;
+  client?: PieceClientStatus | null;
 }) {
+  const clientState = client ? internalClientState(client) : null;
   return (
     <section
-      className="review-status-strip"
+      className={`review-status-strip ${clientState ? "with-client" : ""}`}
       aria-label="Estado de revisión IA y aprobación humana"
     >
+      <div className="ai-state-wrap">
+      {onReanalyze && (
+        <button
+          type="button"
+          className="qa-reanalyze"
+          disabled={reanalyzing}
+          onClick={onReanalyze}
+          title={reanalyzing ? "Esta pieza ya se está analizando" : "Volver a analizar esta versión"}
+          aria-label={`Volver a analizar ${pieceName}, versión ${version}`}
+        >
+          <RotateCcw size={13} />
+        </button>
+      )}
       <button
         className={`review-state-card ai-state-card state-${ai.tone}`}
         onClick={onOpenAi}
@@ -134,6 +158,7 @@ export function ReviewStatusBar({
           <ArrowUpRight size={14} />
         </span>
       </button>
+      </div>
       <div
         className={`review-state-card human-state-card state-${human.tone}`}
         role="group"
@@ -172,6 +197,22 @@ export function ReviewStatusBar({
           )}
         </button>
       </div>
+      {clientState && (
+        <div
+          className={`review-state-card client-state-card tone-${clientState.tone}`}
+          role="group"
+          aria-label={`Revisión del cliente: ${clientState.label}`}
+        >
+          <span className="review-identity">
+            <Building2 size={20} />
+          </span>
+          <span className="review-state-copy">
+            <span className="review-state-eyebrow">CLIENTE · DEFINITORIA</span>
+            <strong className="review-state-title">{clientState.label}</strong>
+            <span className="review-state-detail">{clientState.detail}</span>
+          </span>
+        </div>
+      )}
     </section>
   );
 }

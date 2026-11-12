@@ -6,6 +6,8 @@ export type QaPieceFile = QaFile & {
   driveId: string;
   driveVersion: string;
   contentHash?: string;
+  createdAt?: number;
+  mimeType?: string;
 };
 export type QaInventory = {
   campaignName?: string;
@@ -13,6 +15,8 @@ export type QaInventory = {
   csv: QaFile | null;
   pieces: (QaPieceFile & {
     thumbnailReady?: boolean;
+    imageError?: string;
+    client?: import("../../../convex/qaVisual/clientReview").PieceClientStatus | null;
     pieceId?: import("../../../convex/_generated/dataModel").Id<"qaVisualPieces">;
     pieceVersionId?: import("../../../convex/_generated/dataModel").Id<"qaVisualPieceVersions">;
     currentVersion?: number;
@@ -22,6 +26,8 @@ export type QaInventory = {
     humanStatus?: import("./review-model").PieceStatus;
   })[];
   notices: string[];
+  ignoredFiles?: { name: string; reason: string }[];
+  missingImages?: { key: string; csvLine: number }[];
   clientRequirements?: Record<string, ClientRequirement[]>;
   production?: Record<string, ProductionFields>;
 };

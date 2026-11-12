@@ -1,3 +1,10 @@
+import { importId } from "./model/importContracts";
+import {
+  publishedId,
+  readImport,
+  readPieces,
+  type ImportedPiece,
+} from "./importRead";
 import {
   displayReviewStatus,
   isCurrentReview,
@@ -22,6 +29,7 @@ import {
 import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
 import { dispatchReady } from "./runDispatch";
+import { cancelPoolRun, fillSlots } from "./runner";
 import {
   attempt,
   finding,
@@ -36,8 +44,9 @@ export const start = mutation({
   args: {
     campaignId: v.id("qaVisualCampaigns"),
     requestId: v.string(),
-    snapshotId: v.id("qaVisualCampaignSnapshots"),
+    snapshotId: importId,
     names: v.optional(v.array(v.string())),
+    pieceIds: v.optional(v.array(v.id("qaVisualPieces"))),
     kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
     // batch only: "pending" (default) skips pieces with a current completed analysis.
     scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
@@ -51,7 +60,8 @@ export const start = mutation({
     const requestedBy = await requireQaAdmin(ctx);
     if (
       !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) ||
-      (args.names?.length ?? 0) > MAX_RUN_PIECES
+      Math.max(args.names?.length ?? 0, args.pieceIds?.length ?? 0) >
+        MAX_RUN_PIECES
     )
       return { error: "Solicitud de análisis inválida." };
 
@@ -70,19 +80,16 @@ export const start = mutation({
         return { error: "La solicitud pertenece a otra campaña." };
       return { runId: existing._id };
     }
-    if (registered.currentSnapshotId !== args.snapshotId)
+    if (publishedId(registered) !== args.snapshotId)
       return {
         error:
           "Los datos de la campaña cambiaron. Volvé a iniciar el análisis.",
       };
-    const data = await ctx.db.get(args.snapshotId);
+    const data = await readImport(ctx, args.snapshotId);
     if (!data || data.campaignId !== args.campaignId)
       return { error: "La campaña todavía no tiene datos importados." };
 
-    const pieces = await ctx.db
-      .query("qaVisualCampaignPieces")
-      .withIndex("by_snapshot", (q) => q.eq("snapshotId", data._id))
-      .collect();
+    const pieces = await readPieces(ctx, data._id);
     if (
       pieces.some(
         (piece) =>
@@ -95,14 +102,20 @@ export const start = mutation({
           "Actualizá desde Drive antes de analizar: hay nuevos criterios de revisión.",
       };
     const names = new Set(args.names);
+    const pieceIds = args.pieceIds ? new Set(args.pieceIds) : null;
     const scope = args.kind === "batch" ? (args.scope ?? "pending") : "all";
     const requested = pieces.filter(
-      (piece) => args.kind === "batch" || names.has(piece.input.name),
+      (piece) =>
+        args.kind === "batch" ||
+        (pieceIds
+          ? Boolean(piece.pieceId && pieceIds.has(piece.pieceId))
+          : names.has(piece.input.name)),
     );
     if (
       !requested.length ||
       requested.length > MAX_RUN_PIECES ||
-      (args.kind !== "batch" && requested.length !== names.size) ||
+      (args.kind !== "batch" &&
+        requested.length !== (pieceIds?.size ?? names.size)) ||
       (args.kind === "piece" && requested.length !== 1)
     )
       return {
@@ -132,7 +145,7 @@ export const start = mutation({
         )
         .first();
       if (!active) continue;
-      if (args.kind !== "piece" || !active.rollingQueue)
+      if (args.kind !== "piece" || !(active.rollingQueue || active.runner === "pool"))
         return {
           error:
             "Ya hay un análisis en curso. Podés detenerlo o esperar a que termine.",
@@ -152,6 +165,22 @@ export const start = mutation({
       )
         return { error: "Esta pieza ya se está analizando." };
       const first = busy.reduce((min, row) => Math.min(min, row.order), 0);
+      if (active.runner === "pool") {
+        // §10.4: the piece goes to the front of the queue of the running analysis.
+        await ctx.db.insert("qaVisualReviews", {
+          runId: active._id,
+          campaign,
+          campaignId: args.campaignId,
+          pieceId: piece.pieceId,
+          pieceVersionId: piece.pieceVersionId,
+          input: piece.input,
+          order: first - 1,
+          status: "queued",
+          attempts: [],
+        });
+        await fillSlots(ctx, active._id);
+        return { runId: active._id, queued: 1 };
+      }
       const reviewId = await ctx.db.insert("qaVisualReviews", {
         runId: active._id,
         campaign,
@@ -196,51 +225,32 @@ export const start = mutation({
       snapshotId: data._id,
       ruleSetId,
       kind: args.kind,
-      state: "preparing",
-      activeBatch: [],
-      rollingQueue: true,
+      state: "running",
+      runner: "pool",
       requestId: args.requestId,
       ...(args.kind === "batch" ? { scope } : {}),
     });
-    const ids = await Promise.all(
-      selected.map(({ input, pieceId, pieceVersionId }, order) =>
-        ctx.db.insert("qaVisualReviews", {
-          runId,
-          campaign,
-          campaignId: args.campaignId,
-          pieceId,
-          pieceVersionId,
-          input,
-          order,
-          status: "preparing",
-          attempts: [],
-        }),
-      ),
-    );
-    await ctx.scheduler.runAfter(
-      600_000,
-      internal.qaVisual.runs.expirePreparation,
-      { runId },
-    );
-    await ctx.scheduler.runAfter(0, internal.qaVisual.stageDriveRun.prepare, {
-      runId,
-      folderId: data.deploymentFolderId,
-      items: selected.map(({ file }, index) => ({
-        reviewId: ids[index],
-        id: file.driveId,
-        version: file.driveVersion,
-      })),
-    });
+    // Stage 4 runner: every piece waits as "queued"; fillSlots starts up to 4 per run.
+    for (const [order, { input, pieceId, pieceVersionId }] of selected.entries())
+      await ctx.db.insert("qaVisualReviews", {
+        runId,
+        campaign,
+        campaignId: args.campaignId,
+        pieceId,
+        pieceVersionId,
+        input,
+        order,
+        status: "queued",
+        attempts: [],
+      });
+    await fillSlots(ctx, runId);
     return { runId, queued: selected.length };
   },
 });
 
 const MAX_RUN_PIECES = 1000;
 
-async function hasCurrentResult(
-  ctx: QueryCtx,
-  piece: Doc<"qaVisualCampaignPieces">,
-) {
+async function hasCurrentResult(ctx: QueryCtx, piece: ImportedPiece) {
   if (!piece.pieceVersionId) return false;
   const completed = await ctx.db
     .query("qaVisualReviews")
@@ -272,6 +282,12 @@ export const cancel = mutation({
         )
         .take(10);
       for (const run of runs) {
+        if (run.runner === "pool") {
+          await ctx.db.patch(run._id, { cancelledAt: Date.now(), cancelledBy: user });
+          stopped += await cancelPoolRun(ctx, run);
+          await fillSlots(ctx, run._id);
+          continue;
+        }
         for (const status of ["queued", "preparing"] as const) {
           const rows = await ctx.db
             .query("qaVisualReviews")
@@ -571,14 +587,8 @@ export const dashboard = query({
           .withIndex("by_run", (q) => q.eq("runId", run._id))
           .collect()
       : [];
-    const snapshotPieces = registered.currentSnapshotId
-      ? await ctx.db
-          .query("qaVisualCampaignPieces")
-          .withIndex("by_snapshot", (q) =>
-            q.eq("snapshotId", registered.currentSnapshotId!),
-          )
-          .collect()
-      : [];
+    const currentId = publishedId(registered);
+    const snapshotPieces = currentId ? await readPieces(ctx, currentId) : [];
     const reviews = await Promise.all(
       snapshotPieces.map(async (piece) => {
         const { name, contextKey } = piece.input;
@@ -721,6 +731,9 @@ export const dashboard = query({
         currentCompleted.length,
       completed: batch.filter((row) => row.status === "completed").length,
       failed: batch.filter((row) => row.status === "failed").length,
+      failedPieceIds: batch
+        .filter((row) => row.status === "failed")
+        .flatMap((row) => (row.pieceId ? [row.pieceId] : [])),
       failedNames: batch
         .filter((row) => row.status === "failed")
         .map((row) => row.input.name),

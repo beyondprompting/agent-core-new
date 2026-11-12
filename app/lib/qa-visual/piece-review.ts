@@ -10,6 +10,7 @@ import {
 import { buildAnalysisFeed } from "./analysis-feed";
 import { toReviewPieces } from "./piece-inventory";
 import { pieceKey } from "@/convex/qaVisual/model/normalize";
+import { internalClientState } from "./client-state";
 
 /** Projects persisted review data without changing the AI result or stored threads. */
 export function buildPieceReview({
@@ -138,6 +139,20 @@ export function buildPieceReview({
     }
     comment.threadId = thread._id;
     comment.anchor = thread.anchor;
+    comment.audience = thread.audience ?? "internal";
+    const audioOf = (entry: (typeof entries)[number]) =>
+      entry.audio && !entry.deletedAt
+        ? {
+            url: `/workspace/qa-visual/media?${new URLSearchParams({ audio: entry._id })}`,
+            durationMs: entry.audio.durationMs,
+            transcript: entry.transcript ?? null,
+          }
+        : undefined;
+    if (thread.origin.kind === "human" && entries[0]) {
+      comment.audio = audioOf(entries[0]);
+      if (thread.audience === "client" && entries[0].authorKind === "client")
+        comment.role = "Cliente";
+    }
     comment.resolved = thread.status === "resolved";
     comment.replies = entries.map((entry) => ({
       id: entry._id,
@@ -145,6 +160,9 @@ export function buildPieceReview({
       body: entry.body,
       time: new Date(entry._creationTime).toLocaleString(),
       canEdit: Boolean(entry.canEdit),
+      visibility: entry.visibility ?? "internal",
+      fromClient: entry.authorKind === "client",
+      audio: audioOf(entry),
     }));
     if (thread.origin.kind === "human")
       comment.replies = comment.replies.slice(1);
@@ -185,7 +203,8 @@ export function buildPieceReview({
   const visibleComments = pieceComments.filter(
     (c) =>
       filter === "all" ||
-      filter === c.kind ||
+      (filter === "client" && c.audience === "client") ||
+      (filter !== "client" && filter === c.kind) ||
       (filter === "open" && !c.resolved),
   );
   const results = data
@@ -248,7 +267,10 @@ export function buildPieceReview({
         .toLowerCase()
         .includes(query.toLowerCase()) &&
       (statusFilter === "all" ||
-        (statusFilter.startsWith("ai:")
+        (statusFilter.startsWith("client:")
+          ? internalClientState(p.client).key === statusFilter.slice(7) ||
+            (statusFilter === "client:sent" && internalClientState(p.client).key === "viewed")
+          : statusFilter.startsWith("ai:")
           ? results[p.id]?.[p.currentVersion ?? 1] === statusFilter.slice(3)
           : (statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status) ===
             statusFilter)),

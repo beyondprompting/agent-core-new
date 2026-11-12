@@ -22,6 +22,8 @@ export type PieceStatus =
   | "Pendiente";
 export type Piece = {
   id: string;
+  imageError?: string;
+  client?: import("../../../convex/qaVisual/clientReview").PieceClientStatus | null;
   name: string;
   filename: string;
   image: string;
@@ -51,6 +53,7 @@ export type Piece = {
   cta: string;
 };
 
+export type CommentTranscript = { status: "pending" | "done" | "failed"; text?: string };
 export type Comment = {
   id: number | string;
   marker?: number;
@@ -70,6 +73,9 @@ export type Comment = {
   };
   issue?: ReviewIssue;
   anchor?: import("../../../convex/qaVisual/model/collaboration").Anchor;
+  /** "client" threads are visible in the client portal (§23.8). */
+  audience?: "internal" | "client";
+  audio?: { url: string; durationMs: number; transcript?: CommentTranscript | null };
   replies?: {
     id: string;
     body: string;
@@ -77,6 +83,9 @@ export type Comment = {
     time: string;
     canEdit: boolean;
     event?: string;
+    visibility?: "internal" | "client";
+    fromClient?: boolean;
+    audio?: { url: string; durationMs: number; transcript?: CommentTranscript | null };
   }[];
   source?: string;
   expected?: string;

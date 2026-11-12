@@ -1,3 +1,11 @@
+import { pieceClientStatus } from "./clientReview";
+import { requestImport } from "./imports";
+import {
+  publishedId,
+  readImport,
+  readPieces,
+  sourceDetails,
+} from "./importRead";
 import { publishPiece, humanState } from "./pieces";
 import {
   ANALYSIS_POLICY_VERSION,
@@ -35,24 +43,17 @@ export async function queueSync(
   reprocess = false,
 ) {
   const campaign = await ctx.db.get(campaignId);
-  if (campaign?.status !== "active") throw new Error("Campaña no disponible.");
-  if (await syncIsRunning(ctx, campaign.sync)) return;
-
-  const startedAt = Math.max(Date.now(), (campaign.sync?.startedAt ?? 0) + 1);
-  const jobId = await ctx.scheduler.runAfter(
-    0,
-    internal.qaVisual.campaignSync.run,
-    {
-      campaignId,
-      startedAt,
-      ...(reprocess ? { reprocess: true } : {}),
-    },
+  if (!campaign || (await syncIsRunning(ctx, campaign.sync)))
+    throw new Error("Ya hay una importación en curso.");
+  return requestImport(
+    ctx,
+    campaignId,
+    reprocess
+      ? "reprocess"
+      : campaign.currentImportId || campaign.currentSnapshotId
+        ? "manual"
+        : "register",
   );
-  await ctx.db.patch(campaignId, {
-    sync: { startedAt, jobId, stage: "listing" },
-    syncError: undefined,
-    syncNeedsSources: undefined,
-  });
 }
 
 export const refresh = mutation({
@@ -215,16 +216,6 @@ export const fail = internalMutation({
   },
 });
 
-function fileDetails(source: Doc<"qaVisualSourceDocuments"> | null) {
-  return (
-    source && {
-      name: source.name,
-      bytes: source.bytes ?? 0,
-      updatedAt: source.updatedAt ?? 0,
-    }
-  );
-}
-
 export const viewer = query({
   args: { campaignId: v.string() },
   handler: async (ctx, { campaignId }) => {
@@ -233,25 +224,22 @@ export const viewer = query({
     const campaign = id && (await ctx.db.get(id));
     if (!campaign || campaign.status !== "active") return null;
 
-    const syncing = await syncIsRunning(ctx, campaign.sync);
-    const syncError =
-      campaign.syncError ??
-      (campaign.sync && !syncing
-        ? "Se interrumpió la importación de Drive. Intentá actualizar de nuevo."
-        : undefined);
-    const snapshot =
-      campaign.currentSnapshotId &&
-      (await ctx.db.get(campaign.currentSnapshotId));
-    const data =
-      snapshot && snapshot.campaignId === campaign._id ? snapshot : null;
+    const importing = campaign.activeImportId
+      ? await ctx.db.get(campaign.activeImportId)
+      : null;
+    const syncing =
+      Boolean(
+        importing &&
+        ["queued", "running", "building"].includes(importing.status),
+      ) || (await syncIsRunning(ctx, campaign.sync));
+    const syncError = campaign.syncError;
+    const current = publishedId(campaign);
+    const data = current ? await readImport(ctx, current) : null;
     const [excel, csv, pieces] = data
       ? await Promise.all([
           ctx.db.get(data.excelDocumentId),
           ctx.db.get(data.csvDocumentId),
-          ctx.db
-            .query("qaVisualCampaignPieces")
-            .withIndex("by_snapshot", (q) => q.eq("snapshotId", data._id))
-            .collect(),
+          readPieces(ctx, data._id),
         ])
       : ([null, null, []] as const);
 
@@ -262,9 +250,11 @@ export const viewer = query({
       syncError,
       lastSyncedAt: campaign.lastSyncedAt,
       snapshotId: data?._id,
-      matrix: fileDetails(excel),
-      csv: fileDetails(csv),
+      matrix: sourceDetails(excel),
+      csv: sourceDetails(csv),
       notices: data?.notices ?? [],
+      ignoredFiles: data && "ignoredFiles" in data ? data.ignoredFiles : [],
+      missingImages: data && "missingImages" in data ? data.missingImages : [],
       parserOutdated: pieces.some(
         (p) => p.input.policyVersion !== ANALYSIS_POLICY_VERSION || !p.pieceId,
       ),
@@ -300,6 +290,15 @@ export const viewer = query({
             issues: input.issues ?? [],
             contextKey: input.contextKey,
             thumbnailReady: Boolean(copy?.files),
+            ...(copy && !copy.files && copy.error && !copy.job
+              ? { imageError: copy.error }
+              : {}),
+            client: pieceId
+              ? await pieceClientStatus(ctx, {
+                  _id: pieceId,
+                  currentVersionId: pieceVersionId,
+                })
+              : null,
           };
         }),
       ),

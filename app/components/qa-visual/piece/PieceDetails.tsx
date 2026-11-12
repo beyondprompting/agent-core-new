@@ -1,3 +1,4 @@
+import { DuplicateResolution } from "./DuplicateResolution";
 import { sourceLabel } from "@/convex/qaVisual/model/contracts";
 import {
   ArrowUpRight,
@@ -237,6 +238,9 @@ export function PieceDetails({
           </p>
         </div>
       </div>
+      {piece.pieceId && version === (piece.currentVersion ?? 1) && (
+        <DuplicateResolution key={piece.pieceId} pieceId={piece.pieceId} />
+      )}
       <div className="requirement-source">
         <Link2 size={13} />
         Archivo original<span>Versión {version}</span>

@@ -32,6 +32,42 @@ export function CampaignResources({ inventory }: { inventory: QaInventory }) {
           <p>{file?.name ?? "No disponible"}</p>
         </div>
       ))}
+      {Boolean(inventory.ignoredFiles?.length) && (
+        <section
+          className="qa-import-resource-list"
+          aria-label="Archivos no analizados"
+        >
+          <h4>Archivos no analizados</h4>
+          <ul>
+            {inventory.ignoredFiles?.map((file, index) => (
+              <li key={`${file.name}:${index}`}>
+                <strong>{file.name}</strong>
+                <span>{file.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {Boolean(inventory.missingImages?.length) && (
+        <section
+          className="qa-import-resource-list"
+          aria-label="Entregables sin imagen"
+        >
+          <h4>Entregables sin imagen</h4>
+          <p>
+            Estas filas de producción todavía no tienen una imagen en
+            DESPLIEGUE.
+          </p>
+          <ul>
+            {inventory.missingImages?.map((row) => (
+              <li key={row.key}>
+                <strong>{row.key}</strong>
+                <span>CSV · línea {row.csvLine}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="info-note">
         <Eye size={16} />
         <span>

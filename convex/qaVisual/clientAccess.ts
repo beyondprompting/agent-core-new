@@ -3,6 +3,7 @@ import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { isExternalRoleTarget } from "../lib/userRoles";
+import { qaVisualDisabled } from "./access";
 
 /**
  * Client portal access (§23.6). External users see a campaign only when it has client
@@ -56,6 +57,7 @@ export async function assignedToCampaignClient(
 }
 
 export async function portalViewer(ctx: QueryCtx) {
+  if (qaVisualDisabled()) return null;
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
   if (await isQaAdmin(ctx, userId))
