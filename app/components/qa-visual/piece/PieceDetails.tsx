@@ -1,3 +1,4 @@
+import { sourceLabel } from "@/convex/qaVisual/model/contracts";
 import {
   ArrowUpRight,
   Check,
@@ -19,6 +20,7 @@ export type PieceFinding = {
   ruleId: string;
   outcome: "pass" | "fail" | "unverifiable" | "notApplicable";
   observed: string;
+  method?: "model" | "deterministic";
 };
 
 const controlStates = {
@@ -55,6 +57,14 @@ export function PieceDetails({
   humanReview: HumanReviewState;
   onOpenResources: () => void;
 }) {
+  const requirementLabels = {
+    ready: "Requisito disponible",
+    conflict: "Fuentes en conflicto",
+    notRequested: "No solicitado",
+    unresolved: "Sin resolver",
+    missing: "Falta el dato",
+    invalid: "Dato inválido",
+  };
   const labels: Record<string, string> = {
     dimensions: "Dimensiones",
     format: "Formato",
@@ -68,20 +78,26 @@ export function PieceDetails({
   );
   const requirements = piece.clientRequirements ?? [];
   const requested: DetailField[] = requirements.map((rule) => {
-    const result = resultByRule.get(rule.id);
+    const result = resultByRule.get(rule.ruleId);
     return {
-      title: labels[rule.id] ?? rule.id,
-      value: rule.expected,
-      note: rule.pending ? `${rule.source} · ${rule.pending}` : rule.source,
+      title: labels[rule.ruleId] ?? rule.ruleId,
+      value:
+        rule.expected ??
+        (rule.status === "notRequested"
+          ? "No solicitado por el cliente"
+          : "Sin referencia verificable"),
+      note: `${rule.basis === "client" ? "Cliente" : "Producción"} · ${sourceLabel(rule.sources)} · ${requirementLabels[rule.status]}${rule.expectedAlternatives?.length ? ` · CSV: ${rule.expectedAlternatives.join(" / ")}` : ""}${result?.method ? ` · ${result.method === "model" ? "IA" : "Código"}` : ""}`,
+
       control:
-        result?.outcome ?? (rule.pending ? "unverifiable" : "notEvaluated"),
-      observed: result?.outcome === "fail" ? result.observed : undefined,
+        result?.outcome ??
+        (rule.status === "notRequested" ? "notApplicable" : "notEvaluated"),
+      observed: result?.observed,
     };
   });
   for (const result of findings ?? []) {
     if (
       result.outcome === "notApplicable" &&
-      !requirements.some((rule) => rule.id === result.ruleId)
+      !requirements.some((rule) => rule.ruleId === result.ruleId)
     ) {
       requested.push({
         title: labels[result.ruleId] ?? result.ruleId,
@@ -167,7 +183,7 @@ export function PieceDetails({
         {
           title: "Versión",
           value: `Versión ${version} de ${piece.versions}`,
-          note: "Única versión proporcionada",
+          note: "Cada entrega conserva su revisión y aprobación",
           pending: false,
         },
         {
@@ -235,6 +251,16 @@ export function PieceDetails({
           Por revisar
         </span>
       </div>
+      {!!aiReview.reasons?.length && (
+        <section className="detail-group">
+          <h4>CONTROLES PENDIENTES DE VERIFICACIÓN</h4>
+          <ul>
+            {aiReview.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {groups.map((group) => (
         <section key={group.title} className="detail-group">
           <h4>{group.title}</h4>

@@ -1,14 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-
-import { type Comment, type PieceStatus } from "@/app/lib/qa-visual/review-model";
-
-import { getAiReviewState, getHumanReviewState } from "@/app/lib/qa-visual/review-state";
-import type { ReviewFeed } from "@/app/lib/qa-visual/review-model";
-import { useReviewDecisions } from "./use-review-decisions";
+import {
+  type Comment,
+  type Piece,
+  type PieceStatus,
+  type ReviewFeed,
+} from "@/app/lib/qa-visual/review-model";
+import { buildPieceReview } from "@/app/lib/qa-visual/piece-review";
 import { focusCommentElement } from "@/app/lib/qa-visual/comment-navigation";
-import type { Piece } from "@/app/lib/qa-visual/review-model";
-import { useCanvasAnnotations, type Tool } from "./use-canvas-annotations";
+import {
+  useCanvasAnnotations,
+  type Tool,
+  type Mark,
+} from "./use-canvas-annotations";
+import { usePieceReview } from "./use-piece-review";
 import type { QaInventory } from "@/app/lib/qa-visual/source";
+import type { Anchor } from "@/convex/qaVisual/model/collaboration";
+import type { Id } from "@/convex/_generated/dataModel";
 type LeftTab = "Archivos" | "Resumen" | "Recursos";
 type RightTab = "Comentarios" | "Detalles" | "Versiones" | "Historial";
 
@@ -17,110 +24,104 @@ export function useReviewSession(
   inventory: QaInventory,
   feed: ReviewFeed,
   reviewer: string,
+  campaignId: string,
 ) {
   const [activeId, setActiveId] = useState(pieces[0].id);
-  const [version, setVersion] = useState(1);
+  const [selectedVersion, setVersion] = useState<number>();
+  const currentPiece = pieces.find((p) => p.id === activeId) ?? pieces[0];
+  const version = selectedVersion ?? currentPiece.currentVersion ?? 1;
+  const persisted = usePieceReview(currentPiece.pieceId, version);
+  const data = persisted.data;
   const [leftTab, setLeftTab] = useState<LeftTab>("Archivos");
   const [rightTab, setRightTab] = useState<RightTab>("Comentarios");
-  const [localComments, setLocalComments] = useState<Comment[]>([]);
-  const [resolvedOverrides, setResolvedOverrides] = useState<
-    Record<Comment["id"], boolean>
-  >({});
-  const comments = [...feed.comments, ...localComments].map((comment) => ({
-    ...comment,
-    resolved: resolvedOverrides[comment.id] ?? comment.resolved,
-  }));
   const [selected, setSelected] = useState<Comment["id"] | null>(null);
   const [commentFocus, setCommentFocus] = useState<{
     id: Comment["id"];
     highlight: boolean;
   } | null>(null);
-  const [filter, setFilter] = useState("all");
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [filter, setFilter] = useState("all"),
+    [query, setQuery] = useState(""),
+    [statusFilter, setStatusFilter] = useState("all");
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyTo] = useState<Comment["id"] | null>(null);
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
     null,
   );
-  const [zoom, setZoom] = useState(100);
-  const [tool, setTool] = useState<Tool>("select");
-  const [showPins, setShowPins] = useState(true);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
-  const [toast, setToast] = useState("");
+  const [pendingMark, setPendingMark] = useState<Mark | null>(null);
+  const [zoom, setZoom] = useState(100),
+    [tool, setTool] = useState<Tool>("select"),
+    [showPins, setShowPins] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(true),
+    [rightOpen, setRightOpen] = useState(true),
+    [toast, setToast] = useState("");
   const [modal, setModal] = useState<"share" | "approval" | "help" | null>(
     null,
   );
-  const { exception, setException, statuses, approvals, recordDecision } =
-    useReviewDecisions(reviewer);
-  const {
-    drawing,
-    pieceMarks,
-    setMarks,
-    pan,
-    setPan,
-    onPointerDown,
-    onPointerMove,
-    onPointerUp,
-  } = useCanvasAnnotations(activeId, version, tool, (pin) => {
-    setPendingPin(pin);
-    setShowPins(true);
-    setToast("");
-  });
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const artboardRef = useRef<HTMLDivElement>(null);
-  const pinToolRef = useRef<HTMLButtonElement>(null);
-  const activePieces = pieces;
-  const piece = activePieces.find((p) => p.id === activeId) ?? activePieces[0];
-  const currentStatus = statuses[`${activeId}-${version}`] ?? piece.status;
-  const pieceComments = comments.filter(
-    (c) => c.pieceId === activeId && c.version === version,
-  );
-  const visibleComments = pieceComments.filter(
-    (c) =>
-      filter === "all" ||
-      (filter === "agent" && c.kind === "agent") ||
-      (filter === "human" && c.kind === "human") ||
-      (filter === "open" && !c.resolved),
-  );
-  const aiReview = getAiReviewState(
-    feed.results[piece.id]?.[version],
-    pieceComments,
-  );
-  const latestDecision = approvals
-    .slice()
-    .reverse()
-    .find(
-      (a) =>
-        a.pieceId === activeId &&
-        a.version === version &&
-        a.status === currentStatus,
+  const [exception, setException] = useState("");
+  const [exceptionReason, setExceptionReason] = useState<
+    "acceptedFinding" | "falsePositive" | "notApplicable" | "other"
+  >("other");
+  const { drawing, pan, setPan, onPointerDown, onPointerMove, onPointerUp } =
+    useCanvasAnnotations(
+      currentPiece.id,
+      version,
+      tool,
+      (point) => {
+        if (!data || persisted.busy) return;
+        setPendingMark(null);
+        setPendingPin(point);
+        setShowPins(true);
+      },
+      (mark) => {
+        if (!data || persisted.busy) return;
+        setPendingMark(mark);
+        setPendingPin(mark.points.at(-1)!);
+        setShowPins(true);
+      },
     );
-  const humanReview = getHumanReviewState(currentStatus, latestDecision);
-  const requiresException = Boolean(
-    aiReview.status &&
-    ["findings", "partial", "failed"].includes(aiReview.status),
-  );
-  const filteredPieces = activePieces.filter(
-    (p) =>
-      `${p.name} ${p.phase} ${p.format} ${p.filename}`
-        .toLowerCase()
-        .includes(query.toLowerCase()) &&
-      (statusFilter === "all" ||
-        (statusFilter.startsWith("ai:")
-          ? feed.results[p.id]?.[1] === statusFilter.slice(3)
-          : (statuses[`${p.id}-1`] ?? p.status) === statusFilter)),
-  );
+  const inputRef = useRef<HTMLTextAreaElement>(null),
+    artboardRef = useRef<HTMLDivElement>(null),
+    pinToolRef = useRef<HTMLButtonElement>(null);
+  const selectedKey = `${currentPiece.id}:${version}`;
+  const selectionRef = useRef(selectedKey);
+  selectionRef.current = selectedKey;
+  const {
+    piece,
+    comments,
+    pieceComments,
+    visibleComments,
+    results,
+    statuses,
+    currentStatus,
+    approvals,
+    latestDecision,
+    aiReview,
+    humanReview,
+    requiresException,
+    filteredPieces,
+    pieceMarks,
+  } = buildPieceReview({
+    pieces,
+    currentPiece,
+    version,
+    data,
+    feed,
+    campaignId,
+    filter,
+    query,
+    statusFilter,
+  });
+  const activePieces = pieces;
+  if (pendingMark) pieceMarks.push(pendingMark);
 
   useLayoutEffect(() => {
     if (!commentFocus) return;
     const element = document.getElementById(`comment-${commentFocus.id}`);
-    if (!element) return;
-    const animation = focusCommentElement(element, commentFocus.highlight);
-    return () => animation?.cancel();
+    if (element) {
+      const animation = focusCommentElement(element, commentFocus.highlight);
+      return () => animation?.cancel();
+    }
   }, [commentFocus]);
-
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 3500);
@@ -132,99 +133,170 @@ export function useReviewSession(
         setModal(null);
         setTool("select");
         setPendingPin(null);
+        setPendingMark(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  const choosePiece = (id: string) => {
+  const resetSelection = () => {
     setCommentFocus(null);
-    setActiveId(id);
-    setVersion(1);
-    setSelected(
-      comments.find(
-        (c) => c.pieceId === id && c.severity === "warning" && !c.resolved,
-      )?.id ?? null,
-    );
+    setSelected(null);
     setPendingPin(null);
+    setPendingMark(null);
     setPan({ x: 0, y: 0 });
-    setZoom(100);
     setReplyTo(null);
     setDraft("");
     setException("");
+    persisted.setError("");
   };
-  const selectComment = (id: Comment["id"], options?: { highlight?: boolean }) => {
+  const choosePiece = (id: string) => {
+    resetSelection();
+    setActiveId(id);
+    setVersion(undefined);
+    setZoom(100);
+  };
+  const changeVersion = (v: number) => {
+    resetSelection();
+    setVersion(v === currentPiece.currentVersion ? undefined : v);
+  };
+  const selectComment = (
+    id: Comment["id"],
+    options?: { highlight?: boolean },
+  ) => {
     setSelected(id);
     setFilter("all");
     setRightTab("Comentarios");
     setRightOpen(true);
     setCommentFocus({ id, highlight: Boolean(options?.highlight) });
   };
-  const changeVersion = (v: number) => {
-    setCommentFocus(null);
-    setVersion(v);
-    setSelected(null);
-    setPendingPin(null);
-    setPan({ x: 0, y: 0 });
-    setReplyTo(null);
-    setDraft("");
-    setException("");
+  const target = (comment: Comment) =>
+    comment.threadId
+      ? { threadId: comment.threadId }
+      : comment.finding
+        ? { finding: comment.finding }
+        : null;
+  const toggleResolved = async (id: Comment["id"]) => {
+    const comment = comments.find((c) => c.id === id),
+      ref = comment && target(comment);
+    if (data && comment && ref)
+      await persisted.save(() =>
+        persisted.resolve({
+          pieceVersionId: data.versionId,
+          ...ref,
+          resolved: !comment.resolved,
+        }),
+      );
   };
-  const toggleResolved = (id: Comment["id"]) =>
-    setResolvedOverrides((prev) => ({
-      ...prev,
-      [id]: !(comments.find((c) => c.id === id)?.resolved ?? false),
-    }));
-  const addComment = (
+  const addComment = async (
     text: string,
-    pin?: { x: number; y: number },
+    anchor: Anchor,
     response?: Comment["id"] | null,
   ) => {
-    if (!text.trim()) return;
-    const id = Math.max(0, ...localComments.map((c) => Number(c.id))) + 1;
-    setLocalComments((prev) => [
-      ...prev,
-      {
-        id,
-        pieceId: activeId,
-        version,
-        author: reviewer,
-        role: "Revisora",
-        kind: "human",
-        time: "Ahora",
-        body: `${response ? `En respuesta a ${comments.find((c) => c.id === response)?.author}: ` : ""}${text.trim()}`,
-        pin,
-        resolved: false,
-      },
-    ]);
-    setSelected(id);
-    setFilter("all");
-    setRightTab("Comentarios");
-    setToast("Comentario agregado a esta versión");
+    if (!data || !text.trim()) return false;
+    const comment = response
+      ? comments.find((c) => c.id === response)
+      : undefined;
+    const ref = comment && target(comment),
+      requestId = crypto.randomUUID();
+    if (response && !ref) return false;
+    const saved = await persisted.save(() =>
+      ref
+        ? persisted.reply({
+            pieceVersionId: data.versionId,
+            ...ref,
+            body: text,
+            requestId,
+          })
+        : persisted.create({
+            pieceVersionId: data.versionId,
+            anchor,
+            body: text,
+            requestId,
+          }),
+    );
+    if (!saved) return false;
+    if (selectionRef.current === selectedKey) {
+      setSelected(saved.value);
+      setFilter("all");
+      setRightTab("Comentarios");
+      setToast("Comentario guardado en esta versión");
+    }
+    return true;
   };
-  const publish = () => {
-    if (!draft.trim()) return;
-    addComment(draft, undefined, replyTo);
-    setDraft("");
-    setReplyTo(null);
+  const publish = async () => {
+    if (
+      (await addComment(draft, { kind: "general" }, replyTo)) &&
+      selectionRef.current === selectedKey
+    ) {
+      setDraft("");
+      setReplyTo(null);
+    }
   };
   const cancelImageComment = () => {
     setPendingPin(null);
+    setPendingMark(null);
     setTool("select");
     pinToolRef.current?.focus({ preventScroll: true });
   };
-  const publishImageComment = (text: string) => {
+  const publishImageComment = async (text: string) => {
     if (!pendingPin) return;
-    addComment(text, pendingPin);
-    setShowPins(true);
-    cancelImageComment();
+    let anchor: Anchor = {
+      kind: "point",
+      x: pendingPin.x / 100,
+      y: pendingPin.y / 100,
+    };
+    if (pendingMark?.type === "draw")
+      anchor = {
+        kind: "path",
+        points: pendingMark.points.map((p) => ({ x: p.x / 100, y: p.y / 100 })),
+      };
+    if (pendingMark?.type === "rectangle") {
+      const [a, b] = pendingMark.points;
+      anchor = {
+        kind: "rect",
+        x: Math.min(a.x, b.x) / 100,
+        y: Math.min(a.y, b.y) / 100,
+        width: Math.abs(a.x - b.x) / 100,
+        height: Math.abs(a.y - b.y) / 100,
+      };
+    }
+    if (
+      (await addComment(text, anchor)) &&
+      selectionRef.current === selectedKey
+    ) {
+      setShowPins(true);
+      cancelImageComment();
+    }
   };
-  const setDecision = (status: PieceStatus) => {
-    if (!recordDecision(activeId, version, status, requiresException)) return;
-    setModal(null);
-    setException("");
-    setToast(`${status} · decisión humana registrada`);
+  const setDecision = async (status: PieceStatus) => {
+    if (!data) return;
+    const decision =
+      status === "Aprobada"
+        ? "approved"
+        : status === "Cambios solicitados"
+          ? "changesRequested"
+          : "revoked";
+    const saved = await persisted.save(() =>
+      persisted.decide({
+        pieceVersionId: data.versionId,
+        decision,
+        expectedCurrentDecisionId: data.currentDecisionId,
+        expectedInputHash: data.inputHash,
+        expectedReviewId: data.review?._id ?? null,
+        ...(decision === "approved" && requiresException
+          ? { exception: { reason: exceptionReason, note: exception } }
+          : {}),
+        ...(decision === "changesRequested" && exception.trim()
+          ? { note: exception.trim() }
+          : {}),
+      }),
+    );
+    if (saved && selectionRef.current === selectedKey) {
+      setModal(null);
+      setException("");
+      setToast("Decisión humana guardada");
+    }
   };
   const openAiReview = () => {
     setFilter("agent");
@@ -232,9 +304,8 @@ export function useReviewSession(
     setRightOpen(true);
     setShowPins(true);
     const finding =
-      pieceComments.find(
-        (c) => c.kind === "agent" && c.severity === "warning" && !c.resolved,
-      ) ?? pieceComments.find((c) => c.kind === "agent");
+      pieceComments.find((c) => c.kind === "agent" && !c.resolved) ??
+      pieceComments.find((c) => c.kind === "agent");
     if (finding) selectComment(finding.id);
   };
   const download = () => {
@@ -242,12 +313,35 @@ export function useReviewSession(
     a.href = piece.originalImage ?? piece.image;
     a.download = piece.filename;
     a.click();
-    setToast("Descargando el archivo original de esta pieza");
+  };
+  const editComment = async (id: string, body: string) =>
+    Boolean(
+      await persisted.save(() =>
+        persisted.edit({ commentId: id as Id<"qaVisualComments">, body }),
+      ),
+    );
+  const removeComment = async (id: string) => {
+    await persisted.save(() =>
+      persisted.remove({ commentId: id as Id<"qaVisualComments"> }),
+    );
+  };
+  const linkOffer = async (row: string, ordinal: string, note: string) => {
+    if (!currentPiece.pieceId) return;
+    const saved = await persisted.save(() =>
+      persisted.linkOffer({
+        campaignId: campaignId as Id<"qaVisualCampaigns">,
+        pieceId: currentPiece.pieceId!,
+        row,
+        ordinal,
+        note,
+      }),
+    );
+    if (saved) setToast("Vínculo guardado. Se está actualizando el pedido.");
   };
   return {
-    activeId,
+    activeId: currentPiece.id,
     activePieces,
-    results: feed.results,
+    results,
     reviewer,
     aiReview,
     approvals,
@@ -261,6 +355,8 @@ export function useReviewSession(
     draft,
     drawing,
     exception,
+    exceptionReason,
+    setExceptionReason,
     filter,
     filteredPieces,
     humanReview,
@@ -276,6 +372,7 @@ export function useReviewSession(
     openAiReview,
     pan,
     pendingPin,
+    pendingMark,
     piece,
     pieceComments,
     pieceMarks,
@@ -296,7 +393,6 @@ export function useReviewSession(
     setFilter,
     setLeftOpen,
     setLeftTab,
-    setMarks,
     setModal,
     setPan,
     setPendingPin,
@@ -319,6 +415,13 @@ export function useReviewSession(
     version,
     visibleComments,
     zoom,
+    detail: data,
+    saving: persisted.busy,
+    saveError: persisted.error,
+    canReview: Boolean(data),
+    editComment,
+    removeComment,
+    linkOffer,
   };
 }
 export type ReviewSession = ReturnType<typeof useReviewSession>;

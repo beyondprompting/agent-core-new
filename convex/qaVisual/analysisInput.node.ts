@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseClientMatrix, matrixReviewData } from "./clientMatrix.node";
+import { ANALYSIS_POLICY_VERSION } from "./model/contracts";
+import type { LinkOverride, Requirement } from "./model/contracts";
+import { pieceKey } from "./model/normalize";
 import type { QaInventory } from "../../app/lib/qa-visual/source";
 
 const confirmedRules = z.object({
@@ -77,9 +80,12 @@ export function prepareAnalysisInputs(
   folderId: string,
   inventory: QaInventory,
   matrix?: Awaited<ReturnType<typeof parseClientMatrix>>,
+  overrides: LinkOverride[] = [],
 ) {
   const config = confirmedRulesConfig(folderId);
-  const confirmed = config ? confirmedRules.parse(JSON.parse(config)).rules : [];
+  const confirmed = config
+    ? confirmedRules.parse(JSON.parse(config)).rules
+    : [];
   const rulesById = new Map<
     string,
     Omit<(typeof confirmed)[number], "expectedByPiece">
@@ -100,62 +106,63 @@ export function prepareAnalysisInputs(
   const rules = [...rulesById.values()];
   if (rules.length > 20)
     throw new Error("El conjunto supera las 20 reglas admitidas.");
-  const ruleVersion = digest({
-    rules,
-    confirmed,
-    matrixHash: matrix?.hash,
-    production: inventory.production,
-    names: inventory.pieces.map((file) => file.name),
-    extraction: 3,
-  });
+  const ruleVersion = digest({ rules, policy: ANALYSIS_POLICY_VERSION });
   const inputs = inventory.pieces.map((file) => {
     const stem = file.name.replace(/\.[^.]+$/, "");
-    const production =
-      inventory.production?.[stem.normalize("NFC").toLowerCase()];
-    const expected: Record<string, string> = {};
-    const { requirements, notices } = matrix
-      ? matrixReviewData(matrix, file.name, production)
-      : { requirements: [], notices: [] };
-    const matrixLinked = requirements.length > 0;
-    for (const requirement of requirements) {
-      if (!requirement.pending) expected[requirement.id] = requirement.expected;
-    }
+    const production = inventory.production?.[pieceKey(file.name)];
+    const { requirements, issues } = matrixReviewData(
+      matrix,
+      file.name,
+      production,
+      overrides,
+    );
     for (const [id, perPiece] of confirmedById) {
-      const value = Object.hasOwn(perPiece, file.name)
-        ? perPiece[file.name]
-        : Object.hasOwn(perPiece, stem)
-          ? perPiece[stem]
-          : undefined;
-      // An overridden criterion needs an explicit expected value for each piece.
-      delete expected[id];
-      if (value) {
-        expected[id] = value;
-        const override = {
-          id,
-          expected: value,
-          source: rulesById.get(id)!.source,
-        };
-        const index = requirements.findIndex((item) => item.id === id);
-        if (index < 0) requirements.push(override);
-        else requirements[index] = override;
-      }
+      const value = perPiece[file.name] ?? perPiece[stem];
+      const issueId = `confirmed_value_missing:${id}`;
+      const entry: Requirement = {
+        ruleId: id,
+        status: value ? "ready" : "unresolved",
+        basis: "client",
+        ...(value ? { expected: value } : {}),
+        sources: [
+          { file: "override", text: value ?? rulesById.get(id)!.source },
+        ],
+        issueIds: value ? [] : [issueId],
+      };
+      if (!value)
+        issues.push({
+          id: issueId,
+          code: "confirmed_value_missing",
+          severity: "warning",
+          scope: "piece",
+          affects: [id],
+          message: `La regla confirmada «${id}» no tiene una referencia para esta pieza.`,
+          sources: entry.sources,
+        });
+      const index = requirements.findIndex((r) => r.ruleId === id);
+      if (index < 0) requirements.push(entry);
+      else requirements[index] = entry;
     }
+    const requirementsHash = digest({
+      requirements,
+      issues,
+      rules: rules.filter((r) => requirements.some((q) => q.ruleId === r.id)),
+    });
+    const contentHash =
+      file.contentHash ?? `${file.driveId}:${file.driveVersion}`;
     return {
       name: file.name,
       revision: file.updatedAt,
+      contentHash,
       ...(production ? { production } : {}),
-      expected,
       requirements,
-      notices,
-      matrixLinked,
+      issues,
+      requirementsHash,
+      policyVersion: ANALYSIS_POLICY_VERSION,
       contextKey: digest({
-        reviewPolicy: 2,
-        ruleVersion,
-        name: file.name,
-        size: file.bytes,
-        revision: file.updatedAt,
-        driveVersion: file.driveVersion,
-        production,
+        contentHash,
+        requirementsHash,
+        policyVersion: ANALYSIS_POLICY_VERSION,
       }),
     };
   });

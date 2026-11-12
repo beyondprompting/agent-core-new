@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 
 export type Tool = "select" | "hand" | "pin" | "rectangle" | "draw";
-type Mark = {
-  id: number;
+export type Mark = {
+  id: number | string;
   pieceId: string;
   version: number;
   type: "rectangle" | "draw";
@@ -14,8 +14,8 @@ export function useCanvasAnnotations(
   version: number,
   tool: Tool,
   onPin: (point: { x: number; y: number }) => void,
+  onAnnotation: (mark: Mark) => void,
 ) {
-  const [marks, setMarks] = useState<Mark[]>([]);
   const [drawing, setDrawing] = useState<Mark | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{
@@ -24,9 +24,6 @@ export function useCanvasAnnotations(
     startX: number;
     startY: number;
   } | null>(null);
-  const pieceMarks = marks.filter(
-    (m) => m.pieceId === activeId && m.version === version,
-  );
   const point = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     return {
@@ -80,7 +77,9 @@ export function useCanvasAnnotations(
               ...prev,
               points:
                 prev.type === "draw"
-                  ? [...prev.points, p]
+                  ? prev.points.length < 500
+                    ? [...prev.points, p]
+                    : [...prev.points.slice(0, 499), p]
                   : [prev.points[0], p],
             }
           : null,
@@ -89,14 +88,11 @@ export function useCanvasAnnotations(
   };
   const onPointerUp = () => {
     drag.current = null;
-    if (drawing && drawing.points.length > 1)
-      setMarks((prev) => [...prev, drawing]);
+    if (drawing && drawing.points.length > 1) onAnnotation(drawing);
     setDrawing(null);
   };
   return {
     drawing,
-    pieceMarks,
-    setMarks,
     pan,
     setPan,
     onPointerDown,

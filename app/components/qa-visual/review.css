@@ -242,3 +242,15 @@ html.dark .qa-visual .workspace{--primary-color:#a49aff;--primary-soft:#2c2850;-
   transform: none;
   pointer-events: auto;
 }
+
+.qa-visual .qa-analysis-track-findings{background:var(--warning)!important}
+.qa-visual .qa-analysis-track-partial{background:var(--warning)!important;opacity:.45}
+.qa-visual .comment-card.source-notice{border-left:3px solid var(--primary-color);background:var(--primary-soft)}
+.qa-visual .finding-badge.blocking{color:var(--danger);background:var(--danger-bg)}
+.qa-visual .thread-replies{border-left:2px solid var(--line);padding-left:10px;margin-top:12px;display:grid;gap:12px}
+.qa-visual .thread-replies p{white-space:pre-wrap;font-size:11px;margin:5px 0}
+.qa-visual .thread-replies small{font-size:9px;color:var(--subtle)}
+.qa-visual .comment-edit textarea,.qa-visual .source-choice input,.qa-visual .source-choice select,.qa-visual .exception-label select{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text);padding:8px;font-size:11px}
+.qa-visual .source-choice{display:grid;gap:8px;margin-top:10px}
+.qa-visual .comment-edit-actions{display:flex;gap:10px;margin-top:6px;font-size:10px;color:var(--primary-color)}
+.qa-visual .qa-analysis-track > .qa-analysis-track-stale { background: var(--subtle); }

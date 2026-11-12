@@ -1,6 +1,11 @@
+import type { Id } from "../_generated/dataModel";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { httpAction, internalAction, type ActionCtx } from "../_generated/server";
+import {
+  httpAction,
+  internalAction,
+  type ActionCtx,
+} from "../_generated/server";
 import type { DriveInspection } from "./driveAnalysis";
 
 const headers = {
@@ -12,7 +17,10 @@ async function openDriveImage(
   ctx: ActionCtx,
   fileArgs: { driveFolderId: string; id: string; version: string },
 ): Promise<Response> {
-  const file = await ctx.runAction(internal.qaVisual.drive.authorizeMedia, fileArgs);
+  const file = await ctx.runAction(
+    internal.qaVisual.drive.authorizeMedia,
+    fileArgs,
+  );
   if (!file) return new Response(null, { status: 404, headers });
   const image = await fetch(file.url, {
     headers: { Authorization: `Bearer ${file.token}` },
@@ -20,56 +28,123 @@ async function openDriveImage(
   });
   if (image.status === 404) return new Response(null, { status: 404, headers });
   const length = image.headers.get("Content-Length");
-  if (!image.ok || !image.body || (length !== null && Number(length) !== file.size))
+  if (
+    !image.ok ||
+    !image.body ||
+    (length !== null && Number(length) !== file.size)
+  )
     return new Response(null, { status: 502, headers });
-  return new Response(image.body, { headers: { ...headers, "Content-Type": file.mime } });
+  return new Response(image.body, {
+    headers: { ...headers, "Content-Type": file.mime },
+  });
 }
 
 export const driveMedia = httpAction(async (ctx, request) => {
   const params = new URL(request.url).searchParams;
   const campaignId = params.get("campaign");
+  const creativeVersion = params.get("version");
+  const requestedVariant = params.get("variant");
+  if (
+    campaignId &&
+    creativeVersion &&
+    (requestedVariant === "thumbnail" || requestedVariant === "analysis")
+  ) {
+    const storageId = await ctx
+      .runQuery(internal.qaVisual.imageCopies.versionMedia, {
+        campaignId: campaignId as Id<"qaVisualCampaigns">,
+        pieceVersionId: creativeVersion as Id<"qaVisualPieceVersions">,
+        variant: requestedVariant,
+      })
+      .catch(() => null);
+    const image = storageId && (await ctx.storage.get(storageId));
+    return image
+      ? new Response(image, {
+          headers: {
+            ...headers,
+            "Content-Type":
+              requestedVariant === "analysis" ? "image/jpeg" : "image/webp",
+          },
+        })
+      : new Response(null, { status: 404, headers });
+  }
   const id = params.get("id");
   const version = params.get("v");
-  if (!campaignId || campaignId.length > 128 ||
-      !id || !/^[a-zA-Z0-9_-]{1,150}$/.test(id) || !version || !/^\d{1,30}$/.test(version))
+  if (
+    !campaignId ||
+    campaignId.length > 128 ||
+    !id ||
+    !/^[a-zA-Z0-9_-]{1,150}$/.test(id) ||
+    !version ||
+    !/^\d{1,30}$/.test(version)
+  )
     return new Response(null, { status: 404, headers });
 
   const variant = params.get("variant");
   if (variant === "thumbnail" || variant === "analysis") {
-    const storageId = await ctx.runQuery(internal.qaVisual.imageCopies.mediaStorage, {
-      campaignId, id, version, variant,
-    }).catch(() => null);
-    const image = storageId && await ctx.storage.get(storageId);
+    const storageId = await ctx
+      .runQuery(internal.qaVisual.imageCopies.mediaStorage, {
+        campaignId,
+        id,
+        version,
+        variant,
+      })
+      .catch(() => null);
+    const image = storageId && (await ctx.storage.get(storageId));
     return image
       ? new Response(image, {
-          headers: { ...headers, "Content-Type": variant === "analysis" ? "image/jpeg" : "image/webp" },
+          headers: {
+            ...headers,
+            "Content-Type":
+              variant === "analysis" ? "image/jpeg" : "image/webp",
+          },
         })
       : new Response(null, { status: 404, headers });
   }
 
   if (variant !== null) return new Response(null, { status: 404, headers });
-  const campaign = await ctx.runQuery(internal.qaVisual.campaigns.getActive, { campaignId }).catch(() => null);
+  const campaign = await ctx
+    .runQuery(internal.qaVisual.campaigns.getActive, { campaignId })
+    .catch(() => null);
   if (!campaign) return new Response(null, { status: 404, headers });
 
   try {
-    return await openDriveImage(ctx, { driveFolderId: campaign.driveFolderId, id, version });
+    return await openDriveImage(ctx, {
+      driveFolderId: campaign.driveFolderId,
+      id,
+      version,
+    });
   } catch (error) {
-    console.error("QA Visual: no se pudo abrir la imagen de Google Drive", error);
+    console.error(
+      "QA Visual: no se pudo abrir la imagen de Google Drive",
+      error,
+    );
     return new Response(null, { status: 502, headers });
   }
 });
 
-type ProbeResult = Omit<DriveInspection, "sampleFile"> & { viewer: { mime: string | null; bytes: number } };
+type ProbeResult = Omit<DriveInspection, "sampleFile"> & {
+  viewer: { mime: string | null; bytes: number };
+};
 
 export const probe = internalAction({
   args: { folderUrl: v.string() },
   handler: async (ctx, { folderUrl }): Promise<ProbeResult> => {
-    const { sampleFile, ...result } = await ctx.runAction(internal.qaVisual.driveAnalysis.inspectCampaign, { folderUrl });
+    const { sampleFile, ...result } = await ctx.runAction(
+      internal.qaVisual.driveAnalysis.inspectCampaign,
+      { folderUrl },
+    );
     const { bytes: expectedBytes, ...fileArgs } = sampleFile;
     const image = await openDriveImage(ctx, fileArgs);
-    if (!image.ok) throw new Error(`El visor no pudo leer la imagen de Drive (HTTP ${image.status}).`);
+    if (!image.ok)
+      throw new Error(
+        `El visor no pudo leer la imagen de Drive (HTTP ${image.status}).`,
+      );
     const imageBytes = (await image.arrayBuffer()).byteLength;
-    if (imageBytes !== expectedBytes) throw new Error("El visor recibió una imagen incompleta.");
-    return { ...result, viewer: { mime: image.headers.get("Content-Type"), bytes: imageBytes } };
+    if (imageBytes !== expectedBytes)
+      throw new Error("El visor recibió una imagen incompleta.");
+    return {
+      ...result,
+      viewer: { mime: image.headers.get("Content-Type"), bytes: imageBytes },
+    };
   },
 });

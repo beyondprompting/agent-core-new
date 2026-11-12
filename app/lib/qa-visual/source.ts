@@ -2,12 +2,25 @@ import type { ClientRequirement } from "./review-model";
 import type { ProductionFields } from "./production-csv";
 
 export type QaFile = { name: string; bytes: number; updatedAt: number };
-export type QaPieceFile = QaFile & { driveId: string; driveVersion: string };
+export type QaPieceFile = QaFile & {
+  driveId: string;
+  driveVersion: string;
+  contentHash?: string;
+};
 export type QaInventory = {
   campaignName?: string;
   matrix: QaFile | null;
   csv: QaFile | null;
-  pieces: (QaPieceFile & { thumbnailReady?: boolean })[];
+  pieces: (QaPieceFile & {
+    thumbnailReady?: boolean;
+    pieceId?: import("../../../convex/_generated/dataModel").Id<"qaVisualPieces">;
+    pieceVersionId?: import("../../../convex/_generated/dataModel").Id<"qaVisualPieceVersions">;
+    currentVersion?: number;
+    versions?: number;
+    openThreads?: number;
+    threadCount?: number;
+    humanStatus?: import("./review-model").PieceStatus;
+  })[];
   notices: string[];
   clientRequirements?: Record<string, ClientRequirement[]>;
   production?: Record<string, ProductionFields>;

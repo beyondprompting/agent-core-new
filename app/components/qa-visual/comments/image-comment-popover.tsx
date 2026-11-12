@@ -19,12 +19,14 @@ export default function ImageCommentPopover({
   layoutKey,
   onPublish,
   onCancel,
+  busy = false,
 }: {
   anchor: RefObject<HTMLDivElement | null>;
   point: { x: number; y: number };
   pieceName: string;
   reviewer: string;
   layoutKey: string;
+  busy?: boolean;
   onPublish: (text: string) => void;
   onCancel: () => void;
 }) {
@@ -69,7 +71,7 @@ export default function ImageCommentPopover({
   }, [anchor, point.x, point.y, layoutKey]);
 
   const submit = () => {
-    if (text.trim()) onPublish(text.trim());
+    if (text.trim() && !busy) onPublish(text.trim());
   };
 
   return (
@@ -133,6 +135,7 @@ export default function ImageCommentPopover({
         ref={textarea}
         placeholder="¿Qué quieres señalar en esta zona?"
         value={text}
+        maxLength={4000}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -152,7 +155,7 @@ export default function ImageCommentPopover({
         <button
           type="submit"
           className="button primary"
-          disabled={!text.trim()}
+          disabled={!text.trim() || busy}
         >
           Publicar
           <Send size={13} />

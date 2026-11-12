@@ -11,7 +11,8 @@
     "convex": "convex dev",
     "convex:deploy": "convex deploy",
     "process-pdf": "tsx scripts/process-pdf-multimodal.ts",
-    "process-pdf:test": "MAX_PAGES=5 tsx scripts/process-pdf-multimodal.ts"
+    "process-pdf:test": "MAX_PAGES=5 tsx scripts/process-pdf-multimodal.ts",
+    "test:qa-visual": "node --conditions=import --import tsx --test tests/qaVisual*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.4",
@@ -66,6 +67,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.23",
+    "convex-test": "^0.0.41",
     "dotenv": "^17.3.1",
     "postcss": "^8.5.6",
     "tsx": "^4.21.0",

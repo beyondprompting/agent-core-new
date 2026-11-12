@@ -19,7 +19,10 @@ export function CampaignSnapshotViewer({
   useEffect(() => {
     if (importedSnapshotId && hasPieces) {
       void prepareImages({ snapshotId: importedSnapshotId }).catch((error) => {
-        console.warn("QA Visual: no se pudieron solicitar las miniaturas", error);
+        console.warn(
+          "QA Visual: no se pudieron solicitar las miniaturas",
+          error,
+        );
       });
     }
   }, [importedSnapshotId, hasPieces, prepareImages]);
@@ -27,13 +30,30 @@ export function CampaignSnapshotViewer({
   const [requestError, setRequestError] = useState<string>();
 
   if (!data) {
-    return <QaViewer
-      campaignId=""
-      inventory={{ matrix: null, csv: null, pieces: [], notices: ["La campaña ya no está disponible."] }}
-    />;
+    return (
+      <QaViewer
+        campaignId=""
+        inventory={{
+          matrix: null,
+          csv: null,
+          pieces: [],
+          notices: ["La campaña ya no está disponible."],
+        }}
+      />
+    );
   }
 
-  const { campaignId, snapshotId, pieces, campaignName, matrix, csv, notices, syncing, syncError } = data;
+  const {
+    campaignId,
+    snapshotId,
+    pieces,
+    campaignName,
+    matrix,
+    csv,
+    notices,
+    syncing,
+    syncError,
+  } = data;
 
   async function update() {
     setRequesting(true);
@@ -51,20 +71,72 @@ export function CampaignSnapshotViewer({
     <QaViewer
       campaignId={campaignId}
       inventory={{
-        campaignName, matrix, csv, notices,
-        pieces: pieces.map(({ file, thumbnailReady }) => ({ ...file, thumbnailReady })),
-        production: Object.fromEntries(pieces.flatMap(({ file, production }) => production
-          ? [[file.name.replace(/\.[^.]+$/, "").normalize("NFC").toLowerCase(), production]]
-          : [])),
-        clientRequirements: Object.fromEntries(pieces.map(({ file, requirements }) => [file.name, requirements])),
+        campaignName,
+        matrix,
+        csv,
+        notices,
+        pieces: pieces.map(
+          ({
+            file,
+            thumbnailReady,
+            pieceId,
+            pieceVersionId,
+            version,
+            versions,
+            openThreads,
+            threadCount,
+            humanStatus,
+          }) => ({
+            ...file,
+            thumbnailReady,
+            pieceId,
+            pieceVersionId,
+            currentVersion: version,
+            versions,
+            openThreads,
+            threadCount,
+            humanStatus,
+          }),
+        ),
+        production: Object.fromEntries(
+          pieces.flatMap(({ file, production }) =>
+            production
+              ? [
+                  [
+                    file.name
+                      .replace(/\.[^.]+$/, "")
+                      .normalize("NFC")
+                      .toLowerCase(),
+                    production,
+                  ],
+                ]
+              : [],
+          ),
+        ),
+        clientRequirements: Object.fromEntries(
+          pieces.map(({ file, requirements }) => [file.name, requirements]),
+        ),
       }}
-      analysis={snapshotId && pieces.length ? {
-        campaignId,
-        snapshotId,
-        inputs: pieces.map(({ file, contextKey }) => ({ name: file.name, contextKey })),
-      } : undefined}
+      analysis={
+        snapshotId && pieces.length && !data.parserOutdated
+          ? {
+              campaignId,
+              snapshotId,
+              inputs: pieces.map(({ file, contextKey }) => ({
+                name: file.name,
+                contextKey,
+              })),
+            }
+          : undefined
+      }
       refreshing={requesting || syncing}
-      syncError={requestError ?? syncError}
+      syncError={
+        requestError ??
+        syncError ??
+        (data.parserOutdated
+          ? "Hay nuevos criterios de QA. Usá Actualizar desde Drive para vincular las piezas y habilitar la revisión guardada."
+          : undefined)
+      }
       onRefresh={() => void update()}
     />
   );

@@ -21,6 +21,12 @@ import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 export function ReviewDialogs({
   session: {
     version,
+    saving,
+    canReview,
+    saveError,
+    exceptionReason,
+    setExceptionReason,
+    detail,
     setToast,
     modal,
     setModal,
@@ -68,7 +74,9 @@ export function ReviewDialogs({
                 </p>
                 <div className="share-link">
                   <Link2 size={15} />
-                  <span className="min-w-0 truncate" title={pathname}>{pathname}</span>
+                  <span className="min-w-0 truncate" title={pathname}>
+                    {pathname}
+                  </span>
                   <button
                     onClick={async () => {
                       try {
@@ -128,24 +136,55 @@ export function ReviewDialogs({
                 </div>
                 {requiresException && (
                   <label className="exception-label">
-                    Justificación para aprobar con excepción
-                    <textarea
-                      value={exception}
-                      onChange={(e) => setException(e.target.value)}
-                      placeholder="Describe por qué se acepta esta versión…"
-                    />
+                    Motivo de la excepción
+                    <select
+                      value={exceptionReason}
+                      onChange={(e) =>
+                        setExceptionReason(
+                          e.target.value as typeof exceptionReason,
+                        )
+                      }
+                    >
+                      <option value="acceptedFinding">
+                        Hallazgo aceptado por el cliente
+                      </option>
+                      <option value="falsePositive">
+                        Falso positivo de IA
+                      </option>
+                      <option value="notApplicable">
+                        El requisito no aplica
+                      </option>
+                      <option value="other">Otro motivo</option>
+                    </select>
                   </label>
                 )}
+                <label className="exception-label">
+                  {requiresException
+                    ? "Justificación de la excepción o de los cambios"
+                    : "Nota para solicitar cambios"}
+                  <textarea
+                    maxLength={4000}
+                    value={exception}
+                    onChange={(e) => setException(e.target.value)}
+                    placeholder="Describe el motivo de la decisión…"
+                  />
+                </label>
+                {saveError && <p role="alert">{saveError}</p>}
                 <div className="modal-buttons">
                   <button
                     className="button secondary"
-                    onClick={() => setDecision("Cambios solicitados")}
+                    disabled={saving || !canReview}
+                    onClick={() => void setDecision("Cambios solicitados")}
                   >
                     Solicitar cambios
                   </button>
                   <button
                     className="button primary"
-                    disabled={requiresException && !exception.trim()}
+                    disabled={
+                      saving ||
+                      !canReview ||
+                      (requiresException && !exception.trim())
+                    }
                     onClick={() => setDecision("Aprobada")}
                   >
                     <Check size={15} />
@@ -154,6 +193,16 @@ export function ReviewDialogs({
                       : "Aprobar versión"}
                   </button>
                 </div>
+                {detail?.currentDecisionId &&
+                  detail.decision?.decision !== "revoked" && (
+                    <button
+                      className="button secondary"
+                      disabled={saving}
+                      onClick={() => void setDecision("Pendiente")}
+                    >
+                      Revocar decisión
+                    </button>
+                  )}
                 <p className="modal-footnote">
                   La decisión se aplica a esta pieza y versión.
                 </p>

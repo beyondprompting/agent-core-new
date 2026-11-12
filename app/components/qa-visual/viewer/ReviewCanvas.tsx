@@ -1,10 +1,5 @@
 import { useState } from "react";
-import {
-  CircleHelp,
-  ImageIcon,
-  Plus,
-  ShieldCheck,
-} from "lucide-react";
+import { CircleHelp, ImageIcon, Plus, ShieldCheck } from "lucide-react";
 
 import { Artwork } from "@/app/components/qa-visual/shared/visuals";
 import { CanvasCommentMarkers } from "./CanvasCommentMarkers";
@@ -13,6 +8,8 @@ import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 export function ReviewCanvas({
   session: {
     version,
+    saving,
+    canReview,
     selected,
     filter,
     pendingPin,
@@ -150,7 +147,11 @@ export function ReviewCanvas({
       <div className="viewer-footer">
         <span>
           <span className="live-dot" />
-          Cambios de esta sesión
+          {saving
+            ? "Guardando…"
+            : canReview
+              ? "Revisión guardada en la campaña"
+              : "Cargando revisión…"}
         </span>
         <button onClick={() => setModal("help")}>
           <CircleHelp size={13} />

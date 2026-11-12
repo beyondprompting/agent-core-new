@@ -8,6 +8,8 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
   const { session } = sessionProps;
   const {
     filter,
+    saving,
+    canReview,
     reviewer,
     setFilter,
     draft,
@@ -48,6 +50,7 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
         >
           <option value="all">Todos los comentarios</option>
           <option value="agent">Solo agentes</option>
+          <option value="source">Avisos de fuente</option>
           <option value="human">Solo personas</option>
           <option value="open">Sin resolver</option>
         </select>
@@ -61,6 +64,13 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
         </button>
       </div>
       <div className="comments-scroll">
+        {(session.detail?.moreThreads ||
+          session.detail?.threads.some((t) => t.moreComments)) && (
+          <p className="info-note">
+            Esta vista muestra hasta 200 hilos y 200 entradas por hilo. Hay más
+            actividad guardada que aún no se muestra aquí.
+          </p>
+        )}
         {visibleComments.map((c) => (
           <CommentCard key={c.id} comment={c} session={session} />
         ))}
@@ -98,6 +108,8 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           <Avatar type="you" name={reviewer} small />
           <textarea
             ref={inputRef}
+            maxLength={4000}
+            disabled={!canReview || saving}
             aria-label="Agregar un comentario"
             placeholder="Escribe un comentario…"
             value={draft}
@@ -124,7 +136,7 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           </button>
           <button
             className="publish-button"
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || saving || !canReview}
             onClick={publish}
           >
             Publicar

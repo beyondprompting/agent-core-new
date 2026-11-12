@@ -44,7 +44,10 @@ export function QaViewer({
   const agent = useAgentAnalysis(analysis);
   const { user } = useUser();
   const reviewer = user?.name || user?.email || "Revisor";
-  const pieces = useMemo(() => toReviewPieces(inventory, campaignId), [inventory, campaignId]);
+  const pieces = useMemo(
+    () => toReviewPieces(inventory, campaignId),
+    [inventory, campaignId],
+  );
   return (
     <div className="qa-visual">
       <div className="workspace">
@@ -68,6 +71,7 @@ export function QaViewer({
             feed={analysis ? agent.feed : feed}
             agent={agent}
             reviewer={reviewer}
+            campaignId={campaignId}
             onRefresh={onRefresh}
             refreshing={refreshing}
           />
@@ -83,7 +87,9 @@ export function QaViewer({
             <section className="empty-state">
               <ScanLine size={28} />
               <p role="status">
-                {refreshing ? "Importando los archivos de Drive…" : "No hay piezas disponibles para revisar."}
+                {refreshing
+                  ? "Importando los archivos de Drive…"
+                  : "No hay piezas disponibles para revisar."}
               </p>
             </section>
           </>
@@ -94,6 +100,7 @@ export function QaViewer({
 }
 
 function ReviewWorkspace({
+  campaignId,
   pieces,
   inventory,
   feed,
@@ -102,6 +109,7 @@ function ReviewWorkspace({
   onRefresh,
   refreshing,
 }: {
+  campaignId: string;
   agent: ReturnType<typeof useAgentAnalysis>;
   onRefresh?: () => void;
   refreshing: boolean;
@@ -110,7 +118,13 @@ function ReviewWorkspace({
   pieces: Piece[];
   inventory: QaInventory;
 }) {
-  const session = useReviewSession(pieces, inventory, feed, reviewer);
+  const session = useReviewSession(
+    pieces,
+    inventory,
+    feed,
+    reviewer,
+    campaignId,
+  );
   const {
     leftOpen,
     rightOpen,
@@ -124,7 +138,7 @@ function ReviewWorkspace({
     toast,
   } = session;
   const row = agent.dashboard?.reviews.find(
-    (review) => review?.name === piece.id,
+    (review) => review?.name === piece.filename,
   );
   const phase =
     row?.status === "stale"
@@ -162,7 +176,7 @@ function ReviewWorkspace({
       {dashboard?.total || phase || agent.error ? (
         <div className="qa-analysis-bar" role="status" aria-live="polite">
           <div
-            className={`qa-analysis-icon ${complete ? (failed ? "has-errors" : "is-complete") : ""}`}
+            className={`qa-analysis-icon ${complete ? (failed || dashboard?.findings || dashboard?.partial ? "has-errors" : dashboard?.stale ? "" : "is-complete") : ""}`}
             aria-hidden="true"
           >
             {complete ? (
@@ -185,6 +199,16 @@ function ReviewWorkspace({
                   {finished} de {total} piezas
                 </span>
               )}
+              {complete && (
+                <span>
+                  {dashboard?.validated ?? 0} validadas ·{" "}
+                  {dashboard?.findings ?? 0} con hallazgos ·{" "}
+                  {dashboard?.partial ?? 0} incompletas
+                  {!!dashboard?.stale && (
+                    <> · {dashboard.stale} desactualizadas</>
+                  )}
+                </span>
+              )}
               {failed > 0 && (
                 <span className="qa-analysis-errors">{failed} con error</span>
               )}
@@ -201,12 +225,30 @@ function ReviewWorkspace({
                 >
                   <span
                     style={{
-                      width: `${((dashboard?.completed ?? 0) / total) * 100}%`,
+                      width: `${((dashboard?.validated ?? 0) / total) * 100}%`,
+                    }}
+                  />
+                  <span
+                    className="qa-analysis-track-findings"
+                    style={{
+                      width: `${((dashboard?.findings ?? 0) / total) * 100}%`,
+                    }}
+                  />
+                  <span
+                    className="qa-analysis-track-partial"
+                    style={{
+                      width: `${((dashboard?.partial ?? 0) / total) * 100}%`,
                     }}
                   />
                   <span
                     className="qa-analysis-track-error"
                     style={{ width: `${(failed / total) * 100}%` }}
+                  />
+                  <span
+                    className="qa-analysis-track-stale"
+                    style={{
+                      width: `${((dashboard?.stale ?? 0) / total) * 100}%`,
+                    }}
                   />
                 </div>
                 <span>{percentage}%</span>
@@ -214,7 +256,8 @@ function ReviewWorkspace({
             )}
             {!!dashboard?.preparingImages && (
               <span className="qa-analysis-phase">
-                Preparando imágenes · {dashboard.preparedImages} de {total} listas
+                Preparando imágenes · {dashboard.preparedImages} de {total}{" "}
+                listas
               </span>
             )}
             {phase && phase !== "Preparando imagen" && (
@@ -244,6 +287,11 @@ function ReviewWorkspace({
           )}
         </div>
       ) : null}
+      {session.saveError && (
+        <div className="drive-notices" role="alert">
+          {session.saveError}
+        </div>
+      )}
       <section
         aria-label="Revisión visual"
         className={`review-layout ${!leftOpen ? "hide-left" : ""} ${!rightOpen ? "hide-right" : ""}`}
@@ -256,11 +304,7 @@ function ReviewWorkspace({
         {rightOpen && (
           <PiecePanel
             session={session}
-            findings={
-              row && "findings" in row && version === 1
-                ? row.findings
-                : undefined
-            }
+            findings={session.detail?.review?.findings}
           />
         )}
       </section>
@@ -272,6 +316,7 @@ function ReviewWorkspace({
           reviewer={reviewer}
           layoutKey={`${zoom}-${pan.x}-${pan.y}-${leftOpen}-${rightOpen}-${rightTab}`}
           onPublish={session.publishImageComment}
+          busy={session.saving}
           onCancel={session.cancelImageComment}
         />
       )}

@@ -1,16 +1,7 @@
 import { Check, Layers } from "lucide-react";
-import type { Piece } from "@/app/lib/qa-visual/review-model";
-import { Artwork } from "@/app/components/qa-visual/shared/visuals";
+import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
-export function PieceVersions({
-  piece,
-  version,
-  onSelectVersion,
-}: {
-  piece: Piece;
-  version: number;
-  onSelectVersion: (version: number) => void;
-}) {
+export function PieceVersions({ session }: { session: ReviewSession }) {
   return (
     <div className="versions-panel">
       <div className="requirements-title">
@@ -19,36 +10,37 @@ export function PieceVersions({
         </span>
         <div>
           <h3>Versiones de la pieza</h3>
-          <p>{piece.name}</p>
+          <p>{session.piece.name}</p>
         </div>
       </div>
       <p className="versions-intro">
         Cada entrega conserva sus comentarios y decisiones.
       </p>
-      {Array.from({ length: piece.versions }, (_, i) => i + 1)
-        .reverse()
-        .map((v) => (
-          <button
-            className={`version-card ${version === v ? "active" : ""}`}
-            key={v}
-            onClick={() => onSelectVersion(v)}
-          >
-            <div className="version-thumb">
-              <Artwork piece={piece} thumbnail />
-            </div>
-            <div>
-              <strong>Versión {v}</strong>
-              <span>Original recibido</span>
-              <small>Única versión proporcionada</small>
-            </div>
-            {version === v && <Check size={14} />}
-          </button>
-        ))}
+      {(session.detail?.versions ?? []).map((v) => (
+        <button
+          className={`version-card ${session.version === v.number ? "active" : ""}`}
+          key={v.id}
+          onClick={() => session.changeVersion(v.number)}
+        >
+          <div>
+            <strong>Versión {v.number}</strong>
+            <span>{v.fileName}</span>
+            <small>
+              {new Date(v.at).toLocaleString()} · {v.humanStatus}
+            </small>
+          </div>
+          {session.version === v.number && <Check size={14} />}
+        </button>
+      ))}
+      {!session.detail && <p>Cargando versiones…</p>}
+      {session.detail?.moreVersions && (
+        <p>Se muestran las 200 versiones más recientes.</p>
+      )}
       <div className="info-note">
         <Layers size={16} />
         <span>
-          No se recibieron versiones corregidas de esta pieza. Las nuevas
-          versiones requerirán su propia revisión.
+          Una imagen corregida requiere su propia aprobación. Un cambio en el
+          pedido conserva la decisión con una advertencia.
         </span>
       </div>
     </div>

@@ -1,3 +1,5 @@
+import { ConvexError } from "convex/values";
+import type { Id } from "../_generated/dataModel";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { QueryCtx } from "../_generated/server";
 import { internalQuery } from "../_generated/server";
@@ -23,3 +25,30 @@ export const viewerIsQaAdmin = internalQuery({
   args: {},
   handler: async (ctx) => Boolean(await requireQaAdmin(ctx)),
 });
+
+export async function requireCampaign(
+  ctx: QueryCtx,
+  campaignId: Id<"qaVisualCampaigns">,
+) {
+  const user = await requireQaAdmin(ctx);
+  const campaign = await ctx.db.get(campaignId);
+  if (!campaign || campaign.status !== "active")
+    throw new ConvexError({
+      code: "campaign_unavailable",
+      message: "La campaña ya no está disponible.",
+    });
+  return { user, campaign };
+}
+export async function requireVersion(
+  ctx: QueryCtx,
+  pieceVersionId: Id<"qaVisualPieceVersions">,
+) {
+  const version = await ctx.db.get(pieceVersionId);
+  if (!version)
+    throw new ConvexError({
+      code: "version_unavailable",
+      message: "La versión ya no está disponible.",
+    });
+  const access = await requireCampaign(ctx, version.campaignId);
+  return { ...access, version };
+}

@@ -35,7 +35,8 @@ export function ViewerToolbar({
     rightOpen,
     setRightOpen,
     setModal,
-    setMarks,
+    cancelImageComment,
+    pendingMark,
     setPan,
     pinToolRef,
     piece,
@@ -162,12 +163,9 @@ export function ViewerToolbar({
           ))}
           <button
             className="icon-button"
-            title="Deshacer última anotación"
-            disabled={!pieceMarks.length}
-            onClick={() => {
-              const last = pieceMarks.at(-1);
-              setMarks((prev) => prev.filter((m) => m.id !== last?.id));
-            }}
+            title="Cancelar anotación sin publicar"
+            disabled={!pendingMark}
+            onClick={cancelImageComment}
           >
             <RotateCcw size={15} />
           </button>

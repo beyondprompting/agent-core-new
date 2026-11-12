@@ -33,10 +33,25 @@ export function toReviewPieces(
       variant?.toUpperCase() === "AUTORAPIDO"
         ? "Auto Rápido"
         : display(variant);
-    const media = "/workspace/qa-visual/media?" +
-      new URLSearchParams({ campaign: campaignId, id: file.driveId, v: file.driveVersion });
+    const media =
+      "/workspace/qa-visual/media?" +
+      new URLSearchParams({
+        campaign: campaignId,
+        id: file.driveId,
+        v: file.driveVersion,
+      });
+    const preparedMedia = file.pieceVersionId
+      ? "/workspace/qa-visual/media?" +
+        new URLSearchParams({
+          campaign: campaignId,
+          version: file.pieceVersionId,
+        })
+      : media;
     return {
-      id: file.name,
+      id: file.pieceId ?? file.name,
+      pieceId: file.pieceId,
+      pieceVersionId: file.pieceVersionId,
+      currentVersion: file.currentVersion ?? 1,
       name:
         product === "—"
           ? stem
@@ -44,9 +59,11 @@ export function toReviewPieces(
             ? `${product} · ${variantLabel}`
             : product,
       filename: file.name,
-      image: file.thumbnailReady ? media + "&variant=analysis" : "",
+      image: file.thumbnailReady ? preparedMedia + "&variant=analysis" : "",
       originalImage: media,
-      thumbnail: file.thumbnailReady ? media + "&variant=thumbnail" : undefined,
+      thumbnail: file.thumbnailReady
+        ? preparedMedia + "&variant=thumbnail"
+        : undefined,
       width,
       height,
       channel,
@@ -57,8 +74,10 @@ export function toReviewPieces(
       formatName,
       format:
         width && height ? `${formatName} · ${width} × ${height}` : formatName,
-      status: "Pendiente",
-      versions: 1,
+      status: file.humanStatus ?? "Pendiente",
+      versions: file.versions ?? 1,
+      openThreads: file.openThreads ?? 0,
+      threadCount: file.threadCount ?? 0,
       product,
       price: record?.price || "—",
       validity: record?.dateAsset || "—",

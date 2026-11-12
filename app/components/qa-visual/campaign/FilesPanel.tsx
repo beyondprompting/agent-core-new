@@ -10,7 +10,10 @@ import {
 import { Artwork } from "@/app/components/qa-visual/shared/visuals";
 
 import { CompactReviewStatus } from "@/app/components/qa-visual/piece/review-status";
-import { getAiReviewState, getHumanReviewState } from "@/app/lib/qa-visual/review-state";
+import {
+  getAiReviewState,
+  getHumanReviewState,
+} from "@/app/lib/qa-visual/review-state";
 import { CampaignResources } from "./CampaignResources";
 import { CampaignSummary } from "./CampaignSummary";
 import { usePieceKeyboardNavigation } from "@/app/hooks/qa-visual/use-piece-keyboard-navigation";
@@ -21,11 +24,9 @@ export function FilesPanel({
     pieces,
     inventory,
     activeId,
-    version,
     leftTab,
     setLeftTab,
     comments,
-    filter,
     query,
     setQuery,
     statusFilter,
@@ -35,7 +36,6 @@ export function FilesPanel({
     results,
     approvals,
     activePieces,
-    piece,
     filteredPieces,
     choosePiece,
     modal,
@@ -117,23 +117,38 @@ export function FilesPanel({
               </select>
             </div>
           </div>
-          <div className="file-list" ref={listRef} aria-keyshortcuts="ArrowUp ArrowDown">
+          <div
+            className="file-list"
+            ref={listRef}
+            aria-keyshortcuts="ArrowUp ArrowDown"
+          >
             {filteredPieces.map((p) => {
               const fileComments = comments.filter(
-                (c) => c.pieceId === p.id && c.version === 1,
+                (c) =>
+                  c.pieceId === p.id && c.version === (p.currentVersion ?? 1),
               );
-              const ai = getAiReviewState(results[p.id]?.[1], fileComments);
+              const ai = getAiReviewState(
+                results[p.id]?.[p.currentVersion ?? 1],
+                fileComments,
+              );
+              const conversationCount =
+                (p.threadCount ?? 0) +
+                fileComments.filter(
+                  (c) => c.kind === "agent" && !c.historical && !c.threadId,
+                ).length;
               const decision = approvals
                 .slice()
                 .reverse()
                 .find(
                   (a) =>
                     a.pieceId === p.id &&
-                    a.version === 1 &&
-                    a.status === (statuses[`${p.id}-1`] ?? p.status),
+                    a.version === (p.currentVersion ?? 1) &&
+                    a.status ===
+                      (statuses[`${p.id}-${p.currentVersion ?? 1}`] ??
+                        p.status),
                 );
               const human = getHumanReviewState(
-                statuses[`${p.id}-1`] ?? p.status,
+                statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status,
                 decision,
               );
               return (
@@ -155,13 +170,13 @@ export function FilesPanel({
                     <strong title={p.name}>{p.name}</strong>
                     <div className="file-meta-row">
                       <span className="file-format">{p.format}</span>
-                      {fileComments.length > 0 && (
+                      {conversationCount > 0 && (
                         <span
                           className="file-comment-count"
-                          title={`${fileComments.length} comentarios`}
+                          title={`${conversationCount} conversaciones`}
                         >
                           <MessageCircle size={11} />
-                          {fileComments.length}
+                          {conversationCount}
                         </span>
                       )}
                     </div>
@@ -191,7 +206,9 @@ export function FilesPanel({
               <strong>
                 {
                   activePieces.filter(
-                    (p) => (statuses[`${p.id}-1`] ?? p.status) === "Aprobada",
+                    (p) =>
+                      (statuses[`${p.id}-${p.currentVersion ?? 1}`] ??
+                        p.status) === "Aprobada",
                   ).length
                 }{" "}
                 de {pieces.length} aprobadas
@@ -200,7 +217,7 @@ export function FilesPanel({
             <div className="progress-track">
               <span
                 style={{
-                  width: `${(activePieces.filter((p) => (statuses[`${p.id}-1`] ?? p.status) === "Aprobada").length / pieces.length) * 100}%`,
+                  width: `${(activePieces.filter((p) => (statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status) === "Aprobada").length / pieces.length) * 100}%`,
                 }}
               />
             </div>

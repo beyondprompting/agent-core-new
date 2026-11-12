@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { DOMParser } from "@xmldom/xmldom";
 import JSZip from "jszip";
-import type { ProductionFields } from "../../app/lib/qa-visual/production-csv";
-import type { ClientRequirement, ReviewNotice } from "../../app/lib/qa-visual/review-model";
+import type { Issue } from "./model/contracts";
 
 const sheets = ["PRODUCCION", "LEYENDA", "REGLAS"] as const;
 const normalized = (s: string) =>
@@ -16,6 +15,16 @@ const normalized = (s: string) =>
 
 export async function parseClientMatrix(name: string, bytes: Buffer) {
   const zip = await JSZip.loadAsync(bytes);
+  const expanded = Object.values(zip.files).reduce(
+    (sum, entry) =>
+      sum +
+      ((entry as unknown as { _data?: { uncompressedSize?: number } })._data
+        ?.uncompressedSize ?? 0),
+    0,
+  );
+  if (expanded > 60 * 1024 * 1024)
+    throw new Error("La matriz descomprimida supera 60 MB.");
+  const issues: Issue[] = [];
   const xml = async (path: string) => {
     const entry = zip.file(path);
     if (!entry) throw new Error(`No se encontró ${path} en la matriz`);
@@ -32,6 +41,38 @@ export async function parseClientMatrix(name: string, bytes: Buffer) {
       .join("");
   const workbook = await xml("xl/workbook.xml");
   const relations = await xml("xl/_rels/workbook.xml.rels");
+  const date1904 =
+    elements(workbook, "workbookPr")[0]?.getAttribute("date1904") === "1";
+  const styles = zip.file("xl/styles.xml")
+    ? await xml("xl/styles.xml")
+    : undefined;
+  const customFormats = new Map(
+    styles
+      ? elements(styles, "numFmt").map((n) => [
+          Number(n.getAttribute("numFmtId")),
+          n.getAttribute("formatCode") ?? "",
+        ])
+      : [],
+  );
+  const styleFormats = styles
+    ? elements(styles, "cellXfs").flatMap((n) =>
+        elements(n, "xf").map((x) => Number(x.getAttribute("numFmtId"))),
+      )
+    : [];
+  const isDate = (style: number) => {
+    const id = styleFormats[style];
+    return (
+      (id >= 14 && id <= 22) ||
+      /[dy]/i.test((customFormats.get(id) ?? "").replace(/"[^"]*"|\\./g, ""))
+    );
+  };
+  const excelDate = (serial: number) => {
+    const date = new Date(
+      Date.UTC(date1904 ? 1904 : 1899, date1904 ? 0 : 11, date1904 ? 1 : 30) +
+        serial * 86400000,
+    );
+    return `${date.getUTCDate()} de ${new Intl.DateTimeFormat("es", { month: "long", timeZone: "UTC" }).format(date)}`;
+  };
   const shared = zip.file("xl/sharedStrings.xml")
     ? elements(await xml("xl/sharedStrings.xml"), "si").map(text)
     : [];
@@ -50,28 +91,103 @@ export async function parseClientMatrix(name: string, bytes: Buffer) {
     const target = elements(relations, "Relationship")
       .find((node) => node.getAttribute("Id") === id)
       ?.getAttribute("Target");
-    if (!target) throw new Error(`Falta la pestaña ${sheet}`);
+    if (!target) {
+      if (sheet === "PRODUCCION")
+        throw new Error("Falta la pestaña PRODUCCION");
+      issues.push({
+        id: `template_optional_sheet_missing:${sheet}`,
+        code: "template_optional_sheet_missing",
+        scope: "campaign",
+        severity: "warning",
+        affects: [],
+        message: `Falta la pestaña ${sheet}.`,
+        sources: [{ file: "excel", name, sheet, text: "" }],
+      });
+      continue;
+    }
     const entry = target.startsWith("/")
       ? target.slice(1)
       : posix.normalize(posix.join("xl", target));
     if (!entry.startsWith("xl/worksheets/"))
       throw new Error("Ubicación de pestaña inválida");
-    for (const node of elements(await xml(entry), "c")) {
+    const worksheet = await xml(entry);
+    for (const node of elements(worksheet, "c")) {
       const cell = node.getAttribute("r") ?? "";
       const raw = elements(node, "v")[0]?.textContent ?? "";
       const type = node.getAttribute("t");
-      const value = (
+      let value = (
         type === "s"
           ? shared[Number(raw)]
           : type === "inlineStr"
             ? text(node)
             : raw
       )?.trim();
+      if (elements(node, "f").length && !raw)
+        issues.push({
+          id: `formula_without_value:${sheet}:${cell}`,
+          code: "formula_without_value",
+          scope: "piece",
+          severity: "warning",
+          affects: [],
+          message:
+            "Una fórmula no tiene un resultado guardado. Abrí y guardá el Excel para actualizarla.",
+          sources: [{ file: "excel", name, sheet, cell, text: "" }],
+        });
+      if (
+        raw &&
+        (!type || type === "n") &&
+        isDate(Number(node.getAttribute("s") ?? 0))
+      )
+        value = excelDate(Number(raw));
       if (value && /^[A-Z]+[1-9]\d*$/.test(cell))
         cells.push({ sheet, cell, text: value });
     }
+    const toColumn = (s: string) =>
+      [...s].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+    const fromColumn = (n: number) => {
+      let s = "";
+      while (n > 0) {
+        n--;
+        s = String.fromCharCode(65 + (n % 26)) + s;
+        n = Math.floor(n / 26);
+      }
+      return s;
+    };
+    for (const merge of elements(worksheet, "mergeCell")) {
+      const match = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(
+        merge.getAttribute("ref") ?? "",
+      );
+      if (!match) continue;
+      const text = cells.find(
+        (c) => c.sheet === sheet && c.cell === `${match[1]}${match[2]}`,
+      )?.text;
+      if (!text) continue;
+      const count =
+        (Number(match[4]) - Number(match[2]) + 1) *
+        (toColumn(match[3]) - toColumn(match[1]) + 1);
+      if (count > 10000 || cells.length + count > 100000)
+        throw new Error("La matriz tiene demasiadas celdas combinadas.");
+      for (let row = Number(match[2]); row <= Number(match[4]); row++)
+        for (let col = toColumn(match[1]); col <= toColumn(match[3]); col++) {
+          const cell = `${fromColumn(col)}${row}`;
+          if (!cells.some((c) => c.sheet === sheet && c.cell === cell))
+            cells.push({ sheet, cell, text });
+        }
+    }
   }
+  if (
+    !cells.some(
+      (c) =>
+        c.sheet === "PRODUCCION" &&
+        /^A\d+$/.test(c.cell) &&
+        normalized(c.text) === "CAMPANA",
+    )
+  )
+    throw new Error(
+      "Plantilla no reconocida: falta el encabezado CAMPAÑA en PRODUCCION.",
+    );
   return {
+    issues,
     name,
     hash: createHash("sha256").update(bytes).digest("hex"),
     bytes,
@@ -79,207 +195,4 @@ export async function parseClientMatrix(name: string, bytes: Buffer) {
   };
 }
 
-type Matrix = Awaited<ReturnType<typeof parseClientMatrix>>;
-function numbered(value: string) {
-  // A number without text still belongs to its own line (e.g. an empty PVP).
-  return value.split(/\r\n|\r|\n/).flatMap((line) => {
-    const match = /^(\d+)\.(.*)$/.exec(line.trim());
-    return match ? [{
-      ordinal: match[1].replace(/^0+(?=\d)/, ""),
-      value: match[2].trim(),
-    }] : [];
-  });
-}
-
-function priceAmount(value: string) {
-  const match = /^\$?\s*(\d+)(?:[.,](\d{1,2}))?$/.exec(value.trim());
-  if (!match) return undefined;
-  const whole = match[1].replace(/^0+(?=\d)/, "");
-  return `${whole}.${(match[2] ?? "").padEnd(2, "0")}`;
-}
-
-export function matrixReviewData(
-  matrix: Matrix,
-  fileName: string,
-  production?: ProductionFields,
-) {
-  const requirements: ClientRequirement[] = [];
-  const notices: ReviewNotice[] = [];
-  if (!production) return { requirements, notices };
-  const cells = new Map(
-    matrix.cells.map((cell) => [`${cell.sheet}!${cell.cell}`, cell.text]),
-  );
-  const header = matrix.cells.find(
-    (cell) =>
-      cell.sheet === "PRODUCCION" &&
-      cell.cell.startsWith("A") &&
-      normalized(cell.text) === "CAMPANA",
-  );
-  if (!header) return { requirements, notices };
-  const format = /_CARRUSEL_/i.test(fileName)
-    ? "CARRUSEL"
-    : normalized(production.format);
-  const formatLabel = (value: string) =>
-    value.startsWith("POST ESTATIC") || value === "POST"
-      ? "POST"
-      : value.startsWith("STORIES ESTATIC") ||
-          value === "STORIES" ||
-          value === "STORY"
-        ? "STORY"
-        : value === "POST CARROUSEL"
-          ? "CARRUSEL"
-          : value;
-  const rows = matrix.cells
-    .filter(
-      (cell) =>
-        cell.sheet === "PRODUCCION" &&
-        /^A\d+$/.test(cell.cell) &&
-        Number(cell.cell.slice(1)) > Number(header.cell.slice(1)) &&
-        normalized(cell.text) === normalized(production.campaign),
-    )
-    .map((cell) => cell.cell.slice(1))
-    .filter(
-      (row) =>
-        [
-          ["B", production.phase],
-          ["C", production.channel],
-          ["D", production.platform],
-        ].every(
-          ([col, value]) =>
-            normalized(cells.get(`PRODUCCION!${col}${row}`) ?? "") ===
-            normalized(value),
-        ) &&
-        formatLabel(normalized(cells.get(`PRODUCCION!E${row}`) ?? "")) ===
-          formatLabel(format),
-    );
-  if (rows.length !== 1) return { requirements, notices };
-  const row = rows[0];
-  const ref = (col: string) => `PRODUCCION!${col}${row}`;
-  const get = (col: string) => cells.get(ref(col)) ?? "";
-  const add = (
-    id: string,
-    expected: string,
-    source: string,
-    pending?: string,
-  ) => {
-    if (expected)
-      requirements.push({ id, expected, source, ...(pending ? { pending } : {}) });
-  };
-  const references = (key: string) => (cells.has(key) ? ` · ${key}` : "");
-  if (Number(get("I")) && Number(get("J"))) {
-    const template = cells.get("LEYENDA!C11");
-    const legendSize = template?.match(
-      formatLabel(format) === "POST"
-        ? /Post Estático:\s*(\d+\s*x\s*\d+)/i
-        : formatLabel(format) === "STORY"
-          ? /Stories Estática:\s*(\d+\s*x\s*\d+)/i
-          : /(?!) /,
-    )?.[1];
-    const size = `${Number(get("I"))} × ${Number(get("J"))}`;
-    const conflict =
-      legendSize &&
-      legendSize.replace(/\s/g, "").toLowerCase() !==
-        size.replace(/\s/g, "").replace("×", "x");
-    add(
-      "dimensions",
-      size,
-      `${ref("I")}:J${row}${legendSize ? references("LEYENDA!C11") : ""}`,
-      conflict
-        ? "La matriz y la leyenda indican dimensiones distintas."
-        : undefined,
-    );
-  }
-  add("format", get("G"), `${ref("G")}${references("LEYENDA!B9")}`);
-  const variant = normalized(fileName)
-    .match(/\b(DOMICILIO|EXPRESS|AUTORAPIDO)\b/g)
-    ?.at(-1);
-  const day = normalized(fileName)
-    .match(
-      /\b(?:OCTUBRE|NOVIEMBRE|DICIEMBRE|ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE) \d{1,2}\b|\bHOY\b/g,
-    )
-    ?.at(-1);
-  const numberedOffers = numbered(get("K"));
-  const offers = numberedOffers.filter(({ value }) => {
-    const offer = normalized(value);
-    const product = normalized(production.product);
-    if (!product || !` ${offer} `.includes(` ${product} `)) return false;
-    const offerChannel = offer.match(/\b(DOMICILIO|EXPRESS|AUTORAPIDO)\b/)?.[1];
-    if (offerChannel && variant && offerChannel !== variant) return false;
-    const date = offer.match(/\b(\d{1,2}) DE ([A-Z]+)\b/);
-    return (
-      !day ||
-      (date
-        ? day === `${date[2]} ${date[1]}`
-        : !offer.includes("HOY") || day === "HOY")
-    );
-  });
-  if (
-    formatLabel(format) === "STORY" && get("K") &&
-    /stories.*sin oferta/i.test(cells.get("REGLAS!B6") ?? "")
-  ) {
-    notices.push({
-      id: "stories-offer-filled",
-      message: "El Excel incluye ofertas en la fila de Stories, aunque su regla indica dejar esa celda vacía. La revisión usa las ofertas indicadas en esa fila.",
-      source: `${ref("K")} · REGLAS!B6:D6${references("LEYENDA!B12")}`,
-    });
-  }
-  if (offers.length === 1) {
-    const { value, ordinal } = offers[0];
-    const productOnly = value
-      .replace(/^(?:DOMICILIO|EXPRESS|AUTORAPIDO)\s+/i, "")
-      .replace(/^(?:\d{1,2}\s+de\s+\p{L}+|HOY)\s+/iu, "");
-    add("product", productOnly, ref("K"));
-    const priceCell = get("L");
-    const prices = numbered(priceCell).filter((item) => item.ordinal === ordinal);
-    const price = prices.length === 1 ? prices[0].value : "";
-    const csvPrice = production.price.trim();
-    const amount = priceAmount(price);
-    const offerSource = `${ref("K")} · Oferta n.º ${ordinal}`;
-    const priceSource = `${ref("L")} · Precio n.º ${ordinal}`;
-    if (numberedOffers.filter((item) => item.ordinal === ordinal).length !== 1) {
-      add("price", "Sin precio confirmado", offerSource,
-        `El número ${ordinal} se repite en la lista de ofertas del Excel.`);
-    } else if (prices.length > 1) {
-      add("price", "Sin precio confirmado", priceSource,
-        `El número ${ordinal} se repite en la lista de precios del Excel.`);
-    } else if ((priceCell && prices.length === 0) || (!price && csvPrice)) {
-      add("price", "Sin precio confirmado", priceSource,
-        `El Excel no indica un precio para la oferta n.º ${ordinal}.`);
-    } else if (price && amount === undefined) {
-      add("price", price, priceSource,
-        `El Excel no indica un importe único y válido para la oferta n.º ${ordinal}.`);
-    } else if (price && csvPrice && amount !== priceAmount(csvPrice)) {
-      add("price", price, `${priceSource} · CSV · TXT_PRECIO`,
-        `El Excel indica ${price} y el CSV indica ${csvPrice}. Confirmá qué precio corresponde.`);
-    } else if (price) {
-      add("price", price, priceSource);
-    }
-    const date = value.match(/\b\d{1,2}\s+de\s+\p{L}+\b|\bHOY\b/iu)?.[0];
-    if (date)
-      add(
-        "date",
-        date,
-        ref("K") +
-          (/fecha|vigencia|vigente/i.test(get("P")) ? ` · ${ref("P")}` : ""),
-      );
-  } else if (get("K")) {
-    for (const id of ["product", "price", "date"]) {
-      add(
-        id,
-        get("K"),
-        ref("K"),
-        "No se pudo asociar una única oferta de la matriz a esta imagen.",
-      );
-    }
-  }
-  const notes = get("P");
-  const cta = notes
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) =>
-      /call to action|\bcta\b|^cpa\s*:|^tagline\s*:/i.test(line),
-    )
-    .join("\n");
-  add("cta", cta, ref("P") + references("LEYENDA!C15"));
-  return { requirements, notices };
-}
+export { buildRequirements as matrixReviewData } from "./model/requirements";

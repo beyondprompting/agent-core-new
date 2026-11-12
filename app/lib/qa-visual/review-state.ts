@@ -13,6 +13,7 @@ export type ReviewDecision = {
   author: string;
   exception: string;
   message: string;
+  at?: number;
 };
 export type AiReviewState = {
   status: AiReviewStatus | undefined;
@@ -22,6 +23,7 @@ export type AiReviewState = {
   tone: ReviewTone;
   findings: number;
   openFindings: number;
+  reasons?: string[];
 };
 export type HumanReviewState = {
   title: string;
@@ -35,7 +37,7 @@ export type HumanReviewState = {
 // The AI result is an explicit snapshot. Resolving discussion does not rerun QA.
 export function getAiReviewState(
   status: AiReviewStatus | undefined,
-  comments: Comment[],
+  comments: readonly Comment[],
 ): AiReviewState {
   if (!status)
     return {
@@ -48,7 +50,10 @@ export function getAiReviewState(
       openFindings: 0,
     };
   const warnings = comments.filter(
-    (c) => c.kind === "agent" && c.severity === "warning",
+    (c) =>
+      !c.historical &&
+      c.kind === "agent" &&
+      (c.severity === "warning" || c.severity === "blocking"),
   );
   const findings = warnings.length;
   const openFindings = warnings.filter((c) => !c.resolved).length;
@@ -56,6 +61,12 @@ export function getAiReviewState(
     AiReviewStatus,
     { title: string; shortLabel: string; detail: string; tone: ReviewTone }
   > = {
+    stale: {
+      title: "Análisis desactualizado",
+      shortLabel: "Desactualizada",
+      detail: "Cambió la imagen, el pedido o los criterios de análisis",
+      tone: "neutral",
+    },
     analyzing: {
       title: "Analizando…",
       shortLabel: "Analizando…",
@@ -75,7 +86,7 @@ export function getAiReviewState(
     validated: {
       title: "Validada por IA",
       shortLabel: "Validada",
-      detail: "Sin incumplimientos en los controles ejecutados",
+      detail: "Todos los controles solicitados fueron verificados",
       tone: "success",
     },
     partial: {
@@ -130,7 +141,7 @@ export function getHumanReviewState(
       detail: author
         ? `${author} está revisando esta versión`
         : "Todavía sin decisión de aprobación",
-      tone: "progress",
+      tone: "neutral",
       author,
       hasException: false,
     };

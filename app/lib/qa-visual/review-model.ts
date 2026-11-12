@@ -4,14 +4,12 @@ export type ReviewNotice = {
   source: string;
 };
 
-export type ClientRequirement = {
-  id: string;
-  expected: string;
-  source: string;
-  pending?: string;
-};
-
+export type ClientRequirement =
+  import("../../../convex/qaVisual/model/contracts").Requirement;
+export type ReviewIssue =
+  import("../../../convex/qaVisual/model/contracts").Issue;
 export type AiReviewStatus =
+  | "stale"
   | "analyzing"
   | "findings"
   | "validated"
@@ -39,6 +37,11 @@ export type Piece = {
   phase: string;
   status: PieceStatus;
   versions: number;
+  openThreads?: number;
+  threadCount?: number;
+  currentVersion?: number;
+  pieceId?: import("../../../convex/_generated/dataModel").Id<"qaVisualPieces">;
+  pieceVersionId?: import("../../../convex/_generated/dataModel").Id<"qaVisualPieceVersions">;
   channel: string;
   width: number;
   height: number;
@@ -55,10 +58,26 @@ export type Comment = {
   version: number;
   author: string;
   role: string;
-  kind: "agent" | "human";
+  kind: "agent" | "human" | "source";
   time: string;
   body: string;
-  severity?: "warning" | "success";
+  severity?: "warning" | "blocking" | "success";
+  historical?: boolean;
+  threadId?: import("../../../convex/_generated/dataModel").Id<"qaVisualThreads">;
+  finding?: {
+    reviewId: import("../../../convex/_generated/dataModel").Id<"qaVisualReviews">;
+    ruleId: string;
+  };
+  issue?: ReviewIssue;
+  anchor?: import("../../../convex/qaVisual/model/collaboration").Anchor;
+  replies?: {
+    id: string;
+    body: string;
+    author: string;
+    time: string;
+    canEdit: boolean;
+    event?: string;
+  }[];
   source?: string;
   expected?: string;
   observed?: string;

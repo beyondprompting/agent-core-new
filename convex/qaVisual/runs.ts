@@ -1,3 +1,13 @@
+import {
+  displayReviewStatus,
+  isCurrentReview,
+  reviewResult,
+} from "./model/verdict";
+import { findingDiscussions } from "./pieces";
+import {
+  ANALYSIS_POLICY_VERSION,
+  structuredRequirements,
+} from "./model/contracts";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
@@ -11,7 +21,14 @@ import {
 import { workflow } from "../workflows";
 import { requireQaAdmin } from "./access";
 import { dispatchReady } from "./runDispatch";
-import { attempt, finding, snapshot, status, region, locationStatus } from "./validators";
+import {
+  attempt,
+  finding,
+  snapshot,
+  status,
+  region,
+  locationStatus,
+} from "./validators";
 import { hasValidCommentRegion } from "./commentLocations";
 
 export const start = mutation({
@@ -22,13 +39,20 @@ export const start = mutation({
     names: v.optional(v.array(v.string())),
     kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
   },
-  handler: async (ctx, args): Promise<{ runId: Id<"qaVisualRuns"> } | { error: string }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ runId: Id<"qaVisualRuns"> } | { error: string }> => {
     const requestedBy = await requireQaAdmin(ctx);
-    if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) || (args.names?.length ?? 0) > 200)
+    if (
+      !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) ||
+      (args.names?.length ?? 0) > 200
+    )
       return { error: "Solicitud de análisis inválida." };
 
     const registered = await ctx.db.get(args.campaignId);
-    if (registered?.status !== "active") return { error: "La campaña ya no está disponible." };
+    if (registered?.status !== "active")
+      return { error: "La campaña ya no está disponible." };
     const campaign = registered.reviewKey;
     const existing = await ctx.db
       .query("qaVisualRuns")
@@ -37,24 +61,48 @@ export const start = mutation({
       )
       .unique();
     if (existing) {
-      if (existing.campaign !== campaign) return { error: "La solicitud pertenece a otra campaña." };
+      if (existing.campaign !== campaign)
+        return { error: "La solicitud pertenece a otra campaña." };
       return { runId: existing._id };
     }
     if (registered.currentSnapshotId !== args.snapshotId)
-      return { error: "Los datos de la campaña cambiaron. Volvé a iniciar el análisis." };
+      return {
+        error:
+          "Los datos de la campaña cambiaron. Volvé a iniciar el análisis.",
+      };
     const data = await ctx.db.get(args.snapshotId);
     if (!data || data.campaignId !== args.campaignId)
       return { error: "La campaña todavía no tiene datos importados." };
 
-    const pieces = await ctx.db.query("qaVisualCampaignPieces")
+    const pieces = await ctx.db
+      .query("qaVisualCampaignPieces")
       .withIndex("by_snapshot", (q) => q.eq("snapshotId", data._id))
       .collect();
+    if (
+      pieces.some(
+        (piece) =>
+          !piece.pieceVersionId ||
+          piece.input.policyVersion !== ANALYSIS_POLICY_VERSION,
+      )
+    )
+      return {
+        error:
+          "Actualizá desde Drive antes de analizar: hay nuevos criterios de revisión.",
+      };
     const names = new Set(args.names);
-    const selected = pieces.filter((piece) => args.kind === "batch" || names.has(piece.input.name));
-    if (!selected.length || selected.length > 200 ||
-        (args.kind !== "batch" && selected.length !== names.size) ||
-        (args.kind === "piece" && selected.length !== 1))
-      return { error: "La selección no coincide con las piezas importadas o supera el límite de 200 piezas." };
+    const selected = pieces.filter(
+      (piece) => args.kind === "batch" || names.has(piece.input.name),
+    );
+    if (
+      !selected.length ||
+      selected.length > 200 ||
+      (args.kind !== "batch" && selected.length !== names.size) ||
+      (args.kind === "piece" && selected.length !== 1)
+    )
+      return {
+        error:
+          "La selección no coincide con las piezas importadas o supera el límite de 200 piezas.",
+      };
 
     for (const state of ["preparing", "running"] as const) {
       const active = await ctx.db
@@ -91,10 +139,13 @@ export const start = mutation({
       requestId: args.requestId,
     });
     const ids = await Promise.all(
-      selected.map(({ input }, order) =>
+      selected.map(({ input, pieceId, pieceVersionId }, order) =>
         ctx.db.insert("qaVisualReviews", {
           runId,
           campaign,
+          campaignId: args.campaignId,
+          pieceId,
+          pieceVersionId,
           input,
           order,
           status: "preparing",
@@ -111,7 +162,9 @@ export const start = mutation({
       runId,
       folderId: data.deploymentFolderId,
       items: selected.map(({ file }, index) => ({
-        reviewId: ids[index], id: file.driveId, version: file.driveVersion,
+        reviewId: ids[index],
+        id: file.driveId,
+        version: file.driveVersion,
       })),
     });
     return { runId };
@@ -221,12 +274,16 @@ export const expirePreparation = internalMutation({
       await dispatch(ctx, runId);
       return;
     }
-    const pending = await ctx.db.query("qaVisualReviews")
-      .withIndex("by_run_status", (q) => q.eq("runId", runId).eq("status", "preparing"))
+    const pending = await ctx.db
+      .query("qaVisualReviews")
+      .withIndex("by_run_status", (q) =>
+        q.eq("runId", runId).eq("status", "preparing"),
+      )
       .collect();
     for (const row of pending) {
       await ctx.db.patch(row._id, {
-        status: "failed", error: "Se interrumpió la preparación de la imagen.",
+        status: "failed",
+        error: "Se interrumpió la preparación de la imagen.",
       });
     }
     await dispatchReady(ctx, runId);
@@ -244,13 +301,19 @@ export const getWork = internalQuery({
     const copy = review.copyId && (await ctx.db.get(review.copyId))?.files;
     const asset = copy
       ? { storageId: copy.analysisId, snapshot: copy.snapshot }
-      : review.assetId && await ctx.db.get(review.assetId);
-    return asset ? {
-      asset: { storageId: asset.storageId, snapshot: asset.snapshot, input: review.input },
-      rules: ruleSet.rules,
-      status: review.status,
-      findings: review.findings,
-    } : null;
+      : review.assetId && (await ctx.db.get(review.assetId));
+    return asset
+      ? {
+          asset: {
+            storageId: asset.storageId,
+            snapshot: asset.snapshot,
+            input: review.input,
+          },
+          rules: ruleSet.rules,
+          status: review.status,
+          findings: review.findings,
+        }
+      : null;
   },
 });
 
@@ -266,17 +329,19 @@ export const update = internalMutation({
     const review = await ctx.db.get(args.reviewId);
     if (!review || review.status === "completed" || review.status === "failed")
       return;
-    const verdict = args.findings?.some((item) => item.outcome === "fail")
-      ? "findings"
-      : args.findings?.some((item) => item.outcome === "unverifiable")
-        ? "partial"
-        : args.findings
-          ? "validated"
-          : undefined;
+    const result = args.findings
+      ? reviewResult(
+          structuredRequirements(review.input),
+          args.findings,
+          review.input.issues,
+        )
+      : undefined;
     await ctx.db.patch(review._id, {
       status: args.status,
       ...(args.attempt ? { attempts: [...review.attempts, args.attempt] } : {}),
-      ...(args.findings ? { findings: args.findings, verdict } : {}),
+      ...(args.findings
+        ? { findings: args.findings, verdict: result!.verdict, result }
+        : {}),
       ...(args.error ? { error: args.error } : {}),
     });
   },
@@ -285,28 +350,50 @@ export const update = internalMutation({
 export const saveCommentLocations = internalMutation({
   args: {
     reviewId: v.id("qaVisualReviews"),
-    locations: v.array(v.object({
-      ruleId: v.string(), observed: v.string(), locationStatus,
-      visibleAnchor: v.optional(v.string()), region: v.optional(region),
-    })),
+    locations: v.array(
+      v.object({
+        ruleId: v.string(),
+        observed: v.string(),
+        locationStatus,
+        visibleAnchor: v.optional(v.string()),
+        region: v.optional(region),
+      }),
+    ),
   },
   handler: async (ctx, { reviewId, locations }) => {
     const review = await ctx.db.get(reviewId);
     if (review?.status !== "completed" || !review.findings)
       throw new Error("La revisión cambió antes de guardar las ubicaciones.");
-    const byId = new Map(locations.map((location) => [location.ruleId, location]));
+    const byId = new Map(
+      locations.map((location) => [location.ruleId, location]),
+    );
     if (byId.size !== locations.length) throw new Error("invalid_locations");
     for (const location of locations) {
-      const finding = review.findings.find((item) => item.ruleId === location.ruleId);
-      if (!finding || finding.observed !== location.observed ||
-          (location.locationStatus === "located" && !hasValidCommentRegion({
-            region: location.region ?? null, visibleAnchor: location.visibleAnchor ?? null,
-          }))) throw new Error("invalid_locations");
+      const finding = review.findings.find(
+        (item) => item.ruleId === location.ruleId,
+      );
+      if (
+        !finding ||
+        finding.observed !== location.observed ||
+        (location.locationStatus === "located" &&
+          !hasValidCommentRegion({
+            region: location.region ?? null,
+            visibleAnchor: location.visibleAnchor ?? null,
+          }))
+      )
+        throw new Error("invalid_locations");
     }
     await ctx.db.patch(reviewId, {
       findings: review.findings.map((finding) => {
         const location = byId.get(finding.ruleId);
-        return location ? { ...finding, ...location, region: location.region, visibleAnchor: location.visibleAnchor } : finding;
+        return location
+          ? {
+              ...finding,
+              ...location,
+              region: location.region,
+              visibleAnchor: location.visibleAnchor,
+            }
+          : finding;
       }),
     });
     return locations.length;
@@ -351,8 +438,75 @@ export const dashboard = query({
           .withIndex("by_run", (q) => q.eq("runId", run._id))
           .collect()
       : [];
+    const snapshotPieces = registered.currentSnapshotId
+      ? await ctx.db
+          .query("qaVisualCampaignPieces")
+          .withIndex("by_snapshot", (q) =>
+            q.eq("snapshotId", registered.currentSnapshotId!),
+          )
+          .collect()
+      : [];
     const reviews = await Promise.all(
-      inputs.map(async ({ name, contextKey }) => {
+      snapshotPieces.map(async (piece) => {
+        const { name, contextKey } = piece.input;
+        if (piece.pieceVersionId) {
+          const latest = await ctx.db
+            .query("qaVisualReviews")
+            .withIndex("by_version_input", (q) =>
+              q
+                .eq("pieceVersionId", piece.pieceVersionId)
+                .eq("input.contextKey", contextKey),
+            )
+            .order("desc")
+            .first();
+          const version = await ctx.db.get(piece.pieceVersionId);
+          const common = {
+            name,
+            pieceId: piece.pieceId,
+            pieceVersionId: piece.pieceVersionId,
+            version: version?.number ?? 1,
+          };
+          if (!latest) {
+            const stale = await ctx.db
+              .query("qaVisualReviews")
+              .withIndex("by_version", (q) =>
+                q.eq("pieceVersionId", piece.pieceVersionId),
+              )
+              .order("desc")
+              .first();
+            return {
+              ...common,
+              status: stale ? ("stale" as const) : ("pending" as const),
+              issues: piece.input.issues,
+            };
+          }
+          const result =
+            latest.status === "completed"
+              ? latest
+              : await ctx.db
+                  .query("qaVisualReviews")
+                  .withIndex("by_version_input", (q) =>
+                    q
+                      .eq("pieceVersionId", piece.pieceVersionId)
+                      .eq("input.contextKey", contextKey)
+                      .eq("status", "completed"),
+                  )
+                  .order("desc")
+                  .first();
+          return {
+            ...common,
+            status: displayReviewStatus(latest, contextKey),
+            error: latest.error,
+            previous: Boolean(result && result._id !== latest._id),
+            verdict: result?.verdict,
+            findings: result?.findings,
+            findingThreads: await findingDiscussions(ctx, result),
+            result: result?.result,
+            issues: piece.input.issues,
+            resultAt: result?._creationTime,
+            resultId: result?._id,
+          };
+        }
         const rows = ctx.db
           .query("qaVisualReviews")
           .withIndex("by_piece", (q) =>
@@ -388,22 +542,44 @@ export const dashboard = query({
               .first();
         return {
           name,
-          status: latest.status,
+          status: displayReviewStatus(latest, contextKey),
           error: latest.error,
           previous: Boolean(result && result._id !== latest._id),
           verdict: result?.verdict,
           findings: result?.findings,
           notices: latest.input.notices,
+          issues: latest.input.issues,
+          result: result?.result,
           resultAt: result?._creationTime,
           resultId: result?._id,
         };
       }),
+    );
+    const currentInputs = new Map(
+      snapshotPieces.map((p) => [p.pieceId ?? p.file.name, p.input.contextKey]),
+    );
+    const currentCompleted = batch.filter(
+      (row) =>
+        row.status === "completed" &&
+        isCurrentReview(
+          row.input,
+          currentInputs.get(row.pieceId ?? row.input.name) ?? "",
+        ),
     );
     return {
       active: Boolean(preparing || running),
       total: batch.length,
       preparedImages: batch.filter((row) => row.copyId || row.assetId).length,
       preparingImages: batch.filter((row) => row.status === "preparing").length,
+      validated: currentCompleted.filter((row) => row.verdict === "validated")
+        .length,
+      findings: currentCompleted.filter((row) => row.verdict === "findings")
+        .length,
+      partial: currentCompleted.filter((row) => row.verdict === "partial")
+        .length,
+      stale:
+        batch.filter((row) => row.status === "completed").length -
+        currentCompleted.length,
       completed: batch.filter((row) => row.status === "completed").length,
       failed: batch.filter((row) => row.status === "failed").length,
       failedNames: batch

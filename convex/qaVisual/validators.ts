@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { requirement, issue, source, basis } from "./model/contracts";
 
 export const provider = v.union(v.literal("gemini"), v.literal("openai"));
 export const status = v.union(
@@ -21,7 +22,12 @@ export const region = v.object({
   width: v.number(),
   height: v.number(),
 });
-export const locationStatus = v.union(v.literal("located"), v.literal("absent"), v.literal("unreadable"));
+export const locationStatus = v.union(
+  v.literal("located"),
+  v.literal("absent"),
+  v.literal("unreadable"),
+  v.literal("unlocated"),
+);
 export const finding = v.object({
   ruleId: v.string(),
   outcome,
@@ -29,6 +35,13 @@ export const finding = v.object({
   observed: v.string(),
   source: v.string(),
   severity: v.union(v.literal("warning"), v.literal("blocking")),
+  basis: v.optional(basis),
+  method: v.optional(v.union(v.literal("deterministic"), v.literal("model"))),
+  modelRead: v.optional(v.boolean()),
+  sources: v.optional(v.array(source)),
+  expectedAlternatives: v.optional(v.array(v.string())),
+  observedValue: v.optional(v.string()),
+  causeIssueId: v.optional(v.string()),
   region: v.optional(region),
   visibleAnchor: v.optional(v.string()),
   locationStatus: v.optional(locationStatus),
@@ -48,6 +61,15 @@ export const attempt = v.object({
   outputTokens: v.optional(v.number()),
 });
 export const production = v.object({
+  csvLine: v.optional(v.number()),
+  duplicates: v.optional(
+    v.array(
+      v.object({
+        csvLine: v.number(),
+        values: v.record(v.string(), v.string()),
+      }),
+    ),
+  ),
   product: v.string(),
   price: v.string(),
   ctaAsset: v.string(),
@@ -81,10 +103,14 @@ export const input = v.object({
   revision: v.number(),
   contextKey: v.string(),
   production: v.optional(production),
-  requirements: v.optional(v.array(clientRequirement)),
+  requirements: v.optional(v.array(v.union(clientRequirement, requirement))),
   notices: v.optional(v.array(reviewNotice)),
   matrixLinked: v.optional(v.boolean()),
-  expected: v.record(v.string(), v.string()),
+  expected: v.optional(v.record(v.string(), v.string())),
+  issues: v.optional(v.array(issue)),
+  requirementsHash: v.optional(v.string()),
+  policyVersion: v.optional(v.string()),
+  contentHash: v.optional(v.string()),
 });
 export const snapshot = v.object({
   hash: v.string(),
@@ -100,5 +126,6 @@ export const pieceFile = v.object({
   updatedAt: v.number(),
   driveId: v.string(),
   driveVersion: v.string(),
+  contentHash: v.optional(v.string()),
 });
 export const campaignPiece = v.object({ file: pieceFile, input });

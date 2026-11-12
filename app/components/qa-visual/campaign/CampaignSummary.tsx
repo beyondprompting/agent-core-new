@@ -8,7 +8,12 @@ import {
   ScanLine,
   ShieldCheck,
 } from "lucide-react";
-import type { Comment, Piece, PieceStatus, ReviewFeed } from "@/app/lib/qa-visual/review-model";
+import type {
+  Comment,
+  Piece,
+  PieceStatus,
+  ReviewFeed,
+} from "@/app/lib/qa-visual/review-model";
 import { getAiReviewState } from "@/app/lib/qa-visual/review-state";
 
 export function CampaignSummary({
@@ -27,14 +32,26 @@ export function CampaignSummary({
   onSelectPiece: (id: string) => void;
 }) {
   const approved = items.filter(
-    (p) => (statuses[`${p.id}-1`] ?? p.status) === "Aprobada",
+    (p) =>
+      (statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status) === "Aprobada",
   ).length;
-  const unresolved = comments.filter((c) => !c.resolved).length;
+  const unresolved =
+    items.reduce((total, p) => total + (p.openThreads ?? 0), 0) +
+    comments.filter(
+      (c) =>
+        !c.resolved &&
+        c.kind === "agent" &&
+        !c.threadId &&
+        !c.historical &&
+        items.some(
+          (p) => p.id === c.pieceId && (p.currentVersion ?? 1) === c.version,
+        ),
+    ).length;
   const aiValidated = items.filter(
-    (p) => results[p.id]?.[1] === "validated",
+    (p) => results[p.id]?.[p.currentVersion ?? 1] === "validated",
   ).length;
   const aiWithFindings = items.filter(
-    (p) => results[p.id]?.[1] === "findings",
+    (p) => results[p.id]?.[p.currentVersion ?? 1] === "findings",
   ).length;
   return (
     <div className="campaign-tab-content">
@@ -112,9 +129,10 @@ export function CampaignSummary({
         {items.map((piece) => (
           <button key={piece.id} onClick={() => onSelectPiece(piece.id)}>
             <span
-              className={`overview-piece-icon ${(statuses[`${piece.id}-1`] ?? piece.status) === "Aprobada" ? "ok" : "warn"}`}
+              className={`overview-piece-icon ${(statuses[`${piece.id}-${piece.currentVersion ?? 1}`] ?? piece.status) === "Aprobada" ? "ok" : "warn"}`}
             >
-              {(statuses[`${piece.id}-1`] ?? piece.status) === "Aprobada" ? (
+              {(statuses[`${piece.id}-${piece.currentVersion ?? 1}`] ??
+                piece.status) === "Aprobada" ? (
                 <Check size={13} />
               ) : (
                 <Eye size={13} />
@@ -126,14 +144,20 @@ export function CampaignSummary({
                 {piece.formatName} · IA:{" "}
                 {
                   getAiReviewState(
-                    results[piece.id]?.[1],
+                    results[piece.id]?.[piece.currentVersion ?? 1],
                     comments.filter(
-                      (c) => c.pieceId === piece.id && c.version === 1,
+                      (c) =>
+                        c.pieceId === piece.id &&
+                        c.version === (piece.currentVersion ?? 1),
                     ),
                   ).shortLabel
                 }
               </small>
-              <small>Humana: {statuses[`${piece.id}-1`] ?? piece.status}</small>
+              <small>
+                Humana:{" "}
+                {statuses[`${piece.id}-${piece.currentVersion ?? 1}`] ??
+                  piece.status}
+              </small>
             </span>
             <ArrowUpRight size={12} />
           </button>
