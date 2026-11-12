@@ -299,3 +299,11 @@ html.dark .qa-visual .workspace,.dark .qa-visual .workspace{--client:#72d2da;--c
 .qa-visual .client-state-card{background:var(--tone-bg,var(--surface));border-color:transparent}
 .qa-visual .client-state-card .review-identity{color:var(--tone,var(--subtle));display:grid;place-items:center;width:34px}
 .qa-visual .client-state-card .review-state-title{color:var(--tone,var(--text))}
+/* Barra única del visor (diseño, escena 3) */
+.qa-visual .viewer-unified{height:48px;min-height:48px;justify-content:flex-start;gap:6px;padding:0 10px}
+.qa-visual .viewer-unified .toolbar-end{margin-left:0;flex-shrink:0;gap:4px}
+.qa-visual .viewer-file{display:flex;align-items:center;gap:7px;flex:1;min-width:0;padding:0 4px}
+.qa-visual .viewer-file>svg{color:var(--subtle);flex-shrink:0}
+.qa-visual .viewer-file>span{font:500 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.qa-visual .viewer-version{flex-shrink:0;height:22px;padding:0 6px;border:1px solid var(--line);border-radius:11px;background:var(--surface-muted);color:var(--text);font-size:11px;font-weight:650;cursor:pointer}
+@media (max-width:1279px){.qa-visual .viewer-unified .pins-toggle span{display:none}.qa-visual .viewer-file>svg{display:none}}

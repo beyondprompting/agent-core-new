@@ -56,47 +56,16 @@ export function ViewerToolbar({
 }) {
   return (
     <>
-      <div className="viewer-filebar">
-        <div>
-          <button
-            className="icon-button"
-            title={leftOpen ? "Ocultar archivos" : "Mostrar archivos"}
-            onClick={() => setLeftOpen(!leftOpen)}
-          >
-            <PanelLeftClose size={17} />
-          </button>
-          <FileImage size={15} />
-          <span title={piece.filename}>{piece.filename}</span>
-          <select
-            aria-label="Versión de la pieza"
-            value={version}
-            onChange={(e) => changeVersion(Number(e.target.value))}
-          >
-            {Array.from({ length: piece.versions }, (_, i) => (
-              <option key={i} value={i + 1}>
-                V{i + 1}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <button
-            className="icon-button"
-            title="Descargar original de esta pieza"
-            onClick={download}
-          >
-            <ArrowDownToLine size={16} />
-          </button>
-          <button
-            className="icon-button"
-            title={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
-            onClick={() => setRightOpen(!rightOpen)}
-          >
-            <PanelRightClose size={17} />
-          </button>
-        </div>
-      </div>
-      <div className="viewer-toolbar">
+      {/* Unified viewer bar (design scene 3): tools, version and file, then view actions. */}
+      <div className="viewer-toolbar viewer-unified">
+        <button
+          className="icon-button"
+          title={leftOpen ? "Ocultar archivos" : "Mostrar archivos"}
+          aria-label={leftOpen ? "Ocultar archivos" : "Mostrar archivos"}
+          onClick={() => setLeftOpen(!leftOpen)}
+        >
+          <PanelLeftClose size={17} />
+        </button>
         <div className="zoom-tools">
           <button
             className="icon-button"
@@ -174,6 +143,23 @@ export function ViewerToolbar({
             <RotateCcw size={15} />
           </button>
         </div>
+        <span className="toolbar-divider" />
+        <div className="viewer-file">
+          <select
+            aria-label="Versión de la pieza"
+            className="viewer-version"
+            value={version}
+            onChange={(e) => changeVersion(Number(e.target.value))}
+          >
+            {Array.from({ length: piece.versions }, (_, i) => (
+              <option key={i} value={i + 1}>
+                v{i + 1}
+              </option>
+            ))}
+          </select>
+          <FileImage size={14} />
+          <span title={piece.filename}>{piece.filename}</span>
+        </div>
         <div className="toolbar-end">
           <button
             className={`pins-toggle ${showPins ? "on" : ""}`}
@@ -193,6 +179,22 @@ export function ViewerToolbar({
             }}
           >
             <Expand size={16} />
+          </button>
+          <button
+            className="icon-button"
+            title="Descargar original de esta pieza"
+            aria-label="Descargar original de esta pieza"
+            onClick={download}
+          >
+            <ArrowDownToLine size={16} />
+          </button>
+          <button
+            className="icon-button"
+            title={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
+            aria-label={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
+            onClick={() => setRightOpen(!rightOpen)}
+          >
+            <PanelRightClose size={17} />
           </button>
         </div>
       </div>

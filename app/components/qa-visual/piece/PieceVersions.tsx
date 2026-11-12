@@ -1,4 +1,4 @@
-import { Check, Layers } from "lucide-react";
+import { Check, Layers, Upload } from "lucide-react";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
 export function PieceVersions({ session }: { session: ReviewSession }) {
@@ -36,6 +36,19 @@ export function PieceVersions({ session }: { session: ReviewSession }) {
       {session.detail?.moreVersions && (
         <p>Se muestran las 200 versiones más recientes.</p>
       )}
+      <div className="info-note">
+        <Upload size={16} />
+        <span>
+          <b>Cargar una versión corregida:</b> en Drive, abrí el archivo en
+          DESPLIEGUE y usá «Administrar versiones → Subir versión nueva»
+          (o reemplazalo por uno con el mismo nombre) y después «Actualizar
+          desde Drive». La corrección aparece como versión {(session.detail?.versions.length ?? session.piece.versions) + 1}{" "}
+          sin análisis: analizala con «Analizar piezas» o con «Volver a
+          analizar esta versión». Si subís el archivo nuevo sin borrar el
+          anterior, aparece como duplicado: confirmalo en Detalles con «Es una
+          versión nueva de…».
+        </span>
+      </div>
       <div className="info-note">
         <Layers size={16} />
         <span>
