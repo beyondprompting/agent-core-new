@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, ListFilter, X } from "lucide-react";
 import {
   FILTER_GROUPS,
@@ -23,7 +23,36 @@ export function PieceFilterMenu({
   align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
+  const [menuLayout, setMenuLayout] = useState({ maxHeight: 520, above: false });
   const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const positionMenu = () => {
+      const trigger = ref.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const workspace = trigger.closest(".workspace")?.getBoundingClientRect();
+      const top = Math.max(0, workspace?.top ?? 0);
+      const bottom = Math.min(window.innerHeight, workspace?.bottom ?? window.innerHeight);
+      // Leave 6px below the trigger and 12px before the workspace/viewport edge.
+      const below = bottom - rect.bottom - 18;
+      const above = rect.top - top - 18;
+      const opensAbove = below < 240 && above > below;
+      const maxHeight = Math.max(0, Math.min(520, opensAbove ? above : below));
+      setMenuLayout((previous) =>
+        previous.maxHeight === maxHeight && previous.above === opensAbove
+          ? previous
+          : { maxHeight, above: opensAbove },
+      );
+    };
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [open, filters.length]);
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
@@ -68,7 +97,12 @@ export function PieceFilterMenu({
           <ChevronDown size={13} />
         </button>
         {open && (
-          <div className={`qa-filter-popover ${align}`} role="dialog" aria-label="Filtrar por estado">
+          <div
+            className={`qa-filter-popover ${align}${menuLayout.above ? " above" : ""}`}
+            style={{ maxHeight: menuLayout.maxHeight }}
+            role="dialog"
+            aria-label="Filtrar por estado"
+          >
             {!quick && (
               <fieldset>
                 <legend>Rápidos</legend>

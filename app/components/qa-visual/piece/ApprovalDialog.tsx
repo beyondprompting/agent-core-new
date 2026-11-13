@@ -36,6 +36,7 @@ export function ApprovalDialog({ session }: { session: ReviewSession }) {
   const comment = requestingChanges ? changeRequest : exception;
   const disabled = saving || !canReview || (needsComment && !comment.trim());
   const revoked = detail?.decision?.decision === "revoked";
+  const approved = detail?.decision?.decision === "approved" && !detail.decision.outdated;
   const previousNote = detail?.decision?.note || latestDecision?.exception;
 
   return (
@@ -86,167 +87,185 @@ export function ApprovalDialog({ session }: { session: ReviewSession }) {
         </section>
       )}
 
-      <form
-        className={`approval-form ${requestingChanges ? "requesting-changes" : "approving"}`}
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!disabled)
-            void setDecision(
-              requestingChanges ? "Cambios solicitados" : "Aprobada",
-            );
-        }}
-      >
-        <fieldset className="approval-options" disabled={saving || !canReview}>
-          <legend className="sr-only">
-            Elegí tu decisión para esta versión
-          </legend>
-          <label
-            className={`approval-option approve ${!requestingChanges ? "selected" : ""}`}
-          >
-            <input
-              type="radio"
-              name="approval-decision"
-              value="approve"
-              checked={!requestingChanges}
-              onChange={() => setDecisionMode("approve")}
-            />
-            <span className="approval-option-title">
-              <strong>Aprobar</strong>
-              <span className="approval-option-check" aria-hidden="true">
-                {!requestingChanges && <Check size={12} />}
-              </span>
-            </span>
-            <span className="approval-option-description">
-              La versión puede avanzar.
-            </span>
-          </label>
-          <label
-            className={`approval-option changes ${requestingChanges ? "selected" : ""}`}
-          >
-            <input
-              type="radio"
-              name="approval-decision"
-              value="changes"
-              checked={requestingChanges}
-              onChange={() => setDecisionMode("changes")}
-            />
-            <span className="approval-option-title">
-              <strong>Solicitar cambios</strong>
-              <span className="approval-option-check" aria-hidden="true">
-                {requestingChanges && <Check size={12} />}
-              </span>
-            </span>
-            <span className="approval-option-description">
-              Necesita correcciones.
-            </span>
-          </label>
-        </fieldset>
+      {saveError && (
+        <p className="approval-error" role="alert">{saveError}</p>
+      )}
 
-        <div className="approval-action-body">
-          {!requestingChanges && requiresException && (
-            <>
-              <p className="approval-exception-notice">
-                La IA no validó esta versión. Para aprobarla, justificá la
-                excepción.
-              </p>
-              <label className="approval-field">
-                Motivo de la excepción
-                <select
-                  value={exceptionReason}
-                  disabled={saving}
-                  onChange={(event) =>
-                    setExceptionReason(
-                      event.target.value as typeof exceptionReason,
-                    )
-                  }
-                >
-                  <option value="acceptedFinding">
-                    Hallazgo aceptado por el cliente
-                  </option>
-                  <option value="falsePositive">Falso positivo de IA</option>
-                  <option value="notApplicable">El requisito no aplica</option>
-                  <option value="other">Otro motivo</option>
-                </select>
-              </label>
-            </>
-          )}
-          {needsComment ? (
-            <div className="approval-comment">
-              <label className="approval-field" htmlFor="approval-comment">
-                <span className="approval-field-heading">
-                  {requestingChanges
-                    ? "¿Qué debe corregirse?"
-                    : "Justificación de la excepción"}
-                  <span className="approval-required">*</span>
+      {approved && !requestingChanges ? (
+        <div className="approval-actions">
+          <button
+            type="button"
+            className="button secondary"
+            disabled={saving || !canReview}
+            onClick={() => setDecisionMode("changes")}
+          >
+            <MessageSquare size={15} />
+            Solicitar cambios
+          </button>
+          <button type="button" className="button primary" disabled={saving} onClick={() => setModal(null)}>
+            Cerrar
+          </button>
+        </div>
+      ) : (
+        <form
+          className={`approval-form ${requestingChanges ? "requesting-changes" : "approving"}`}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!disabled && (!approved || requestingChanges))
+              void setDecision(
+                requestingChanges ? "Cambios solicitados" : "Aprobada",
+              );
+          }}
+        >
+          {!approved && (
+            <fieldset className="approval-options" disabled={saving || !canReview}>
+              <legend className="sr-only">
+                Elegí tu decisión para esta versión
+              </legend>
+              <label
+                className={`approval-option approve ${!requestingChanges ? "selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="approval-decision"
+                  value="approve"
+                  checked={!requestingChanges}
+                  onChange={() => setDecisionMode("approve")}
+                />
+                <span className="approval-option-title">
+                  <strong>Aprobar</strong>
+                  <span className="approval-option-check" aria-hidden="true">
+                    {!requestingChanges && <Check size={12} />}
+                  </span>
+                </span>
+                <span className="approval-option-description">
+                  La versión puede avanzar.
                 </span>
               </label>
-              <textarea
-                id="approval-comment"
-                required
-                rows={4}
-                maxLength={4000}
-                disabled={saving}
-                aria-describedby="approval-comment-help"
-                value={comment}
-                onChange={(event) =>
-                  requestingChanges
-                    ? setChangeRequest(event.target.value)
-                    : setException(event.target.value)
-                }
-                placeholder={
-                  requestingChanges
-                    ? "Describí el cambio concreto que necesita esta versión…"
-                    : "Explicá por qué aprobás esta versión con una excepción…"
-                }
-              />
-              <p id="approval-comment-help" className="approval-hint">
-                {requestingChanges
-                  ? "Se guardará como comentario de esta versión."
-                  : "La justificación quedará registrada con la aprobación."}
-              </p>
-            </div>
-          ) : (
-            <div className="approval-ready">
-              <CheckCircle2 size={18} />
-              <span>Lista para tu aprobación.</span>
-            </div>
+              <label
+                className={`approval-option changes ${requestingChanges ? "selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="approval-decision"
+                  value="changes"
+                  checked={requestingChanges}
+                  onChange={() => setDecisionMode("changes")}
+                />
+                <span className="approval-option-title">
+                  <strong>Solicitar cambios</strong>
+                  <span className="approval-option-check" aria-hidden="true">
+                    {requestingChanges && <Check size={12} />}
+                  </span>
+                </span>
+                <span className="approval-option-description">
+                  Necesita correcciones.
+                </span>
+              </label>
+            </fieldset>
           )}
 
-          {saveError && (
-            <p className="approval-error" role="alert">
-              {saveError}
-            </p>
-          )}
-          <div className="approval-actions">
-            <button
-              type="button"
-              className="button secondary"
-              disabled={saving}
-              onClick={() => setModal(null)}
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className={`button approval-submit ${requestingChanges ? "changes" : "primary"}`}
-              disabled={disabled}
-            >
-              {requestingChanges ? (
-                <MessageSquare size={15} />
-              ) : (
-                <Check size={15} />
-              )}
-              {saving
-                ? "Guardando…"
-                : requestingChanges
-                  ? "Enviar solicitud"
-                  : requiresException
-                    ? "Aprobar con excepción"
-                    : "Aprobar versión"}
-            </button>
+          <div className="approval-action-body">
+            {!requestingChanges && requiresException && (
+              <>
+                <p className="approval-exception-notice">
+                  La IA no validó esta versión. Para aprobarla, justificá la
+                  excepción.
+                </p>
+                <label className="approval-field">
+                  Motivo de la excepción
+                  <select
+                    value={exceptionReason}
+                    disabled={saving}
+                    onChange={(event) =>
+                      setExceptionReason(
+                        event.target.value as typeof exceptionReason,
+                      )
+                    }
+                  >
+                    <option value="acceptedFinding">
+                      Hallazgo aceptado por el cliente
+                    </option>
+                    <option value="falsePositive">Falso positivo de IA</option>
+                    <option value="notApplicable">El requisito no aplica</option>
+                    <option value="other">Otro motivo</option>
+                  </select>
+                </label>
+              </>
+            )}
+            {needsComment ? (
+              <div className="approval-comment">
+                <label className="approval-field" htmlFor="approval-comment">
+                  <span className="approval-field-heading">
+                    {requestingChanges
+                      ? "¿Qué debe corregirse?"
+                      : "Justificación de la excepción"}
+                    <span className="approval-required">*</span>
+                  </span>
+                </label>
+                <textarea
+                  id="approval-comment"
+                  required
+                  rows={4}
+                  maxLength={4000}
+                  disabled={saving}
+                  aria-describedby="approval-comment-help"
+                  value={comment}
+                  onChange={(event) =>
+                    requestingChanges
+                      ? setChangeRequest(event.target.value)
+                      : setException(event.target.value)
+                  }
+                  placeholder={
+                    requestingChanges
+                      ? "Describí el cambio concreto que necesita esta versión…"
+                      : "Explicá por qué aprobás esta versión con una excepción…"
+                  }
+                />
+                <p id="approval-comment-help" className="approval-hint">
+                  {requestingChanges
+                    ? "Se guardará como comentario de esta versión."
+                    : "La justificación quedará registrada con la aprobación."}
+                </p>
+              </div>
+            ) : (
+              <div className="approval-ready">
+                <CheckCircle2 size={18} />
+                <span>Lista para tu aprobación.</span>
+              </div>
+            )}
+
+            <div className="approval-actions">
+              <button
+                type="button"
+                className="button secondary"
+                disabled={saving}
+                onClick={() => approved ? setDecisionMode("approve") : setModal(null)}
+              >
+                {approved ? "Volver" : "Cancelar"}
+              </button>
+              <button
+                type="submit"
+                className={`button approval-submit ${requestingChanges ? "changes" : "primary"}`}
+                disabled={disabled}
+              >
+                {requestingChanges ? (
+                  <MessageSquare size={15} />
+                ) : (
+                  <Check size={15} />
+                )}
+                {saving
+                  ? "Guardando…"
+                  : requestingChanges
+                    ? "Enviar solicitud"
+                    : requiresException
+                      ? "Aprobar con excepción"
+                      : "Aprobar versión"}
+              </button>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      )}
       <p className="approval-footnote">
         La decisión se aplica a esta pieza y versión.
       </p>

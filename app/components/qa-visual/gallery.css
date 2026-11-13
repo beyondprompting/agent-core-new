@@ -251,6 +251,7 @@ html.dark .qa-visual .qa-final-stamp,.dark .qa-visual .qa-final-stamp{color:#0f1
 .qa-visual .qa-filter-count{display:inline-grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--primary-color);color:#fff;font-size:10.5px}
 .qa-visual .qa-filter-popover{position:absolute;top:calc(100% + 6px);z-index:30;width:260px;max-height:min(70dvh,520px);overflow:auto;padding:8px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow,0 12px 36px #1e294919);display:flex;flex-direction:column;gap:4px}
 .qa-visual .qa-filter-popover.left{left:0}.qa-visual .qa-filter-popover.right{right:0}
+.qa-visual .qa-filter-popover.above{top:auto;bottom:calc(100% + 6px)}
 .qa-visual .qa-filter-popover fieldset{border:0;margin:0;padding:4px 0 6px;display:flex;flex-direction:column;gap:2px;border-bottom:1px solid var(--line)}
 .qa-visual .qa-filter-popover fieldset:last-of-type{border-bottom:0}
 .qa-visual .qa-filter-popover legend{padding:4px 6px;font-size:10.5px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.05em}

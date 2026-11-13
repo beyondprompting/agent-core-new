@@ -285,6 +285,72 @@ test("requesting changes always requires an explicit comment, even with existing
   assert.equal(version?.threadCount, 1);
 });
 
+test("a current approval cannot be recorded twice, with or without an exception", async () => {
+  for (const manual of [false, true]) {
+    const s = await setup();
+    const reviewId = manual ? null : await finishPassingReview(s);
+    const args = {
+      pieceVersionId: s.pieceVersionId,
+      decision: "approved" as const,
+      expectedCurrentDecisionId: null,
+      expectedInputHash: "input-1",
+      expectedReviewId: reviewId,
+      ...(manual ? { exception: { reason: "other" as const, note: "Verificada manualmente" } } : {}),
+    };
+    const id = await s.user.mutation(api.qaVisual.decisions.decide, args);
+    await assert.rejects(
+      s.other.mutation(api.qaVisual.decisions.decide, { ...args, expectedCurrentDecisionId: id }),
+      /ya tiene una aprobación vigente/,
+    );
+    const data = (await s.user.query(api.qaVisual.editor.piece, { pieceId: s.pieceId }))!;
+    assert.equal(data.decisions.length, 1);
+    assert.equal(data.currentDecisionId, id);
+    assert.equal(data.decision?.decidedBy, s.userId);
+
+    const revoked = await s.user.mutation(api.qaVisual.decisions.decide, {
+      ...args, decision: "revoked", expectedCurrentDecisionId: id,
+    });
+    const approved = await s.user.mutation(api.qaVisual.decisions.decide, { ...args, expectedCurrentDecisionId: revoked });
+    assert.notEqual(approved, id);
+  }
+});
+
+test("an approved version can receive changes and later be approved again", async () => {
+  const s = await setup();
+  const reviewId = await finishPassingReview(s);
+  const args = {
+    pieceVersionId: s.pieceVersionId, decision: "approved" as const,
+    expectedCurrentDecisionId: null, expectedInputHash: "input-1", expectedReviewId: reviewId,
+  };
+  const approved = await s.user.mutation(api.qaVisual.decisions.decide, args);
+  const changes = await s.other.mutation(api.qaVisual.decisions.decide, {
+    ...args, decision: "changesRequested", expectedCurrentDecisionId: approved, note: "Ajustar el texto legal",
+  });
+  await s.user.mutation(api.qaVisual.decisions.decide, { ...args, expectedCurrentDecisionId: changes });
+  const data = (await s.user.query(api.qaVisual.editor.piece, { pieceId: s.pieceId }))!;
+  assert.equal(data.humanStatus, "Aprobada");
+  assert.equal(data.decisions.length, 3);
+  assert.equal(data.threads[0].comments[0].body, "Ajustar el texto legal");
+});
+
+test("an approval for an earlier input does not block approving the updated request", async () => {
+  const s = await setup();
+  const args = {
+    pieceVersionId: s.pieceVersionId, decision: "approved" as const,
+    expectedCurrentDecisionId: null, expectedInputHash: "input-1", expectedReviewId: null,
+    exception: { reason: "other" as const, note: "Revisada manualmente" },
+  };
+  const previous = await s.user.mutation(api.qaVisual.decisions.decide, args);
+  await s.t.run((ctx) => ctx.db.patch(s.pieceVersionId, { currentInputHash: "updated-request" }));
+  const updated = await s.user.mutation(api.qaVisual.decisions.decide, {
+    ...args, expectedCurrentDecisionId: previous, expectedInputHash: "updated-request",
+  });
+  assert.notEqual(updated, previous);
+  const data = (await s.user.query(api.qaVisual.editor.piece, { pieceId: s.pieceId }))!;
+  assert.equal(data.decisions.length, 2);
+  assert.equal(data.decision?.outdated, false);
+});
+
 test("requesting changes atomically saves the explanation as a visible comment on the selected version", async () => {
   const s = await setup();
   const body = "Completar la fecha: debe decir 15 DE OCTUBRE";

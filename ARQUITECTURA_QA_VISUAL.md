@@ -1072,6 +1072,7 @@ Los errores esperados se devuelven como `ConvexError({ code, message })`, y el c
 
 - **Concurrencia:** `decide` recibe `expectedCurrentDecisionId`. Si otra persona decidió antes, devuelve `ConvexError({ code: "decision_conflict" })` y la UI muestra la decisión nueva antes de permitir otra.
 - **Revocar:** agrega un registro `revoked`. La versión vuelve a Pendiente o a En revisión.
+- **Aprobación vigente:** el diálogo muestra la decisión, **Revocar decisión**, **Cerrar** y la opción explícita **Solicitar cambios**. No ofrece aprobar otra vez ni muestra "Lista para tu aprobación". El servidor rechaza otra aprobación mientras la decisión actual sea `approved` para el mismo `inputHash`; revocar o solicitar cambios permite una decisión posterior. Si cambió el pedido (`inputHash`), se permite registrar una aprobación actualizada.
 - **Auditoría:** cada decisión guarda `aiSeen` (revisión, dictamen, `inputHash` y si estaba desactualizada) para saber qué tenía delante quien decidió.
 - **Versión nueva:** empieza en Pendiente. Los hilos abiertos de la versión anterior se muestran en una sección colapsable, "Pendientes de v1 para verificar en v2".
 

@@ -6,7 +6,7 @@ import { ConvexProvider, ConvexReactClient } from "convex/react";
 import { ReviewDialogs } from "../app/components/qa-visual/piece/ReviewDialogs";
 import { useReviewSession } from "../app/hooks/qa-visual/use-review-session";
 import type { ReviewSession } from "../app/hooks/qa-visual/use-review-session";
-import { getAiReviewState } from "../app/lib/qa-visual/review-state";
+import { getAiReviewState, getHumanReviewState } from "../app/lib/qa-visual/review-state";
 import { toReviewPieces } from "../app/lib/qa-visual/piece-inventory";
 import { emptyReviewFeed } from "../app/lib/qa-visual/review-model";
 
@@ -110,4 +110,53 @@ test("revoke belongs to the previous decision card, outside the new decision for
     detail: { ...detail!, decision: { ...detail!.decision!, decision: "revoked" } }, latestDecision,
   });
   assert.doesNotMatch(revoked, /Revocar decisión/);
+});
+
+function approvedSession(outdated = false): Partial<ReviewSession> {
+  const latestDecision = {
+    pieceId: "piece-1", version: 1, status: "Aprobada" as const,
+    author: "Revisora", exception: "", message: "Aprobada",
+  };
+  return {
+    detail: {
+      currentDecisionId: "decision-1",
+      decision: { decision: "approved", outdated },
+    } as unknown as ReviewSession["detail"],
+    latestDecision,
+    humanReview: getHumanReviewState("Aprobada", latestDecision),
+  };
+}
+
+test("an approved version displays its decision without offering approval again", () => {
+  for (const requiresException of [false, true]) {
+    const html = dialog("", requiresException, "approve", approvedSession());
+    assert.doesNotMatch(html, /<form|<textarea|type="radio"|Aprobar versión|Aprobar con excepción|Lista para tu aprobación/);
+    assert.doesNotMatch(button(html, "Cerrar</button>"), /disabled=""/);
+    assert.doesNotMatch(button(html, "Revocar decisión"), /disabled=""/);
+    assert.doesNotMatch(button(html, "Solicitar cambios"), /disabled=""/);
+  }
+});
+
+test("requesting changes to an approved version requires a comment and offers a way back", () => {
+  const html = dialog("", false, "changes", approvedSession());
+  assert.match(html, /¿Qué debe corregirse\?/);
+  assert.match(button(html, "Enviar solicitud"), /disabled=""/);
+  assert.doesNotMatch(html, /type="radio"|Aprobar versión|Lista para tu aprobación/);
+  assert.ok(button(html, "Volver"));
+  assert.doesNotMatch(
+    button(dialog("Completar la fecha", false, "changes", approvedSession()), "Enviar solicitud"),
+    /disabled=""/,
+  );
+});
+
+test("an approval based on an older request can be updated", () => {
+  const html = dialog("", false, "approve", approvedSession(true));
+  assert.doesNotMatch(button(html, "Aprobar versión"), /disabled=""/);
+});
+
+test("errors revoking an approved decision remain visible in the decision view", () => {
+  const html = dialog("", false, "approve", {
+    ...approvedSession(), saveError: "Otra persona cambió la decisión.",
+  });
+  assert.match(html, /role="alert">Otra persona cambió la decisión\./);
 });

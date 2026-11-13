@@ -43,6 +43,17 @@ export const decide = mutation({
         message:
           "El pedido o el análisis cambió. Revisá la información actualizada antes de decidir.",
       });
+    if (args.decision === "approved" && version.currentDecisionId) {
+      const current = await ctx.db.get(version.currentDecisionId);
+      if (
+        current?.decision === "approved" &&
+        current.aiSeen.inputHash === version.currentInputHash
+      )
+        throw new ConvexError({
+          code: "already_approved",
+          message: "Esta versión ya tiene una aprobación vigente.",
+        });
+    }
     const validated =
       latest?.status === "completed" &&
       completed &&

@@ -384,6 +384,8 @@ html.dark .qa-visual .workspace,.dark .qa-visual .workspace{--client:#72d2da;--c
 .qa-visual input[type=checkbox]:focus-visible,.qa-visual input[type=radio]:focus-visible{outline:2px solid var(--primary-medium);outline-offset:2px}
 /* Overflow guards: long Drive file names and IDs must never push a panel sideways. */
 .qa-visual .comments-panel,.qa-visual .files-panel,.qa-visual .qa-carousel-panel{min-width:0;overflow:hidden}
+/* The filter extends over the viewer; the grid item must not clip its menu. */
+.qa-visual .files-panel:has(.qa-filter-popover){overflow:visible;z-index:40}
 .qa-visual .versions-panel,.qa-visual .history-scroll,.qa-visual .requirements-scroll,.qa-visual .comments-scroll,.qa-visual .campaign-tab-content,.qa-visual .qa-panel-scroll,.qa-visual .qa-dialog-body,.qa-visual .modal{overflow-x:hidden}
 .qa-visual :is(.comments-panel,.files-panel,.qa-carousel-panel,.modal,.qa-dialog) :is(p,dd,li,small,code){overflow-wrap:anywhere}
 .qa-visual .panel-tabs{overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
