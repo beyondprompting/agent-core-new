@@ -85,13 +85,26 @@ export function useReviewSession(
   const [leftOpen, setLeftOpen] = useState(true),
     [rightOpen, setRightOpen] = useState(true),
     [toast, setToast] = useState("");
-  const [modal, setModal] = useState<"share" | "approval" | "help" | null>(
+  const [modal, setModalState] = useState<"share" | "approval" | "help" | null>(
     null,
   );
+  const [decisionMode, setDecisionModeState] = useState<"approve" | "changes">("approve");
+  const [changeRequest, setChangeRequest] = useState("");
   const [exception, setException] = useState("");
   const [exceptionReason, setExceptionReason] = useState<
     "acceptedFinding" | "falsePositive" | "notApplicable" | "other"
   >("other");
+  const setDecisionMode = (mode: typeof decisionMode) => {
+    setDecisionModeState(mode);
+    persisted.setError("");
+  };
+  const setModal = (next: typeof modal) => {
+    setModalState(next);
+    if (next === "approval") {
+      setDecisionModeState("approve");
+      persisted.setError("");
+    }
+  };
   const { drawing, pan, setPan, onPointerDown, onPointerMove, onPointerUp } =
     useCanvasAnnotations(
       currentPiece.id,
@@ -203,6 +216,8 @@ export function useReviewSession(
     setReplyTo(null);
     setDraft("");
     setException("");
+    setChangeRequest("");
+    setDecisionModeState("approve");
     persisted.setError("");
   };
   const choosePiece = (id: string) => {
@@ -356,6 +371,13 @@ export function useReviewSession(
         : status === "Cambios solicitados"
           ? "changesRequested"
           : "revoked";
+    const note = changeRequest.trim();
+    if (decision === "changesRequested" && !note) {
+      persisted.setError(
+        "Escribí un comentario que explique qué cambios solicitás para esta versión.",
+      );
+      return;
+    }
     const saved = await persisted.save(() =>
       persisted.decide({
         pieceVersionId: data.versionId,
@@ -366,15 +388,21 @@ export function useReviewSession(
         ...(decision === "approved" && requiresException
           ? { exception: { reason: exceptionReason, note: exception } }
           : {}),
-        ...(decision === "changesRequested" && exception.trim()
-          ? { note: exception.trim() }
-          : {}),
+        ...(decision === "changesRequested" ? { note } : {}),
       }),
     );
     if (saved && selectionRef.current === selectedKey) {
       setModal(null);
       setException("");
-      setToast("Decisión humana guardada");
+      setChangeRequest("");
+      if (decision === "changesRequested") {
+        setFilter("all");
+        setRightTab("Comentarios");
+        setRightOpen(true);
+        setToast("Cambios solicitados y comentario guardado");
+      } else {
+        setToast("Decisión humana guardada");
+      }
     }
   };
   const openAiReview = () => {
@@ -433,6 +461,10 @@ export function useReviewSession(
     download,
     draft,
     drawing,
+    decisionMode,
+    setDecisionMode,
+    changeRequest,
+    setChangeRequest,
     exception,
     exceptionReason,
     setExceptionReason,

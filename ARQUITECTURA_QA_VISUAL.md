@@ -1066,7 +1066,7 @@ Los errores esperados se devuelven como `ConvexError({ code, message })`, y el c
 | --- | --- |
 | Pendiente | Sin decisión y sin actividad humana. |
 | En revisión | **Se deriva**: hay hilos humanos o respuestas en esta versión y todavía no hay decisión. No es un botón ni muestra un spinner. |
-| Cambios solicitados | `decide({ decision: "changesRequested", note })`. Exige al menos un hilo abierto o una nota. |
+| Cambios solicitados | `decide({ decision: "changesRequested", note })`. Exige siempre un comentario explícito y no vacío que explique qué debe corregirse, aunque ya existan hilos abiertos. La decisión y un hilo interno con ese comentario se guardan en la misma operación para la pieza y versión seleccionadas; el texto queda visible en Comentarios y en el historial. |
 | Aprobada | `decide({ decision: "approved" })` cuando la IA está en `validated` y vigente. |
 | Aprobada con excepción | `decide({ decision: "approved", exception: { reason, note } })` cuando la IA tiene hallazgos, una revisión incompleta, un error, está desactualizada o no existe. `reason` es uno de: `acceptedFinding` (hallazgo aceptado por el cliente), `falsePositive` (la IA se equivocó), `notApplicable` (el requisito no aplica) u `other`. La nota es obligatoria. |
 

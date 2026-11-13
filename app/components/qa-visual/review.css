@@ -121,12 +121,15 @@ html.dark .qa-visual .workspace{--primary-color:#a49aff;--primary-soft:#2c2850;-
 .qa-visual .qa-summary.state-success{background:var(--success-bg)}.qa-visual .qa-summary.state-success .ai-badge{color:var(--success)}.qa-visual .qa-summary.state-danger{background:var(--danger-bg)}.qa-visual .qa-summary.state-danger .ai-badge{color:var(--danger)}.qa-visual .qa-summary.state-progress{background:var(--primary-soft)}.qa-visual .qa-summary.state-progress .ai-badge{color:var(--primary-color)}
 
 /* The approval action belongs to the selected piece and version. */
-.qa-visual .human-state-card{display:grid;grid-template-columns:37px minmax(0,1fr) auto;cursor:default}
+.qa-visual .human-state-card{display:grid;grid-template-columns:37px minmax(0,1fr);cursor:default}
 .qa-visual .human-state-card:hover{border-color:var(--line);box-shadow:none}
-.qa-visual .human-state-card .piece-approval-action{height:32px;padding:0 10px;gap:6px;font-size:11.5px;white-space:nowrap}
+.qa-visual .human-state-card .review-state-copy{overflow-wrap:anywhere}
+.qa-visual .human-state-card .review-state-detail{white-space:normal}
+.qa-visual .human-state-card .piece-approval-action{grid-column:2;justify-self:start;min-width:0;max-width:100%;min-height:32px;height:auto;padding:6px 10px;gap:6px;font-size:11.5px;white-space:normal}
+.qa-visual .human-state-card .piece-approval-action svg{flex-shrink:0}
 .qa-visual .human-state-card.state-success .piece-approval-action{color:var(--success);border-color:color-mix(in srgb,var(--success) 25%,var(--line));background:var(--success-bg)}
 @media(max-width:1250px){.qa-visual .human-state-card{grid-template-columns:32px minmax(0,1fr);column-gap:9px;row-gap:9px}.qa-visual .human-state-card .piece-approval-action{grid-column:2;justify-self:start}}
-@media(max-width:1050px){.qa-visual .human-state-card{grid-template-columns:29px minmax(0,1fr);gap:8px}.qa-visual .human-state-card .piece-approval-action{font-size:11px;padding:0 8px;height:30px}}
+@media(max-width:1050px){.qa-visual .human-state-card{grid-template-columns:29px minmax(0,1fr);gap:8px}.qa-visual .human-state-card .piece-approval-action{font-size:11px;padding:6px 8px;min-height:30px}}
 @media(max-width:620px){.qa-visual .human-state-card .piece-approval-action{grid-column:1/-1;justify-self:stretch;justify-content:center;font-size:10.5px;gap:4px;padding:0 5px}.qa-visual .human-state-card .piece-approval-action svg{width:12px}}
 
 .qa-visual .global-nav a { display:flex; align-items:center; gap:7px; height:100%; font-size:12px; font-weight:500; color:var(--muted-text); white-space:nowrap; }
@@ -251,6 +254,62 @@ html.dark .qa-visual .workspace{--primary-color:#a49aff;--primary-soft:#2c2850;-
 .qa-visual .thread-replies p{white-space:pre-wrap;font-size:12px;margin:5px 0}
 .qa-visual .thread-replies small{font-size:11px;color:var(--subtle)}
 .qa-visual .comment-edit textarea,.qa-visual .source-choice input,.qa-visual .source-choice select,.qa-visual .exception-label select{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text);padding:8px;font-size:12px}
+
+/* One intent at a time; its fields and submit action stay together. */
+.qa-visual .modal.approval-dialog{width:480px;padding:26px;border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;gap:18px}
+.qa-visual .approval-heading{display:flex;align-items:center;gap:12px;padding-right:18px}
+.qa-visual .approval-heading .modal-icon{width:42px;height:42px;margin:0;flex-shrink:0}
+.qa-visual .approval-heading>div{min-width:0}
+.qa-visual .approval-heading h2{font-size:20px;line-height:1.25;letter-spacing:-.4px}
+.qa-visual .approval-heading p{font-size:12px;line-height:1.5;color:var(--muted-text);margin-top:4px}
+.qa-visual .approval-dialog>.piece-dual-status{margin:0;gap:10px}
+.qa-visual .approval-dialog .mini-review-state{padding:10px;border-radius:9px}
+.qa-visual .approval-dialog .mini-review-state.state-danger{--state-color:var(--warning);--state-bg:var(--warning-bg);background:var(--warning-bg)}
+.qa-visual .approval-current{padding:12px;background:var(--surface-muted);border:1px solid var(--line);border-radius:10px}
+.qa-visual .approval-current-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.qa-visual .approval-current-heading>div{display:flex;flex:1 1 150px;min-width:0;flex-direction:column;gap:4px}
+.qa-visual .approval-current-heading span{font-size:11px;line-height:1.4;color:var(--muted-text);overflow-wrap:anywhere}
+.qa-visual .approval-current strong{font-size:12px;font-weight:600;line-height:1.4;color:var(--text)}
+.qa-visual .approval-current.state-success strong{color:var(--success)}
+.qa-visual .approval-current.state-danger strong{color:var(--warning)}
+.qa-visual .approval-current .approval-revoke{height:30px;padding:0 9px;font-size:11px;background:transparent;border-radius:7px}
+.qa-visual .approval-current .approval-previous-note{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:12px;line-height:1.5;color:var(--muted-text);white-space:pre-wrap;max-height:100px;overflow:auto}
+.qa-visual .approval-form{display:flex;flex-direction:column;gap:18px;--action-color:var(--primary-color)}
+.qa-visual .approval-form.requesting-changes{--action-color:var(--warning)}
+.qa-visual .approval-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;border:0;padding:0;margin:0;min-width:0}
+.qa-visual .approval-option{position:relative;display:flex;flex-direction:column;gap:7px;padding:13px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface-muted);cursor:pointer;transition:border-color .15s,background .15s;min-width:0}
+.qa-visual .approval-option input{position:absolute;width:1px;height:1px;opacity:0}
+.qa-visual .approval-option:hover{border-color:var(--muted-text)}
+.qa-visual .approval-option:focus-within{outline:2px solid var(--action-color);outline-offset:3px}
+.qa-visual .approval-option.selected.approve{background:var(--primary-soft);border-color:var(--primary-color);box-shadow:inset 0 0 0 .5px var(--primary-color)}
+.qa-visual .approval-option.selected.changes{background:var(--warning-bg);border-color:var(--warning);box-shadow:inset 0 0 0 .5px var(--warning)}
+.qa-visual .approval-option-title{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:13px;line-height:1.4}
+.qa-visual .approval-option-title strong{font-weight:600}
+.qa-visual .approval-option.selected .approval-option-title{color:var(--action-color)}
+.qa-visual .approval-option-check{display:grid;place-items:center;width:16px;height:16px;border:1px solid var(--line);border-radius:50%;flex-shrink:0}
+.qa-visual .approval-option.selected .approval-option-check{border-color:currentColor;background:var(--surface)}
+.qa-visual .approval-option-description{font-size:11.5px;line-height:1.5;color:var(--muted-text)}
+.qa-visual .approval-options:disabled .approval-option{cursor:default;opacity:.6}
+.qa-visual .approval-action-body{display:flex;flex-direction:column;gap:14px}
+.qa-visual .approval-field{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:550;color:var(--text)}
+.qa-visual .approval-field-heading{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.qa-visual .approval-required{font-size:11px;color:var(--action-color)}
+.qa-visual .approval-field select,.qa-visual .approval-comment textarea{display:block;width:100%;min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--surface-muted);color:var(--text);padding:11px 12px;font-size:12px;line-height:1.6}
+.qa-visual .approval-comment textarea{margin-top:8px;min-height:108px;resize:vertical}
+.qa-visual .requesting-changes .approval-comment textarea{border-color:var(--warning)}
+.qa-visual .approval-comment textarea:focus,.qa-visual .approval-field select:focus-visible{border-color:var(--action-color);outline:2px solid color-mix(in srgb,var(--action-color) 22%,transparent);outline-offset:2px}
+.qa-visual .approval-comment textarea::placeholder{color:var(--subtle)}
+.qa-visual .approval-hint{margin-top:7px;font-size:11px;line-height:1.5;color:var(--muted-text)}
+.qa-visual .approval-exception-notice{padding:10px 12px;border-radius:9px;background:var(--warning-bg);color:var(--warning);font-size:12px;line-height:1.5}
+.qa-visual .approval-ready{display:flex;align-items:center;gap:9px;padding:12px;border-radius:9px;background:var(--success-bg);color:var(--success);font-size:12px}
+.qa-visual .approval-actions{display:flex;justify-content:flex-end;gap:9px}
+.qa-visual .approval-actions .button{height:auto;min-height:40px;padding:9px 14px;border-radius:9px;font-size:12px;white-space:normal}
+.qa-visual .approval-submit.changes{background:var(--warning);color:var(--surface);font-weight:650}
+.qa-visual .approval-submit.changes:hover:not(:disabled){filter:brightness(.95)}
+.qa-visual .approval-submit:disabled{opacity:1;background:var(--surface-hover);color:var(--subtle);box-shadow:none;border:1px solid var(--line)}
+.qa-visual .approval-error{font-size:12px;line-height:1.5;color:var(--danger)}
+.qa-visual .approval-dialog>p.approval-footnote{margin:0;font-size:10.5px;line-height:1.5;color:var(--subtle)}
+@media(max-width:480px){.qa-visual .modal.approval-dialog{padding:22px 18px;gap:16px}.qa-visual .approval-heading h2{font-size:18px}.qa-visual .approval-option{padding:11px 9px}.qa-visual .approval-option-title{font-size:12px}.qa-visual .approval-option-description{font-size:11px}.qa-visual .approval-actions .approval-submit{flex:1}}
 .qa-visual .source-choice{display:grid;gap:8px;margin-top:10px}
 .qa-visual .comment-edit-actions{display:flex;gap:10px;margin-top:6px;font-size:11.5px;color:var(--primary-color)}
 .qa-visual .qa-analysis-track > .qa-analysis-track-stale { background: var(--subtle); }

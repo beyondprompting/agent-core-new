@@ -229,6 +229,7 @@ test("approval requires an exception without validated AI and rejects conflictin
     pieceId: s.pieceId,
   }))!;
   assert.equal(data.humanStatus, "Aprobada");
+  assert.equal(data.threads.length, 0);
   assert.equal(data.decision?.decidedBy, s.userId);
   assert.equal(data.decision?.aiSeen.stale, true);
   assert.equal(data.decision?.aiSeen.inputHash, "input-1");
@@ -243,6 +244,107 @@ test("approval requires an exception without validated AI and rejects conflictin
       .humanStatus,
     "En revisión",
   );
+});
+
+test("requesting changes always requires an explicit comment, even with existing open threads", async () => {
+  const s = await setup();
+  await s.user.mutation(api.qaVisual.threads.create, {
+    pieceVersionId: s.pieceVersionId,
+    body: "Una conversación previa no explica esta solicitud",
+    anchor: { kind: "general" },
+    requestId: "existing-thread",
+  });
+  const args = {
+    pieceVersionId: s.pieceVersionId,
+    decision: "changesRequested" as const,
+    expectedCurrentDecisionId: null,
+    expectedInputHash: "input-1",
+    expectedReviewId: null,
+  };
+  for (const note of [undefined, "", " \n\t "]) {
+    await assert.rejects(
+      s.user.mutation(api.qaVisual.decisions.decide, { ...args, note }),
+      /comentario que explique qué cambios/,
+    );
+  }
+  await assert.rejects(
+    s.user.mutation(api.qaVisual.decisions.decide, {
+      ...args,
+      note: "x".repeat(4001),
+    }),
+    /entre 1 y 4000/,
+  );
+  const data = (await s.user.query(api.qaVisual.editor.piece, {
+    pieceId: s.pieceId,
+  }))!;
+  assert.equal(data.currentDecisionId, null);
+  assert.equal(data.decisions.length, 0);
+  assert.equal(data.threads.length, 1);
+  const version = await s.t.run((ctx) => ctx.db.get(s.pieceVersionId));
+  assert.equal(version?.openThreads, 1);
+  assert.equal(version?.threadCount, 1);
+});
+
+test("requesting changes atomically saves the explanation as a visible comment on the selected version", async () => {
+  const s = await setup();
+  const body = "Completar la fecha: debe decir 15 DE OCTUBRE";
+  const args = {
+    pieceVersionId: s.pieceVersionId,
+    decision: "changesRequested" as const,
+    expectedCurrentDecisionId: null,
+    expectedInputHash: "input-1",
+    expectedReviewId: null,
+    note: `  ${body}\n`,
+  };
+  const id = await s.user.mutation(api.qaVisual.decisions.decide, args);
+  // A repeated submission with the old decision cannot create another comment.
+  await assert.rejects(
+    s.user.mutation(api.qaVisual.decisions.decide, args),
+    /Otra persona/,
+  );
+  const data = (await s.other.query(api.qaVisual.editor.piece, {
+    pieceId: s.pieceId,
+  }))!;
+  assert.equal(data.humanStatus, "Cambios solicitados");
+  assert.equal(data.currentDecisionId, id);
+  assert.equal(data.decisions.length, 1);
+  assert.equal(data.decision?.note, body);
+  assert.equal(data.threads.length, 1);
+  const thread = data.threads[0];
+  assert.equal(thread.pieceVersionId, s.pieceVersionId);
+  assert.equal(thread.status, "open");
+  assert.equal(thread.audience, "internal");
+  assert.equal(thread.commentCount, 1);
+  assert.deepEqual(thread.anchor, { kind: "general" });
+  assert.equal(thread.comments.length, 1);
+  assert.equal(thread.comments[0].authorId, s.userId);
+  assert.equal(thread.comments[0].body, body);
+  const version = await s.t.run((ctx) => ctx.db.get(s.pieceVersionId));
+  assert.equal(version?.openThreads, 1);
+  assert.equal(version?.threadCount, 1);
+
+  const pieces = toReviewPieces({
+    matrix: null, csv: null, notices: [],
+    pieces: [{ ...data.file!, pieceId: s.pieceId, currentVersion: 1 }],
+  }, s.campaignId);
+  const projection = buildPieceReview({
+    pieces, currentPiece: pieces[0], version: 1, data,
+    feed: buildAnalysisFeed([]), campaignId: s.campaignId,
+    filter: "all", query: "", filters: [],
+  });
+  assert.equal(projection.visibleComments.length, 1);
+  assert.equal(projection.visibleComments[0].body, body);
+  assert.equal(projection.visibleComments[0].kind, "human");
+  assert.equal(projection.visibleComments[0].threadId, thread._id);
+
+  await s.user.mutation(api.qaVisual.decisions.decide, {
+    ...args, decision: "revoked", expectedCurrentDecisionId: id, note: undefined,
+  });
+  const revoked = (await s.user.query(api.qaVisual.editor.piece, {
+    pieceId: s.pieceId,
+  }))!;
+  assert.equal(revoked.threads.length, 1);
+  assert.equal(revoked.threads[0].comments[0].body, body);
 });
 
 test("a new image gets a new version with no inherited approval; renaming preserves identity", async () => {
@@ -421,7 +523,7 @@ test("access, cross-version references and geometry are validated on the server"
       expectedInputHash: "input-1",
       expectedReviewId: null,
     }),
-    /comentario abierto o una nota/,
+    /comentario que explique qué cambios/,
   );
 });
 

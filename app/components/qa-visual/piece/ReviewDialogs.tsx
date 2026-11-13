@@ -1,55 +1,30 @@
 import { usePathname } from "next/navigation";
 import {
-  Check,
-  CheckCircle2,
   Copy,
   Eye,
   Link2,
   MessageSquare,
   Moon,
   ScanLine,
-  ShieldCheck,
   Sparkles,
   Square,
   Users,
   X,
 } from "lucide-react";
 
-import { CompactReviewStatus } from "./review-status";
+import { ApprovalDialog } from "./ApprovalDialog";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
-export function ReviewDialogs({
-  session: {
-    version,
-    saving,
-    canReview,
-    saveError,
-    exceptionReason,
-    setExceptionReason,
-    detail,
-    setToast,
-    modal,
-    setModal,
-    exception,
-    setException,
-    piece,
-    aiReview,
-    latestDecision,
-    humanReview,
-    requiresException,
-    setDecision,
-  },
-}: {
-  session: ReviewSession;
-}) {
+export function ReviewDialogs({ session }: { session: ReviewSession }) {
+  const { setToast, modal, setModal, saving } = session;
   const pathname = usePathname();
 
   return (
     <>
       {modal && (
-        <div className="modal-backdrop" onClick={() => setModal(null)}>
+        <div className="modal-backdrop" onClick={() => !saving && setModal(null)}>
           <section
-            className="modal"
+            className={`modal ${modal === "approval" ? "approval-dialog" : ""}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -58,6 +33,7 @@ export function ReviewDialogs({
             <button
               className="modal-close icon-button"
               aria-label="Cerrar diálogo"
+              disabled={saving}
               onClick={() => setModal(null)}
             >
               <X size={18} />
@@ -98,115 +74,7 @@ export function ReviewDialogs({
                 </p>
               </>
             ) : modal === "approval" ? (
-              <>
-                <span className="modal-icon">
-                  <ShieldCheck size={25} />
-                </span>
-                <h2 id="modal-title">Aprobación humana</h2>
-                <p>
-                  {piece.name} · Versión {version}
-                </p>
-                <CompactReviewStatus ai={aiReview} human={humanReview} />
-                {latestDecision && (
-                  <div className="previous-decision">
-                    <strong>
-                      Última decisión · {latestDecision.author ?? "Revisor"}
-                    </strong>
-                    <span>{humanReview.title}</span>
-                    {latestDecision.exception && (
-                      <p>{latestDecision.exception}</p>
-                    )}
-                  </div>
-                )}
-                <div
-                  className={`decision-summary ${requiresException ? "warn" : "ok"}`}
-                >
-                  {requiresException ? (
-                    <Eye size={18} />
-                  ) : (
-                    <CheckCircle2 size={18} />
-                  )}
-                  <span>
-                    {requiresException
-                      ? aiReview.status === "findings"
-                        ? "La IA mantiene un resultado con hallazgos. Puedes solicitar cambios o justificar una aprobación con excepción."
-                        : "La revisión IA no está validada. Para aprobar esta versión, registra una excepción."
-                      : "La IA validó los controles ejecutados. Puedes registrar tu decisión para esta versión."}
-                  </span>
-                </div>
-                {requiresException && (
-                  <label className="exception-label">
-                    Motivo de la excepción
-                    <select
-                      value={exceptionReason}
-                      onChange={(e) =>
-                        setExceptionReason(
-                          e.target.value as typeof exceptionReason,
-                        )
-                      }
-                    >
-                      <option value="acceptedFinding">
-                        Hallazgo aceptado por el cliente
-                      </option>
-                      <option value="falsePositive">
-                        Falso positivo de IA
-                      </option>
-                      <option value="notApplicable">
-                        El requisito no aplica
-                      </option>
-                      <option value="other">Otro motivo</option>
-                    </select>
-                  </label>
-                )}
-                <label className="exception-label">
-                  {requiresException
-                    ? "Justificación de la excepción o de los cambios"
-                    : "Nota para solicitar cambios"}
-                  <textarea
-                    maxLength={4000}
-                    value={exception}
-                    onChange={(e) => setException(e.target.value)}
-                    placeholder="Describe el motivo de la decisión…"
-                  />
-                </label>
-                {saveError && <p role="alert">{saveError}</p>}
-                <div className="modal-buttons">
-                  <button
-                    className="button secondary"
-                    disabled={saving || !canReview}
-                    onClick={() => void setDecision("Cambios solicitados")}
-                  >
-                    Solicitar cambios
-                  </button>
-                  <button
-                    className="button primary"
-                    disabled={
-                      saving ||
-                      !canReview ||
-                      (requiresException && !exception.trim())
-                    }
-                    onClick={() => setDecision("Aprobada")}
-                  >
-                    <Check size={15} />
-                    {requiresException
-                      ? "Aprobar con excepción"
-                      : "Aprobar versión"}
-                  </button>
-                </div>
-                {detail?.currentDecisionId &&
-                  detail.decision?.decision !== "revoked" && (
-                    <button
-                      className="button secondary"
-                      disabled={saving}
-                      onClick={() => void setDecision("Pendiente")}
-                    >
-                      Revocar decisión
-                    </button>
-                  )}
-                <p className="modal-footnote">
-                  La decisión se aplica a esta pieza y versión.
-                </p>
-              </>
+              <ApprovalDialog session={session} />
             ) : (
               <>
                 <span className="modal-icon">

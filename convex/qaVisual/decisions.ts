@@ -61,15 +61,11 @@ export const decide = mutation({
     if (args.exception) commentBody(args.exception.note);
     const note = args.note?.trim();
     if (note) commentBody(note);
-    if (
-      args.decision === "changesRequested" &&
-      !note &&
-      !(version.openThreads ?? 0)
-    )
+    if (args.decision === "changesRequested" && !note)
       throw new ConvexError({
         code: "reason_required",
         message:
-          "Agregá un comentario abierto o una nota que explique los cambios solicitados.",
+          "Escribí un comentario que explique qué cambios solicitás para esta versión.",
       });
     if (args.decision === "revoked" && !version.currentDecisionId)
       throw new ConvexError("No hay una decisión para revocar.");
@@ -102,9 +98,38 @@ export const decide = mutation({
           !isCurrentReview(completed.input, version.currentInputHash),
       },
     });
+    // Persist the request and its discussion together: neither can exist alone.
+    if (args.decision === "changesRequested" && note) {
+      const threadId = await ctx.db.insert("qaVisualThreads", {
+        campaignId: version.campaignId,
+        pieceId: version.pieceId,
+        pieceVersionId: version._id,
+        origin: { kind: "human" },
+        anchor: { kind: "general" },
+        audience: "internal",
+        status: "open",
+        createdBy: user,
+        lastActivityAt: Date.now(),
+        commentCount: 1,
+      });
+      await ctx.db.insert("qaVisualComments", {
+        threadId,
+        pieceVersionId: version._id,
+        authorId: user,
+        authorKind: "internal",
+        visibility: "internal",
+        body: note,
+      });
+    }
     await ctx.db.patch(version._id, {
       currentDecisionId: id,
       humanActivity: true,
+      ...(args.decision === "changesRequested"
+        ? {
+            openThreads: (version.openThreads ?? 0) + 1,
+            threadCount: (version.threadCount ?? 0) + 1,
+          }
+        : {}),
     });
     return id;
   },
