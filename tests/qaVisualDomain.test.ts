@@ -342,29 +342,29 @@ test("validation requires complete coverage, visual evidence, client basis, and 
 });
 test("code compares prices exactly and does not equate HOY with a concrete date", () => {
   assert.equal(
-    compareVisibleValue(req("price", { expected: "$8,99" }), "8.99").outcome,
+    compareVisibleValue(req("price", { expected: "$8,99" }), "8.99")?.outcome,
     "pass",
   );
   assert.equal(
     compareVisibleValue(
       req("price", { expected: "$8,99", expectedAlternatives: ["9,99"] }),
       "$9,99",
-    ).outcome,
+    )?.outcome,
     "fail",
   );
   assert.equal(
-    compareVisibleValue(req("price", { expected: "$8,99" }), "8 o 9").outcome,
-    "unverifiable",
+    compareVisibleValue(req("price", { expected: "$8,99" }), "8 o 9"),
+    undefined,
   );
   assert.equal(
     compareVisibleValue(req("date", { expected: "22 de octubre" }), "HOY")
-      .outcome,
+      ?.outcome,
     "fail",
   );
   assert.equal(
     compareVisibleValue(req("date", { expected: "22 de octubre" }), "JUEVES 22")
-      .outcome,
-    "unverifiable",
+      ?.outcome,
+    "fail",
   );
 });
 test("workbook propagates merged cells, interprets serial dates, and reports formulas without a value", async () => {

@@ -99,7 +99,7 @@ export type LinkOverride = {
   author?: string;
   at?: number;
 };
-export const ANALYSIS_POLICY_VERSION = "qa-visual-4";
+export const ANALYSIS_POLICY_VERSION = "qa-visual-5";
 export const PARSER_VERSION = 5;
 
 export function structuredRequirements(input: {

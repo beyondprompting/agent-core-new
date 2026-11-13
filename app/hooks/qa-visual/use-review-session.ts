@@ -15,6 +15,7 @@ import {
 import { usePieceReview } from "./use-piece-review";
 import { uploadRecording, type Recording } from "./use-voice-recorder";
 import type { QaInventory } from "@/app/lib/qa-visual/source";
+import type { ReviewLocation } from "@/app/lib/qa-visual/review-location";
 import type { Anchor } from "@/convex/qaVisual/model/collaboration";
 import type { Id } from "@/convex/_generated/dataModel";
 type LeftTab = "Archivos" | "Resumen" | "Recursos";
@@ -26,25 +27,31 @@ export function useReviewSession(
   feed: ReviewFeed,
   reviewer: string,
   campaignId: string,
+  initialLocation: ReviewLocation,
 ) {
-  // Deep link (§19.3): ?pieza=<pieceId>&v=<version>&hilo=<threadId>
+  // The server supplies the URL selection so hydration starts on the same piece.
   const [link] = useState(() => {
-    if (typeof window === "undefined") return null;
-    const params = new URLSearchParams(window.location.search);
+    const piece = pieces.find(
+      (p) => initialLocation.piece && p.pieceId === initialLocation.piece,
+    );
+    const selected = piece ?? pieces[0];
+    const requestedVersion = initialLocation.version;
+    const version =
+      (!initialLocation.piece || piece) &&
+      requestedVersion !== undefined &&
+      Number.isSafeInteger(requestedVersion) &&
+      requestedVersion > 0 &&
+      requestedVersion <= selected.versions
+        ? requestedVersion
+        : undefined;
     return {
-      piece: params.get("pieza"),
-      version: Number(params.get("v")) || undefined,
-      thread: params.get("hilo"),
+      activeId: selected.id,
+      version,
+      thread: piece ? initialLocation.thread : undefined,
     };
   });
-  const [activeId, setActiveId] = useState(
-    () =>
-      pieces.find((p) => link?.piece && p.pieceId === link.piece)?.id ??
-      pieces[0].id,
-  );
-  const [selectedVersion, setVersion] = useState<number | undefined>(
-    link?.version,
-  );
+  const [activeId, setActiveId] = useState(link.activeId);
+  const [selectedVersion, setVersion] = useState(link.version);
   const currentPiece = pieces.find((p) => p.id === activeId) ?? pieces[0];
   const version = selectedVersion ?? currentPiece.currentVersion ?? 1;
   const persisted = usePieceReview(currentPiece.pieceId, version);
@@ -146,7 +153,7 @@ export function useReviewSession(
       return () => animation?.cancel();
     }
   }, [commentFocus]);
-  const linkedThread = useRef(link?.thread ?? null);
+  const linkedThread = useRef(link.thread ?? null);
   useEffect(() => {
     const thread = linkedThread.current;
     if (!thread || !data) return;

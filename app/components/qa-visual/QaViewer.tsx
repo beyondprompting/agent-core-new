@@ -25,6 +25,7 @@ import {
 } from "@/app/lib/qa-visual/review-model";
 import { useUser } from "@/app/UserContextProvider";
 import type { QaInventory } from "@/app/lib/qa-visual/source";
+import type { ReviewLocation } from "@/app/lib/qa-visual/review-location";
 import { useReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 import {
   useAgentAnalysis,
@@ -35,6 +36,7 @@ import "./review.css";
 export function QaViewer({
   campaignId,
   inventory,
+  initialLocation = {},
   feed = emptyReviewFeed,
   analysis,
   syncError,
@@ -43,6 +45,7 @@ export function QaViewer({
 }: {
   campaignId: string;
   inventory: QaInventory;
+  initialLocation?: ReviewLocation;
   feed?: ReviewFeed;
   analysis?: AnalysisContext;
   syncError?: string;
@@ -80,6 +83,7 @@ export function QaViewer({
             agent={agent}
             reviewer={reviewer}
             campaignId={campaignId}
+            initialLocation={initialLocation}
             onRefresh={onRefresh}
             refreshing={refreshing}
           />
@@ -109,6 +113,7 @@ export function QaViewer({
 
 function ReviewWorkspace({
   campaignId,
+  initialLocation,
   pieces,
   inventory,
   feed,
@@ -118,6 +123,7 @@ function ReviewWorkspace({
   refreshing,
 }: {
   campaignId: string;
+  initialLocation: ReviewLocation;
   agent: ReturnType<typeof useAgentAnalysis>;
   onRefresh?: () => void;
   refreshing: boolean;
@@ -132,6 +138,7 @@ function ReviewWorkspace({
     feed,
     reviewer,
     campaignId,
+    initialLocation,
   );
   const {
     leftOpen,
@@ -165,11 +172,8 @@ function ReviewWorkspace({
   const dashboard = agent.dashboard;
   const total = dashboard?.total ?? 0;
   const failed = dashboard?.failed ?? 0;
-  const [view, setView] = useState<CampaignView>(() =>
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("vista") === "galeria"
-      ? "gallery"
-      : "review",
+  const [view, setView] = useState<CampaignView>(
+    initialLocation.view ?? "review",
   );
   const [carousel, setCarousel] = useState(false);
   const [sending, setSending] = useState(false);
@@ -319,12 +323,7 @@ function ReviewWorkspace({
                 <span>{percentage}%</span>
               </div>
             )}
-            {!!dashboard?.preparingImages && (
-              <span className="qa-analysis-phase">
-                Preparando imágenes · {dashboard.preparedImages} de {total}{" "}
-                listas
-              </span>
-            )}
+
             {phase && phase !== "Preparando imagen" && (
               <div className="qa-analysis-detail">
                 {phase}
@@ -341,7 +340,9 @@ function ReviewWorkspace({
             )}
             {!!cancelled && (
               <div className="qa-analysis-detail">
-                {cancelled} {cancelled === 1 ? "pieza detenida" : "piezas detenidas"} antes de empezar
+                {cancelled}{" "}
+                {cancelled === 1 ? "pieza detenida" : "piezas detenidas"} antes
+                de empezar
               </div>
             )}
           </div>
@@ -401,26 +402,31 @@ function ReviewWorkspace({
           onSend={() => setSending(true)}
         />
       ) : (
-      <section
-        aria-label="Revisión visual"
-        className={`review-layout ${!leftOpen ? "hide-left" : ""} ${!rightOpen ? "hide-right" : ""}`}
-      >
-        {leftOpen && <FilesPanel session={session} />}
-        <section className="viewer" aria-label="Visor de pieza">
-          <ViewerToolbar
-            session={session}
-            onReanalyze={agent.available ? reanalyzePiece : undefined}
-            reanalyzing={Boolean(row && ["queued", "preparing", "analyzing", "retrying"].includes(row.status))}
-          />
-          <ReviewCanvas session={session} />
+        <section
+          aria-label="Revisión visual"
+          className={`review-layout ${!leftOpen ? "hide-left" : ""} ${!rightOpen ? "hide-right" : ""}`}
+        >
+          {leftOpen && <FilesPanel session={session} />}
+          <section className="viewer" aria-label="Visor de pieza">
+            <ViewerToolbar
+              session={session}
+              onReanalyze={agent.available ? reanalyzePiece : undefined}
+              reanalyzing={Boolean(
+                row &&
+                ["queued", "preparing", "analyzing", "retrying"].includes(
+                  row.status,
+                ),
+              )}
+            />
+            <ReviewCanvas session={session} />
+          </section>
+          {rightOpen && (
+            <PiecePanel
+              session={session}
+              findings={session.detail?.review?.findings}
+            />
+          )}
         </section>
-        {rightOpen && (
-          <PiecePanel
-            session={session}
-            findings={session.detail?.review?.findings}
-          />
-        )}
-      </section>
       )}
       {carousel && (
         <InternalCarousel
@@ -431,7 +437,12 @@ function ReviewWorkspace({
             changeView("review");
           }}
           onReanalyze={agent.available ? reanalyzePiece : undefined}
-          reanalyzing={Boolean(row && ["queued", "preparing", "analyzing", "retrying"].includes(row.status))}
+          reanalyzing={Boolean(
+            row &&
+            ["queued", "preparing", "analyzing", "retrying"].includes(
+              row.status,
+            ),
+          )}
         />
       )}
       {sending && (

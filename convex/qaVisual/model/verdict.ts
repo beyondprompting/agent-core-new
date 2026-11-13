@@ -80,7 +80,7 @@ export function reviewResult(
     reasons.push("Controles duplicados en el pedido");
   if (coverage.blockingNotices) reasons.push("Vinculación por confirmar");
   if (coverage.unverifiable)
-    reasons.push("Evidencia ilegible o controles sin verificar");
+    reasons.push("Falta información para concluir controles solicitados");
   if (!coverage.visualRequested || !coverage.modelControls)
     reasons.push("Solo controles técnicos");
   else if (coverage.modelControls !== coverage.visualRequested)

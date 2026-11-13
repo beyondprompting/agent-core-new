@@ -39,6 +39,15 @@ export const finding = v.object({
   basis: v.optional(basis),
   method: v.optional(v.union(v.literal("deterministic"), v.literal("model"))),
   modelRead: v.optional(v.boolean()),
+  evidenceStatus: v.optional(
+    v.union(
+      v.literal("readable"),
+      v.literal("absent"),
+      v.literal("unreadable"),
+      v.literal("ambiguous"),
+    ),
+  ),
+  missingElements: v.optional(v.array(v.string())),
   sources: v.optional(v.array(source)),
   expectedAlternatives: v.optional(v.array(v.string())),
   observedValue: v.optional(v.string()),

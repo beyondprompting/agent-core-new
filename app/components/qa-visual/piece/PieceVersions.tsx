@@ -24,7 +24,9 @@ export function PieceVersions({ session }: { session: ReviewSession }) {
         >
           <div>
             <strong>Versión {v.number}</strong>
-            <span className="version-file" title={v.fileName}>{v.fileName}</span>
+            <span className="version-file" title={v.fileName}>
+              {v.fileName}
+            </span>
             <small>
               {new Date(v.at).toLocaleString()} · {v.humanStatus}
             </small>
@@ -36,25 +38,29 @@ export function PieceVersions({ session }: { session: ReviewSession }) {
       {session.detail?.moreVersions && (
         <p>Se muestran las 200 versiones más recientes.</p>
       )}
-      <section className="version-howto" aria-label="Cómo cargar una versión corregida">
+      <section
+        className="version-howto"
+        aria-label="Cómo cargar una versión corregida"
+      >
         <h4>
           <Upload size={14} />
           Cargar una versión corregida
         </h4>
         <ol>
           <li>
-            En Drive (DESPLIEGUE), abrí el archivo y usá <b>Administrar versiones → Subir versión nueva</b>.
+            En Drive (DESPLIEGUE), abrí el archivo y usá{" "}
+            <b>Administrar versiones → Subir versión nueva</b>.
           </li>
           <li>
-            Acá, tocá <b>Actualizar desde Drive</b>. Aparece como versión {(session.detail?.versions.length ?? session.piece.versions) + 1}, sin análisis ni aprobación.
+            Acá, tocá <b>Actualizar desde Drive</b>. Aparece como versión{" "}
+            {(session.detail?.versions.length ?? session.piece.versions) + 1},
+            sin análisis ni aprobación.
           </li>
           <li>
-            Analizala con <b>Volver a analizar esta versión</b> o con <b>Analizar piezas</b>.
+            Analizala con <b>Volver a analizar esta versión</b> o con{" "}
+            <b>Analizar piezas</b>.
           </li>
         </ol>
-        <p>
-          Si subiste el archivo nuevo sin borrar el anterior, aparece como duplicado: confirmalo en Detalles con <b>Es una versión nueva de…</b>
-        </p>
       </section>
       <div className="info-note">
         <Layers size={16} />

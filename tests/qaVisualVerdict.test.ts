@@ -197,7 +197,7 @@ test("incomplete reasons follow source, conflict, confirmation, evidence and tec
     "Pedido sin vincular o incompleto",
     "Conflicto de fuentes",
     "Vinculación por confirmar",
-    "Evidencia ilegible o controles sin verificar",
+    "Falta información para concluir controles solicitados",
     "Solo controles técnicos",
   ]);
   assert.equal(result.reason, result.reasons?.[0]);
@@ -225,7 +225,7 @@ test("technical progress/errors and freshness override a previously green verdic
   }
   for (const obsolete of [
     { ...input, contextKey: "previous" },
-    { ...input, policyVersion: "qa-visual-3" },
+    { ...input, policyVersion: "qa-visual-4" },
   ]) {
     const status = displayReviewStatus(
       { status: "completed", input: obsolete },

@@ -101,19 +101,9 @@ import type * as messaging_chat from "../messaging/chat.js";
 import type * as messaging_chatGenerate from "../messaging/chatGenerate.js";
 import type * as messaging_threadTitle from "../messaging/threadTitle.js";
 import type * as messaging_threads from "../messaging/threads.js";
-import type * as qaVisual_importJob from "../qaVisual/importJob.js";
-import type * as qaVisual_importPool from "../qaVisual/importPool.js";
-import type * as qaVisual_model_retryPolicy from "../qaVisual/model/retryPolicy.js";
-import type * as qaVisual_qaModels from "../qaVisual/qaModels.js";
-import type * as qaVisual_runner from "../qaVisual/runner.js";
-import type * as qaVisual_analyzeJob from "../qaVisual/analyzeJob.js";
-import type * as qaVisual_analysisPool from "../qaVisual/analysisPool.js";
-import type * as qaVisual_imagePool from "../qaVisual/imagePool.js";
-import type * as qaVisual_importRead from "../qaVisual/importRead.js";
-import type * as qaVisual_imports from "../qaVisual/imports.js";
-import type * as qaVisual_sourceFiles from "../qaVisual/sourceFiles.js";
-import type * as qaVisual_model_importContracts from "../qaVisual/model/importContracts.js";
 import type * as qaVisual_access from "../qaVisual/access.js";
+import type * as qaVisual_analysisPool from "../qaVisual/analysisPool.js";
+import type * as qaVisual_analyzeJob from "../qaVisual/analyzeJob.js";
 import type * as qaVisual_audio from "../qaVisual/audio.js";
 import type * as qaVisual_campaignRegistration from "../qaVisual/campaignRegistration.js";
 import type * as qaVisual_campaignSnapshots from "../qaVisual/campaignSnapshots.js";
@@ -131,26 +121,38 @@ import type * as qaVisual_driveAnalysis from "../qaVisual/driveAnalysis.js";
 import type * as qaVisual_driveClient from "../qaVisual/driveClient.js";
 import type * as qaVisual_editor from "../qaVisual/editor.js";
 import type * as qaVisual_imageCopies from "../qaVisual/imageCopies.js";
+import type * as qaVisual_imagePool from "../qaVisual/imagePool.js";
 import type * as qaVisual_imageWarmup from "../qaVisual/imageWarmup.js";
+import type * as qaVisual_importJob from "../qaVisual/importJob.js";
+import type * as qaVisual_importPool from "../qaVisual/importPool.js";
+import type * as qaVisual_importRead from "../qaVisual/importRead.js";
+import type * as qaVisual_imports from "../qaVisual/imports.js";
 import type * as qaVisual_mediaHttp from "../qaVisual/mediaHttp.js";
 import type * as qaVisual_model_clientBrief from "../qaVisual/model/clientBrief.js";
 import type * as qaVisual_model_collaboration from "../qaVisual/model/collaboration.js";
 import type * as qaVisual_model_contracts from "../qaVisual/model/contracts.js";
 import type * as qaVisual_model_controls from "../qaVisual/model/controls.js";
 import type * as qaVisual_model_identity from "../qaVisual/model/identity.js";
+import type * as qaVisual_model_importContracts from "../qaVisual/model/importContracts.js";
 import type * as qaVisual_model_importProgress from "../qaVisual/model/importProgress.js";
 import type * as qaVisual_model_linking from "../qaVisual/model/linking.js";
 import type * as qaVisual_model_normalize from "../qaVisual/model/normalize.js";
 import type * as qaVisual_model_offers from "../qaVisual/model/offers.js";
 import type * as qaVisual_model_productionCsv from "../qaVisual/model/productionCsv.js";
+import type * as qaVisual_model_prompt from "../qaVisual/model/prompt.js";
 import type * as qaVisual_model_requirements from "../qaVisual/model/requirements.js";
+import type * as qaVisual_model_retryPolicy from "../qaVisual/model/retryPolicy.js";
 import type * as qaVisual_model_verdict from "../qaVisual/model/verdict.js";
+import type * as qaVisual_model_visibleDate from "../qaVisual/model/visibleDate.js";
 import type * as qaVisual_overrides from "../qaVisual/overrides.js";
 import type * as qaVisual_pieces from "../qaVisual/pieces.js";
 import type * as qaVisual_pipeline from "../qaVisual/pipeline.js";
 import type * as qaVisual_prepareImages from "../qaVisual/prepareImages.js";
+import type * as qaVisual_qaModels from "../qaVisual/qaModels.js";
 import type * as qaVisual_runDispatch from "../qaVisual/runDispatch.js";
+import type * as qaVisual_runner from "../qaVisual/runner.js";
 import type * as qaVisual_runs from "../qaVisual/runs.js";
+import type * as qaVisual_sourceFiles from "../qaVisual/sourceFiles.js";
 import type * as qaVisual_stageDriveRun from "../qaVisual/stageDriveRun.js";
 import type * as qaVisual_tables from "../qaVisual/tables.js";
 import type * as qaVisual_threads from "../qaVisual/threads.js";
@@ -286,19 +288,9 @@ declare const fullApi: ApiFromModules<{
   "messaging/chatGenerate": typeof messaging_chatGenerate;
   "messaging/threadTitle": typeof messaging_threadTitle;
   "messaging/threads": typeof messaging_threads;
-  "qaVisual/importJob": typeof qaVisual_importJob;
-  "qaVisual/importPool": typeof qaVisual_importPool;
-  "qaVisual/model/retryPolicy": typeof qaVisual_model_retryPolicy;
-  "qaVisual/qaModels": typeof qaVisual_qaModels;
-  "qaVisual/runner": typeof qaVisual_runner;
-  "qaVisual/analyzeJob": typeof qaVisual_analyzeJob;
-  "qaVisual/analysisPool": typeof qaVisual_analysisPool;
-  "qaVisual/imagePool": typeof qaVisual_imagePool;
-  "qaVisual/importRead": typeof qaVisual_importRead;
-  "qaVisual/imports": typeof qaVisual_imports;
-  "qaVisual/sourceFiles": typeof qaVisual_sourceFiles;
-  "qaVisual/model/importContracts": typeof qaVisual_model_importContracts;
   "qaVisual/access": typeof qaVisual_access;
+  "qaVisual/analysisPool": typeof qaVisual_analysisPool;
+  "qaVisual/analyzeJob": typeof qaVisual_analyzeJob;
   "qaVisual/audio": typeof qaVisual_audio;
   "qaVisual/campaignRegistration": typeof qaVisual_campaignRegistration;
   "qaVisual/campaignSnapshots": typeof qaVisual_campaignSnapshots;
@@ -316,26 +308,38 @@ declare const fullApi: ApiFromModules<{
   "qaVisual/driveClient": typeof qaVisual_driveClient;
   "qaVisual/editor": typeof qaVisual_editor;
   "qaVisual/imageCopies": typeof qaVisual_imageCopies;
+  "qaVisual/imagePool": typeof qaVisual_imagePool;
   "qaVisual/imageWarmup": typeof qaVisual_imageWarmup;
+  "qaVisual/importJob": typeof qaVisual_importJob;
+  "qaVisual/importPool": typeof qaVisual_importPool;
+  "qaVisual/importRead": typeof qaVisual_importRead;
+  "qaVisual/imports": typeof qaVisual_imports;
   "qaVisual/mediaHttp": typeof qaVisual_mediaHttp;
   "qaVisual/model/clientBrief": typeof qaVisual_model_clientBrief;
   "qaVisual/model/collaboration": typeof qaVisual_model_collaboration;
   "qaVisual/model/contracts": typeof qaVisual_model_contracts;
   "qaVisual/model/controls": typeof qaVisual_model_controls;
   "qaVisual/model/identity": typeof qaVisual_model_identity;
+  "qaVisual/model/importContracts": typeof qaVisual_model_importContracts;
   "qaVisual/model/importProgress": typeof qaVisual_model_importProgress;
   "qaVisual/model/linking": typeof qaVisual_model_linking;
   "qaVisual/model/normalize": typeof qaVisual_model_normalize;
   "qaVisual/model/offers": typeof qaVisual_model_offers;
   "qaVisual/model/productionCsv": typeof qaVisual_model_productionCsv;
+  "qaVisual/model/prompt": typeof qaVisual_model_prompt;
   "qaVisual/model/requirements": typeof qaVisual_model_requirements;
+  "qaVisual/model/retryPolicy": typeof qaVisual_model_retryPolicy;
   "qaVisual/model/verdict": typeof qaVisual_model_verdict;
+  "qaVisual/model/visibleDate": typeof qaVisual_model_visibleDate;
   "qaVisual/overrides": typeof qaVisual_overrides;
   "qaVisual/pieces": typeof qaVisual_pieces;
   "qaVisual/pipeline": typeof qaVisual_pipeline;
   "qaVisual/prepareImages": typeof qaVisual_prepareImages;
+  "qaVisual/qaModels": typeof qaVisual_qaModels;
   "qaVisual/runDispatch": typeof qaVisual_runDispatch;
+  "qaVisual/runner": typeof qaVisual_runner;
   "qaVisual/runs": typeof qaVisual_runs;
+  "qaVisual/sourceFiles": typeof qaVisual_sourceFiles;
   "qaVisual/stageDriveRun": typeof qaVisual_stageDriveRun;
   "qaVisual/tables": typeof qaVisual_tables;
   "qaVisual/threads": typeof qaVisual_threads;
@@ -399,9 +403,6 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
-  qaVisualImportPool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"qaVisualImportPool">;
-  qaVisualImagePool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"qaVisualImagePool">;
-  qaVisualAnalysisPool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"qaVisualAnalysisPool">;
   agent: {
     apiKeys: {
       destroy: FunctionReference<
@@ -4100,6 +4101,300 @@ export declare const components: {
           pageStatus?: "SplitRecommended" | "SplitRequired" | null;
           splitCursor?: string | null;
         }
+      >;
+    };
+  };
+  qaVisualImportPool: {
+    config: {
+      update: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+          maxParallelism?: number;
+        },
+        any
+      >;
+    };
+    lib: {
+      cancel: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          id: string;
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+        },
+        any
+      >;
+      cancelAll: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          before?: number;
+          limit?: number;
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+        },
+        any
+      >;
+      enqueue: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          config: {
+            logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+            maxParallelism?: number;
+          };
+          fnArgs: any;
+          fnHandle: string;
+          fnName: string;
+          fnType: "action" | "mutation" | "query";
+          onComplete?: { context?: any; fnHandle: string };
+          retryBehavior?: {
+            base: number;
+            initialBackoffMs: number;
+            maxAttempts: number;
+          };
+          runAt: number;
+        },
+        string
+      >;
+      enqueueBatch: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          config: {
+            logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+            maxParallelism?: number;
+          };
+          items: Array<{
+            fnArgs: any;
+            fnHandle: string;
+            fnName: string;
+            fnType: "action" | "mutation" | "query";
+            onComplete?: { context?: any; fnHandle: string };
+            retryBehavior?: {
+              base: number;
+              initialBackoffMs: number;
+              maxAttempts: number;
+            };
+            runAt: number;
+          }>;
+        },
+        Array<string>
+      >;
+      status: FunctionReference<
+        "query",
+        "internal",
+        { id: string },
+        | { previousAttempts: number; state: "pending" }
+        | { previousAttempts: number; state: "running" }
+        | { state: "finished" }
+      >;
+      statusBatch: FunctionReference<
+        "query",
+        "internal",
+        { ids: Array<string> },
+        Array<
+          | { previousAttempts: number; state: "pending" }
+          | { previousAttempts: number; state: "running" }
+          | { state: "finished" }
+        >
+      >;
+    };
+  };
+  qaVisualImagePool: {
+    config: {
+      update: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+          maxParallelism?: number;
+        },
+        any
+      >;
+    };
+    lib: {
+      cancel: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          id: string;
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+        },
+        any
+      >;
+      cancelAll: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          before?: number;
+          limit?: number;
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+        },
+        any
+      >;
+      enqueue: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          config: {
+            logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+            maxParallelism?: number;
+          };
+          fnArgs: any;
+          fnHandle: string;
+          fnName: string;
+          fnType: "action" | "mutation" | "query";
+          onComplete?: { context?: any; fnHandle: string };
+          retryBehavior?: {
+            base: number;
+            initialBackoffMs: number;
+            maxAttempts: number;
+          };
+          runAt: number;
+        },
+        string
+      >;
+      enqueueBatch: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          config: {
+            logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+            maxParallelism?: number;
+          };
+          items: Array<{
+            fnArgs: any;
+            fnHandle: string;
+            fnName: string;
+            fnType: "action" | "mutation" | "query";
+            onComplete?: { context?: any; fnHandle: string };
+            retryBehavior?: {
+              base: number;
+              initialBackoffMs: number;
+              maxAttempts: number;
+            };
+            runAt: number;
+          }>;
+        },
+        Array<string>
+      >;
+      status: FunctionReference<
+        "query",
+        "internal",
+        { id: string },
+        | { previousAttempts: number; state: "pending" }
+        | { previousAttempts: number; state: "running" }
+        | { state: "finished" }
+      >;
+      statusBatch: FunctionReference<
+        "query",
+        "internal",
+        { ids: Array<string> },
+        Array<
+          | { previousAttempts: number; state: "pending" }
+          | { previousAttempts: number; state: "running" }
+          | { state: "finished" }
+        >
+      >;
+    };
+  };
+  qaVisualAnalysisPool: {
+    config: {
+      update: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+          maxParallelism?: number;
+        },
+        any
+      >;
+    };
+    lib: {
+      cancel: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          id: string;
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+        },
+        any
+      >;
+      cancelAll: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          before?: number;
+          limit?: number;
+          logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+        },
+        any
+      >;
+      enqueue: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          config: {
+            logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+            maxParallelism?: number;
+          };
+          fnArgs: any;
+          fnHandle: string;
+          fnName: string;
+          fnType: "action" | "mutation" | "query";
+          onComplete?: { context?: any; fnHandle: string };
+          retryBehavior?: {
+            base: number;
+            initialBackoffMs: number;
+            maxAttempts: number;
+          };
+          runAt: number;
+        },
+        string
+      >;
+      enqueueBatch: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          config: {
+            logLevel?: "DEBUG" | "TRACE" | "INFO" | "REPORT" | "WARN" | "ERROR";
+            maxParallelism?: number;
+          };
+          items: Array<{
+            fnArgs: any;
+            fnHandle: string;
+            fnName: string;
+            fnType: "action" | "mutation" | "query";
+            onComplete?: { context?: any; fnHandle: string };
+            retryBehavior?: {
+              base: number;
+              initialBackoffMs: number;
+              maxAttempts: number;
+            };
+            runAt: number;
+          }>;
+        },
+        Array<string>
+      >;
+      status: FunctionReference<
+        "query",
+        "internal",
+        { id: string },
+        | { previousAttempts: number; state: "pending" }
+        | { previousAttempts: number; state: "running" }
+        | { state: "finished" }
+      >;
+      statusBatch: FunctionReference<
+        "query",
+        "internal",
+        { ids: Array<string> },
+        Array<
+          | { previousAttempts: number; state: "pending" }
+          | { previousAttempts: number; state: "running" }
+          | { state: "finished" }
+        >
       >;
     };
   };

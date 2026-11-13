@@ -4,11 +4,14 @@ import { useMutation, usePreloadedQuery, type Preloaded } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { QaViewer } from "../QaViewer";
+import type { ReviewLocation } from "@/app/lib/qa-visual/review-location";
 
 export function CampaignSnapshotViewer({
   preloaded,
+  initialLocation,
 }: {
   preloaded: Preloaded<typeof api.qaVisual.campaignSnapshots.viewer>;
+  initialLocation: ReviewLocation;
 }) {
   const data = usePreloadedQuery(preloaded);
   const refresh = useMutation(api.qaVisual.campaignSnapshots.refresh);
@@ -70,6 +73,7 @@ export function CampaignSnapshotViewer({
   return (
     <QaViewer
       campaignId={campaignId}
+      initialLocation={initialLocation}
       inventory={{
         campaignName,
         matrix,

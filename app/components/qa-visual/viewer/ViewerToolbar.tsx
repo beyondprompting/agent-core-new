@@ -42,7 +42,7 @@ export function ViewerToolbar({
 }) {
   return (
     <>
-      {/* Viewer bar (design scene 3): panels, annotation tools, version and file, download.
+      {/* Viewer bar (design scene 3): panels, annotation tools, file, version, download.
           Zoom lives in a floating pill over the image (ReviewCanvas). */}
       <div className="viewer-toolbar viewer-unified">
         <button
@@ -90,26 +90,26 @@ export function ViewerToolbar({
           )}
         </div>
         <div className="viewer-file">
-          {piece.versions > 1 ? (
-            <select
-              aria-label="Versión de la pieza"
-              className="viewer-version"
-              value={version}
-              onChange={(e) => changeVersion(Number(e.target.value))}
-            >
-              {Array.from({ length: piece.versions }, (_, i) => (
-                <option key={i} value={i + 1}>
-                  v{i + 1}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="viewer-version single">v{version}</span>
-          )}
           <span className="viewer-filename" title={piece.filename}>
             {piece.filename}
           </span>
         </div>
+        {piece.versions > 1 ? (
+          <select
+            aria-label="Versión de la pieza"
+            className="viewer-version"
+            value={version}
+            onChange={(e) => changeVersion(Number(e.target.value))}
+          >
+            {Array.from({ length: piece.versions }, (_, i) => (
+              <option key={i} value={i + 1}>
+                v{i + 1}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="viewer-version single">v{version}</span>
+        )}
         <button
           className="icon-button"
           title="Descargar original"

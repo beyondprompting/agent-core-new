@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import {
   ArrowUpRight,
   FileText,
@@ -51,6 +52,17 @@ export function FilesPanel({
     activeId,
     onChoose: choosePiece,
   });
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!list || !selected) return;
+    const viewport = list.getBoundingClientRect();
+    const card = selected.getBoundingClientRect();
+    // Scroll only the file list, without moving the page or stealing focus.
+    if (card.top < viewport.top) list.scrollTop += card.top - viewport.top;
+    else if (card.bottom > viewport.bottom)
+      list.scrollTop += card.bottom - viewport.bottom;
+  }, [activeId, leftTab, query, statusFilter, listRef]);
 
   return (
     <aside className="files-panel" aria-label="Archivos de campaña">

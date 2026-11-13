@@ -1,6 +1,7 @@
 # QA Visual: arquitectura objetivo y plan de implementación
 
 Fecha: 12 de noviembre de 2026
+Actualización de criterios de análisis: 13 de noviembre de 2026, política `qa-visual-5` (§9.2.1 y §24.5).
 Base analizada: rama `feat/qa-visual`, commit `094b2da`, y `ESPECIFICACION_QA_VISUAL.md`.
 Diseño propuesto: [`DISENO_QA_VISUAL.html`](./DISENO_QA_VISUAL.html), con temas claro y oscuro.
 
@@ -18,7 +19,7 @@ Las diez decisiones que más cambian el sistema:
 4. **Identidad estable de pieza y versión creativa.** `qaVisualPieces` y `qaVisualPieceVersions` reemplazan la identidad por nombre de archivo. Las aprobaciones humanas se asocian a la versión.
 5. **El hash de entrada se calcula por pieza.** Hoy agregar una imagen a la campaña invalida los análisis de todas las demás. El nuevo `inputHash` depende solo de la imagen, de los requisitos de esa pieza y de la versión de política.
 6. **Una sola cola de trabajo con `@convex-dev/workpool`** y una máquina de estados guardada en `qaVisualReviews`. Así se eliminan la cola propia con `activeBatch`, los workflows por pieza, la espera activa con `setTimeout`, el vencimiento a diez minutos y el código de compatibilidad. El límite es de cuatro piezas por corrida y además hay un límite global configurable para todas las campañas, dimensionado según cuotas y capacidad medidas (§10.1).
-7. **El modelo observa y el código compara.** El LLM lee los textos visibles y sus coordenadas. El precio, la fecha, el formato y las dimensiones se comparan con código determinista. Si falla la localización, la conclusión se conserva y el comentario pasa a ser general.
+7. **El modelo observa y evalúa; el código verifica los formatos que reconoce.** Formato y dimensiones se comparan con código. Para precio y fecha se usan comparaciones deterministas cuando preservan toda la información requerida; si la sintaxis no está soportada se conserva la evaluación semántica del modelo. Una omisión legible o una ausencia confirmada de contenido requerido es un hallazgo. Un parser limitado nunca es motivo suficiente para una revisión incompleta. Si falla la localización, la conclusión se conserva y el comentario pasa a ser general.
 8. **El dictamen y la cobertura se muestran por separado.** "Validada por IA" exige las ocho condiciones de §9.5: resultado vigente, todos los controles solicitados ejecutados y cumplidos contra el pedido del cliente, sin conflictos ni avisos de advertencia, y los controles visuales pasados por el modelo. Una revisión solo técnica, con conflictos o desactualizada nunca aparece en verde.
 9. **La colaboración humana se guarda en Convex:** hilos, respuestas, anotaciones, resolución y decisiones por versión, con autor, fecha, control de concurrencia e historial derivado.
 10. **Consultas reactivas pequeñas.** Hay una proyección liviana para la lista de tarjetas y una consulta de detalle para la pieza seleccionada. Las imágenes inmutables se cachean en el navegador.
@@ -32,6 +33,7 @@ Las diez decisiones que más cambian el sistema:
 | --- | --- |
 | Separar capas de verdad | Fuente original (Storage) → dato interpretado (importación inmutable) → vínculo confirmado (equivalencias humanas) → resultado de IA (revisión) → decisión humana. Ninguna capa sobrescribe a otra. |
 | Analizar con lo que haya | Cada requisito se evalúa por separado. Una ambigüedad bloquea solo los controles que afecta. |
+| Diferenciar omisión e incertidumbre | Si se puede comprobar que falta algo pedido, es `fail`. `unverifiable` exige información o evidencia realmente insuficiente; no se usa por una sintaxis no reconocida por el código. |
 | Trazabilidad total | Todo valor esperado lleva sus `sources[]`. Todo hallazgo informa qué método lo produjo (código o modelo) y en qué corrida. |
 | Idempotencia en cada paso | Las importaciones, corridas, intentos, imágenes y decisiones toleran reintentos y callbacks repetidos sin duplicar resultados. |
 | Simplicidad | Hay un solo mecanismo de cola (workpool), una sola fuente de identidad (pieza y versión) y lógica de dominio en TypeScript puro y testeable. No se usan workflows anidados ni leases manuales. |
@@ -426,10 +428,12 @@ Hay doce tablas. Cada una corresponde a una capa de verdad:
   ruleId, outcome: "pass" | "fail" | "unverifiable" | "notApplicable",
   basis: "client" | "production",          // contra qué se comparó
   method: "deterministic" | "model",
+  evidenceStatus?: "readable" | "absent" | "unreadable" | "ambiguous",
+  missingElements?: string[],                // omisiones confirmadas de contenido requerido
   severity: "info" | "warning" | "blocking",
   expected?: string, expectedAlternatives?: string[],   // conflicto Excel/CSV
   observed: string,                         // explicación
-  observedValue?: string,                   // texto leído en la imagen, normalizado
+  observedValue?: string,                   // transcripción literal, sin completar desde el pedido
   sources: Source[],
   causeIssueId?: string,                    // si el resultado depende de un aviso de fuente
   region?: { x, y, width, height }, visibleAnchor?: string,
@@ -707,7 +711,7 @@ Así se cumple el pedido de la usuaria: **siempre se analiza la pieza**. Cuando 
   - Precio distinto: estado `conflict`, con `expected` del Excel y `expectedAlternatives` del CSV, más el aviso `price_conflict_csv` con las dos fuentes.
   - Numeral sin precio: estado `missing` y aviso `price_missing`.
   - Numeral duplicado: estado `invalid` y aviso `price_duplicate_ordinal`.
-- **Fecha:** se toma la temporalidad de la oferta seleccionada. Si `SLOT_FECHA` o el nombre de archivo indican otra cosa, se emite `date_mismatch_sources`. `HOY` y una fecha concreta son valores distintos; su posible equivalencia es una decisión abierta (§22).
+- **Fecha:** se toma la temporalidad de la oferta seleccionada. Si `SLOT_FECHA` o el nombre de archivo indican otra cosa, se emite `date_mismatch_sources`. `HOY` y una fecha concreta son valores distintos. La imagen debe contener los componentes exigidos por la referencia: no se completa un mes o año ausente desde el contexto de la campaña (§9.2.1).
 - **CTA:** se toman las líneas de P que coinciden con el patrón de CTA.
   - Si la fila tiene P y ninguna línea coincide: estado `notRequested`, salvo que P contenga palabras de CTA que no se pudieron interpretar, en cuyo caso es `unresolved`.
   - Si la fila **no** tiene P: `notRequested`.
@@ -789,12 +793,12 @@ Pieza 16 (equivalencia por conectores). Primer precio vacío y `$5,99` en el num
 | --- | --- | --- |
 | Formato | Código | Formato decodificado del original contra G, con las equivalencias JPG/JPEG. |
 | Dimensiones | Código | Ancho y alto del original contra I y J. |
-| Precio | El modelo **lee**, el código **compara** | El modelo devuelve el texto del precio visible y su caja. El código normaliza (`$8,99` = `8.99`) y compara con el valor esperado y las alternativas. |
-| Fecha y vigencia | El modelo lee, el código compara | El modelo devuelve el texto visible (`JUEVES 22`, `HOY`). El código compara contra la temporalidad esperada con reglas declaradas (§22 para las equivalencias de días de la semana). |
+| Precio | Lectura y evaluación semántica, con comparación exacta cuando aplica | El código compara importes simples (`$8,99` = `8.99`) contra la referencia. Para otras expresiones legibles conserva el resultado semántico; no convierte un formato desconocido en `unverifiable`. La alternativa de producción nunca reemplaza el pedido del cliente. |
+| Fecha y vigencia | Lectura y evaluación semántica, con comparación estructurada cuando aplica | Se compara la expresión completa y cada componente requerido. `JUEVES 15` frente a `15 DE OCTUBRE` es `fail` por faltar el mes. Se aceptan escrituras equivalentes que conservan los datos, como `15/10`. Rangos y condiciones que el código no interpreta se evalúan semánticamente, sin truncarlos a la primera fecha. |
 | Producto | El modelo juzga | Hace falta interpretar la semántica: el nombre comercial visible frente a la oferta. |
 | CTA | El modelo juzga | Criterio del cliente frente al texto visible. Por ejemplo, `A DOMICILIO POR KFC APP` no es una invitación a descargar la app. |
 
-El modelo responde un objeto por control: `{ ruleId, visibleText, outcome, observed, visibleAnchor, box_2d }`. Para precio y fecha, el `outcome` final lo decide el código. Si el código y el modelo no coinciden, gana el código y la discrepancia se registra en el intento para medir la calidad del modelo.
+El modelo responde un objeto por control: `{ ruleId, visibleText, evidenceStatus, missingElements, outcome, observed, visibleAnchor, box_2d }`. El código aplica las reglas de §9.2.1. `method` indica cómo se obtuvo el resultado final: `deterministic` para una comparación soportada o `model` para la evaluación semántica. Una comparación no soportada devuelve internamente "sin comparación determinista"; eso no es un dictamen ni un `unverifiable`. La evaluación semántica ya viene en la misma respuesta: no requiere otra llamada por cada formato desconocido.
 
 ### 9.2 Contrato del prompt (`model/prompt.ts`)
 
@@ -802,6 +806,46 @@ El modelo responde un objeto por control: `{ ruleId, visibleText, outcome, obser
 - Los datos (requisitos e imagen) se tratan como datos y nunca como instrucciones. Esto ya está así y se mantiene.
 - Cada control incluye `ruleId`, el criterio y el valor esperado. Si existe, también la alternativa y la indicación "comparar con el pedido del cliente" o "comparar con lo declarado por producción".
 - Se exige exactamente un control por cada `ruleId` enviado. Si falta alguno o hay uno duplicado, se considera salida inválida y se reintenta (§10.3).
+- La evidencia se clasifica separadamente del resultado. `missingElements` enumera solo omisiones confirmadas de requisitos reales. No se inventan palabras, meses, años, importes o exigencias a partir del contexto.
+
+### 9.2.1 Política de contenido legible, omisiones e incertidumbre (13/11/2026)
+
+**Regla central:** una pieza con texto legible que incumple u omite algo exigido por el cliente tiene un hallazgo. "Revisión incompleta" describe la imposibilidad real de concluir la evaluación; no describe un texto incompleto respecto del pedido.
+
+| Evidencia y referencia | Resultado del control | Explicación requerida |
+| --- | --- | --- |
+| Contenido legible y equivalente, con todos los componentes solicitados | `pass` | Qué coincide con la referencia. No se exige copia literal salvo que el criterio lo indique. |
+| Contenido legible diferente, o parte requerida ausente | `fail` | Qué se pidió, qué se ve y qué falta o difiere. Incluye producto, cantidad, precio, fecha, CTA y otros controles configurados. |
+| Se inspeccionó la imagen y se confirmó que el elemento requerido no aparece (`absent`) | `fail` | Identificar el elemento ausente. No se necesita inventar un marcador donde no hay nada visible. |
+| Elemento presente pero ilegible (`unreadable`), o evidencia realmente ambigua (`ambiguous`) | `unverifiable` | Indicar qué información concreta impide decidir. Una zona borrosa o recortada no demuestra ausencia. |
+| Falta una referencia suficiente del cliente o su vinculación es incierta | `unverifiable` para el control afectado, o evaluación parcial contra producción según §8.5 | Explicar el problema de fuente y conservar su `causeIssueId`. No atribuirlo a un error del diseño. |
+| Texto legible con sintaxis no soportada por el comparador | Evaluación semántica: `pass` o `fail` | La limitación del código no autoriza `unverifiable`. Si existe una ambigüedad real, se identifica como tal y se explica. |
+| El cliente no solicitó el control (`notRequested`) | `notApplicable` | No participa en los controles solicitados. El modelo no puede descartar por su cuenta un requisito recibido. |
+
+Orden de resolución por control:
+
+1. Comprobar aplicabilidad y disponibilidad de referencia (§8.5).
+2. Una ausencia confirmada es `fail`. Una omisión confirmada en evidencia legible también es `fail`, aunque el modelo haya propuesto `unverifiable`.
+3. Evidencia ilegible o verdaderamente ambigua queda `unverifiable`, con explicación. Una salida que simultáneamente afirma que no puede verificar la evidencia y enumera ausencias confirmadas es inconsistente y se reintenta.
+4. Para precio y fecha legibles, aplicar la comparación determinista cuando reconoce toda la expresión. Las fechas se comparan por los componentes exigidos; un componente requerido ausente es un incumplimiento.
+5. Cuando no hay comparación determinista, conservar la evaluación semántica. Si el modelo informa `readable` pero devuelve `unverifiable` sin una omisión resoluble, o intenta marcar como `notApplicable` un control solicitado, tratarlo como salida inválida y reintentar. Si se agotan los intentos, es **error de análisis**, no una revisión completada como "incompleta".
+
+Ejemplos obligatorios:
+
+| Pedido | Visible / evidencia | Resultado |
+| --- | --- | --- |
+| `15 DE OCTUBRE` | `JUEVES 15` legible | `fail`: falta el mes. No se infiere octubre del pedido, del calendario ni de la campaña. |
+| `15 DE OCTUBRE` | `15/10`, `15 OCT.`, `OCTUBRE 15` | `pass`: conservan día y mes. Fechas numéricas en orden día/mes[/año]; también se reconoce ISO año-mes-día. |
+| `15 DE OCTUBRE DE 2026` | `15/10` | `fail`: falta el año requerido. Si el pedido no exige año, no se agrega esa exigencia. |
+| `15 DE OCTUBRE` | `16 DE OCTUBRE` o `HOY` | `fail`: la vigencia no coincide. |
+| `DEL 15 AL 20 DE OCTUBRE` | Rango legible | Evaluación semántica de ambos extremos y sus condiciones, sin aprobar por reconocer solo el primer día. |
+| `$8,99` | `8.99` | `pass`. Un precio diferente es `fail`, incluso si coincide con el CSV. |
+| `FESTIN LOCURA 12 PRESAS` | `FESTIN LOCURA` sin cantidad | `fail`: falta la cantidad solicitada. |
+| Invitación a descargar la app | `A DOMICILIO POR KFC APP` | `fail`: mencionar la app no cumple la acción requerida. |
+| Precio solicitado | No aparece en la imagen completa | `fail`: ausencia confirmada. |
+| Precio solicitado | Zona borrosa, no se distingue el importe | `unverifiable`: falta evidencia legible. |
+
+`evidenceStatus` y `missingElements` se guardan en el hallazgo para auditar la conclusión; son opcionales en datos históricos. `observedValue` conserva el texto literal. `locationStatus` solo describe la ubicación del comentario y nunca rebaja un incumplimiento a `unverifiable`.
 
 ### 9.3 Coordenadas
 
@@ -852,7 +896,9 @@ else if (V3…V8 se cumplen)              -> verdict "validated"  · "Validada p
 else                                    -> verdict "partial"    · "Revisión incompleta · <motivo>"
 ```
 
-Cuando hay más de un motivo de "Revisión incompleta", se muestra el primero de esta lista: **Pedido sin vincular** (V3 o V5) > **Conflicto de fuentes** (V6) > **Vinculación por confirmar** (V7) > **Evidencia ilegible** (V4 por `unverifiable`) > **Solo controles técnicos** (V8). Detalles muestra la lista completa.
+Cuando hay más de un motivo de "Revisión incompleta", se muestra el primero de esta lista: **Pedido sin vincular** (V3 o V5) > **Conflicto de fuentes / dato inválido** (V6) > **Controles duplicados en el pedido** > **Vinculación por confirmar** (V7) > **Falta información para concluir controles solicitados** (V4 por `unverifiable`) > **Solo controles técnicos / visuales pendientes** (V8). Detalles muestra la lista completa. No se presenta "evidencia ilegible" como explicación genérica de un formato no soportado.
+
+**Clasificación de la pieza:** un `fail` basta para "Con hallazgos", incluso si otro control sigue sin verificarse. Cuatro `pass` y una omisión legible son **5/5 controles verificados, 1 hallazgo**. Cuatro `pass` y un texto realmente ilegible son **4/5 controles verificados, revisión incompleta**. El número de comentarios no determina el dictamen: los comentarios incluyen hallazgos, controles no verificables y avisos de fuente. Resolver una conversación no cambia el resultado de IA ni aprueba la pieza.
 
 | Dictamen | Tono |
 | --- | --- |
@@ -1264,7 +1310,7 @@ Cada punto incluye la opción recomendada, que se puede aplicar mientras el equi
 | --- | --- | --- |
 | 1 | ¿Qué equivalencias se aceptan automáticamente? | Los niveles `exact` y `connectors` se aceptan automáticamente, con un aviso informativo. `contained` se acepta con una advertencia. Lo fuzzy requiere confirmación humana. |
 | 2 | Si no se puede vincular el pedido del cliente, ¿se compara contra el CSV? | Sí, con `basis: production` visible y sin poder llegar a "Validada por IA". Así se cumple "analizar siempre" sin ocultar la falta del pedido. |
-| 3 | ¿`JUEVES 22` equivale a `22 de octubre`? ¿Y `HOY` a una fecha? | El día de la semana con el número equivale a la fecha si el día coincide con el calendario de la campaña. `HOY` y una fecha concreta no son equivalentes. Hay que confirmarlo con el equipo. |
+| 3 | ¿`JUEVES 22` equivale a `22 de octubre`? ¿Y `HOY` a una fecha? | **Resuelta el 13/11/2026 (§9.2.1):** no se completa el mes desde el calendario de la campaña. Si se exige día y mes, `JUEVES 22` tiene un hallazgo por omitir el mes. `HOY` y una fecha concreta no son equivalentes. Sí se aceptan formatos que conservan toda la información solicitada, como `22/10`. |
 | 4 | Cobertura mínima para "Validada por IA" | Todos los controles solicitados ejecutados y cumplidos, con base en el cliente. |
 | 5 | ¿Quién puede aprobar con excepción? | Por ahora, `super_admin`. Más adelante, el rol `approver`. |
 | 6 | Subcarpetas dentro de DESPLIEGUE | En v1 se informan sin analizarse. Si el equipo organiza por formato, se pueden recorrer hasta dos niveles con `path` en la pieza. |
@@ -1750,3 +1796,11 @@ Las casillas marcadas identifican funcionalidades implementadas dentro del alcan
 | `QA_VISUAL_ENABLED` | Convex | `false` desactiva todas las funciones de QA. |
 
 Las transcripciones usan `SPEECH_KEY` y `SPEECH_REGION`, que la app ya tiene configuradas para Azure.
+
+### 24.5 Corrección de clasificación de contenido legible (13/11/2026)
+
+- Implementada la política de §9.2.1 en `model/controls.ts`, `model/visibleDate.ts`, `model/prompt.ts` y `worker.ts`: omisión legible o ausencia confirmada → hallazgo; evidencia realmente insuficiente → no verificable; formato no soportado → evaluación semántica.
+- Se guarda el método final y la evidencia (`evidenceStatus`, `missingElements`) en los hallazgos. Un fallo de localización no cambia el resultado.
+- `ANALYSIS_POLICY_VERSION` pasa de `qa-visual-4` a `qa-visual-5`. Las revisiones anteriores se conservan como historial y quedan desactualizadas; no se reescriben sus dictámenes ni se reclasifican solo en la UI. Para aplicar la política a una campaña existente, **Actualizar desde Drive** genera entradas con la política nueva y luego se deben volver a analizar las piezas. Este cambio no ejecuta análisis automáticamente.
+- Pruebas de regresión en `qaVisualControls.test.ts`, `qaVisualDomain.test.ts` y `qaVisualVerdict.test.ts`: omisión de mes, componentes de fecha, formatos equivalentes, cantidades y CTA faltantes, ausencia frente a ilegibilidad, evaluación semántica de formatos no soportados, prioridad de hallazgos y conteo en la UI.
+- La evaluación con imágenes reales de §16 sigue siendo necesaria para medir errores de lectura y clasificación del modelo. Las pruebas deterministas no sustituyen esa evaluación visual.
