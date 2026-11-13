@@ -120,15 +120,19 @@ export function CampaignHeader({
             className="button secondary"
             onClick={onRefresh}
             disabled={refreshing}
+            title="Actualizar desde Drive"
+            aria-label={refreshing ? "Actualizando desde Drive" : "Actualizar desde Drive"}
           >
             <RefreshCw size={15} className={refreshing ? "animate-spin" : undefined} />
-            {refreshing ? "Actualizando…" : "Actualizar desde Drive"}
+            <span className="qa-collapsible-label">
+              {refreshing ? "Actualizando…" : "Actualizar desde Drive"}
+            </span>
           </button>
         )}
         {onShare && (
-          <button className="button secondary" onClick={onShare}>
+          <button className="button secondary" onClick={onShare} title="Compartir" aria-label="Compartir">
             <Users size={15} />
-            Compartir
+            <span className="qa-collapsible-label">Compartir</span>
           </button>
         )}
         {onSendToClient && (

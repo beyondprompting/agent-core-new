@@ -80,11 +80,22 @@ html.dark .qa-campaigns {
   cursor: default;
 }
 .qa-campaigns button:focus-visible,
-.qa-campaigns a:focus-visible,
-.qa-campaigns input:focus-visible,
-.qa-campaigns select:focus-visible {
+.qa-campaigns a:focus-visible {
   outline: 2px solid var(--qc-primary);
   outline-offset: 3px;
+}
+/* Text fields: no focus ring; the field border tints instead. */
+.qa-campaigns input:focus,
+.qa-campaigns input:focus-visible,
+.qa-campaigns textarea:focus,
+.qa-campaigns textarea:focus-visible,
+.qa-campaigns select:focus,
+.qa-campaigns select:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.qa-campaigns .qc-url-field:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--qc-primary) 45%, var(--qc-line));
 }
 .qa-campaigns svg {
   flex-shrink: 0;

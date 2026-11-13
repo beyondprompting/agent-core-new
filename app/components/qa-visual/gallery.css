@@ -222,3 +222,8 @@
 html.dark .qa-visual .button.qa-approve,.dark .qa-visual .button.qa-approve{color:#0f1f19}
 .qa-visual .qa-carousel-btn.on{background:var(--client);color:#fff}
 .qa-visual .qa-panel-actions .qa-muted{flex:1;justify-content:center;text-align:center}
+.qa-field input:focus,.qa-field select:focus,.qa-field textarea:focus{border-color:var(--primary-medium)}
+.qa-composer:focus-within{box-shadow:inset 0 0 0 1px var(--primary-medium)}
+.qa-visual .qa-gallery-toolbar select{height:34px}
+.qa-visual .campaign-actions{min-width:0}
+@media (max-width:1440px){.qa-visual .campaign-actions .qa-collapsible-label{display:none}.qa-visual .campaign-actions .button:has(.qa-collapsible-label){padding:0 9px}}

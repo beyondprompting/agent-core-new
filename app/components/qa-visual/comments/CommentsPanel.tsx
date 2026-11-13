@@ -1,5 +1,5 @@
 import { CommentCard } from "./CommentCard";
-import { Building2, Lock, MessageSquare, Send, Settings2, Sparkles, X } from "lucide-react";
+import { Building2, Lock, MessageSquare, Send, Sparkles, X } from "lucide-react";
 
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
 import { VoiceRecorder } from "@/app/components/qa-visual/voice/VoiceRecorder";
@@ -61,13 +61,6 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           <option value="open">Sin resolver</option>
         </select>
         <span>{visibleComments.length}</span>
-        <button
-          className="icon-button"
-          title="Mostrar solo comentarios sin resolver"
-          onClick={() => setFilter(filter === "open" ? "all" : "open")}
-        >
-          <Settings2 size={15} />
-        </button>
       </div>
       <div className="comments-scroll">
         {(session.detail?.moreThreads ||

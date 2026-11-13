@@ -101,6 +101,7 @@ export function useReviewSession(
         setPendingPin(mark.points.at(-1)!);
         setShowPins(true);
       },
+      zoom > 100,
     );
   const inputRef = useRef<HTMLTextAreaElement>(null),
     artboardRef = useRef<HTMLDivElement>(null),

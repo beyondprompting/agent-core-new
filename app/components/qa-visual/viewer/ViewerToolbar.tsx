@@ -1,10 +1,5 @@
 import {
   ArrowDownToLine,
-  ChevronDown,
-  Expand,
-  Eye,
-  FileImage,
-  Hand,
   MessageSquare,
   MousePointer2,
   PanelLeftClose,
@@ -12,8 +7,6 @@ import {
   Pencil,
   RotateCcw,
   Square,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 
 import { ReviewStatusBar } from "@/app/components/qa-visual/piece/review-status";
@@ -22,14 +15,9 @@ import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 export function ViewerToolbar({
   session: {
     version,
-    filter,
     setPendingPin,
-    zoom,
-    setZoom,
     tool,
     setTool,
-    showPins,
-    setShowPins,
     leftOpen,
     setLeftOpen,
     rightOpen,
@@ -37,12 +25,10 @@ export function ViewerToolbar({
     setModal,
     cancelImageComment,
     pendingMark,
-    setPan,
     pinToolRef,
     piece,
     aiReview,
     humanReview,
-    pieceMarks,
     changeVersion,
     openAiReview,
     download,
@@ -56,67 +42,25 @@ export function ViewerToolbar({
 }) {
   return (
     <>
-      {/* Unified viewer bar (design scene 3): tools, version and file, then view actions. */}
+      {/* Viewer bar (design scene 3): panels, annotation tools, version and file, download.
+          Zoom lives in a floating pill over the image (ReviewCanvas). */}
       <div className="viewer-toolbar viewer-unified">
         <button
-          className="icon-button"
+          className={`icon-button panel-toggle ${leftOpen ? "" : "off"}`}
           title={leftOpen ? "Ocultar archivos" : "Mostrar archivos"}
           aria-label={leftOpen ? "Ocultar archivos" : "Mostrar archivos"}
+          aria-pressed={leftOpen}
           onClick={() => setLeftOpen(!leftOpen)}
         >
-          <PanelLeftClose size={17} />
+          <PanelLeftClose size={16} />
         </button>
-        <div className="zoom-tools">
-          <button
-            className="icon-button"
-            title="Alejar"
-            onClick={() => setZoom(Math.max(50, zoom - 25))}
-          >
-            <ZoomOut size={16} />
-          </button>
-          <button
-            className="zoom-value"
-            title="Restablecer zoom"
-            onClick={() => {
-              setZoom(100);
-              setPan({ x: 0, y: 0 });
-            }}
-          >
-            {zoom}%<ChevronDown size={12} />
-          </button>
-          <button
-            className="icon-button"
-            title="Acercar"
-            onClick={() => setZoom(Math.min(200, zoom + 25))}
-          >
-            <ZoomIn size={16} />
-          </button>
-        </div>
-        <span className="toolbar-divider" />
-        <div className="annotation-tools">
+        <div className="annotation-tools" role="toolbar" aria-label="Herramientas de anotación">
           {(
             [
-              {
-                id: "select",
-                label: "Seleccionar",
-                icon: MousePointer2,
-              },
-              { id: "hand", label: "Desplazar imagen", icon: Hand },
-              {
-                id: "pin",
-                label: "Agregar comentario en la imagen",
-                icon: MessageSquare,
-              },
-              {
-                id: "rectangle",
-                label: "Dibujar rectángulo",
-                icon: Square,
-              },
-              {
-                id: "draw",
-                label: "Dibujar a mano alzada",
-                icon: Pencil,
-              },
+              { id: "select", label: "Seleccionar", icon: MousePointer2 },
+              { id: "pin", label: "Comentar en un punto", icon: MessageSquare },
+              { id: "rectangle", label: "Marcar un área", icon: Square },
+              { id: "draw", label: "Dibujo libre", icon: Pencil },
             ] as const
           ).map((item) => (
             <button
@@ -125,78 +69,64 @@ export function ViewerToolbar({
               aria-label={item.label}
               title={item.label}
               aria-pressed={tool === item.id}
-              className={`icon-button tool-button ${tool === item.id ? "active" : ""}`}
+              className={`tool-button ${tool === item.id ? "active" : ""}`}
               onClick={() => {
                 setTool(item.id);
                 if (item.id !== "pin") setPendingPin(null);
               }}
             >
-              <item.icon size={17} />
+              <item.icon size={15} />
             </button>
           ))}
-          <button
-            className="icon-button"
-            title="Cancelar anotación sin publicar"
-            disabled={!pendingMark}
-            onClick={cancelImageComment}
-          >
-            <RotateCcw size={15} />
-          </button>
+          {pendingMark && (
+            <button
+              className="tool-button"
+              title="Descartar la marca sin publicar"
+              aria-label="Descartar la marca sin publicar"
+              onClick={cancelImageComment}
+            >
+              <RotateCcw size={14} />
+            </button>
+          )}
         </div>
-        <span className="toolbar-divider" />
         <div className="viewer-file">
-          <select
-            aria-label="Versión de la pieza"
-            className="viewer-version"
-            value={version}
-            onChange={(e) => changeVersion(Number(e.target.value))}
-          >
-            {Array.from({ length: piece.versions }, (_, i) => (
-              <option key={i} value={i + 1}>
-                v{i + 1}
-              </option>
-            ))}
-          </select>
-          <FileImage size={14} />
-          <span title={piece.filename}>{piece.filename}</span>
+          {piece.versions > 1 ? (
+            <select
+              aria-label="Versión de la pieza"
+              className="viewer-version"
+              value={version}
+              onChange={(e) => changeVersion(Number(e.target.value))}
+            >
+              {Array.from({ length: piece.versions }, (_, i) => (
+                <option key={i} value={i + 1}>
+                  v{i + 1}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="viewer-version single">v{version}</span>
+          )}
+          <span className="viewer-filename" title={piece.filename}>
+            {piece.filename}
+          </span>
         </div>
-        <div className="toolbar-end">
-          <button
-            className={`pins-toggle ${showPins ? "on" : ""}`}
-            onClick={() => setShowPins(!showPins)}
-            title="Mostrar u ocultar marcadores"
-          >
-            <Eye size={15} />
-            <span>Marcadores</span>
-          </button>
-          <button
-            className="icon-button"
-            title="Ampliar espacio de revisión"
-            onClick={() => {
-              const expanded = !leftOpen && !rightOpen;
-              setLeftOpen(expanded);
-              setRightOpen(expanded);
-            }}
-          >
-            <Expand size={16} />
-          </button>
-          <button
-            className="icon-button"
-            title="Descargar original de esta pieza"
-            aria-label="Descargar original de esta pieza"
-            onClick={download}
-          >
-            <ArrowDownToLine size={16} />
-          </button>
-          <button
-            className="icon-button"
-            title={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
-            aria-label={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
-            onClick={() => setRightOpen(!rightOpen)}
-          >
-            <PanelRightClose size={17} />
-          </button>
-        </div>
+        <button
+          className="icon-button"
+          title="Descargar original"
+          aria-label="Descargar original de esta pieza"
+          onClick={download}
+        >
+          <ArrowDownToLine size={16} />
+        </button>
+        <button
+          className={`icon-button panel-toggle ${rightOpen ? "" : "off"}`}
+          title={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
+          aria-label={rightOpen ? "Ocultar comentarios" : "Mostrar comentarios"}
+          aria-pressed={rightOpen}
+          onClick={() => setRightOpen(!rightOpen)}
+        >
+          <PanelRightClose size={16} />
+        </button>
       </div>
       <ReviewStatusBar
         ai={aiReview}

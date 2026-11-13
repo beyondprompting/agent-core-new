@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-export type Tool = "select" | "hand" | "pin" | "rectangle" | "draw";
+export type Tool = "select" | "pin" | "rectangle" | "draw";
 export type Mark = {
   id: number | string;
   pieceId: string;
@@ -15,6 +15,8 @@ export function useCanvasAnnotations(
   tool: Tool,
   onPin: (point: { x: number; y: number }) => void,
   onAnnotation: (mark: Mark) => void,
+  /** With the select tool, dragging moves the image only while it is zoomed. */
+  zoomed = false,
 ) {
   const [drawing, setDrawing] = useState<Mark | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -43,7 +45,7 @@ export function useCanvasAnnotations(
       onPin(point(event));
       return;
     }
-    if (tool === "hand") {
+    if (tool === "select" && zoomed) {
       drag.current = {
         x: event.clientX,
         y: event.clientY,

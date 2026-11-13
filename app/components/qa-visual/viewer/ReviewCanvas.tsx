@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleHelp, ImageIcon, Plus, ShieldCheck } from "lucide-react";
+import { CircleHelp, ImageIcon, Plus, ShieldCheck, ZoomIn, ZoomOut } from "lucide-react";
 
 import { Artwork } from "@/app/components/qa-visual/shared/visuals";
 import { CanvasCommentMarkers } from "./CanvasCommentMarkers";
@@ -14,6 +14,8 @@ export function ReviewCanvas({
     filter,
     pendingPin,
     zoom,
+    setZoom,
+    setPan,
     tool,
     showPins,
     setModal,
@@ -56,7 +58,7 @@ export function ReviewCanvas({
         <div className="artboard-area">
           <div
             ref={artboardRef}
-            className={`artboard ${piece.height > piece.width ? "portrait" : ""} tool-${tool}`}
+            className={`artboard ${piece.height > piece.width ? "portrait" : ""} tool-${tool} ${zoom > 100 ? "zoomed" : ""}`}
             style={{
               aspectRatio: ratio,
               width: `min(100cqw, calc(100cqh * ${ratio}))`,
@@ -136,8 +138,40 @@ export function ReviewCanvas({
               </>
             )}
             {piece.extension ?? "PNG"}
-            <span>·</span>Vista de revisión
           </span>
+          <div className="zoom-pill" role="group" aria-label="Zoom">
+            <button
+              aria-label="Alejar"
+              title="Alejar"
+              disabled={zoom <= 50}
+              onClick={() => {
+                const next = Math.max(50, zoom - 25);
+                setZoom(next);
+                if (next <= 100) setPan({ x: 0, y: 0 });
+              }}
+            >
+              <ZoomOut size={14} />
+            </button>
+            <button
+              className="zoom-pill-value"
+              title="Ajustar a la pantalla"
+              aria-label={`Zoom ${zoom} %. Ajustar a la pantalla`}
+              onClick={() => {
+                setZoom(100);
+                setPan({ x: 0, y: 0 });
+              }}
+            >
+              {zoom} %
+            </button>
+            <button
+              aria-label="Acercar"
+              title={zoom > 100 ? "Acercar · arrastrá la imagen para moverla" : "Acercar"}
+              disabled={zoom >= 200}
+              onClick={() => setZoom(Math.min(200, zoom + 25))}
+            >
+              <ZoomIn size={14} />
+            </button>
+          </div>
           <span>
             <ShieldCheck size={13} />
             Versión {version} de {piece.versions}
