@@ -24,9 +24,10 @@ import { AudioMessage } from "@/app/components/qa-visual/voice/AudioMessage";
 import { VoiceRecorder } from "@/app/components/qa-visual/voice/VoiceRecorder";
 import { uploadRecording, useVoiceRecorder } from "@/app/hooks/qa-visual/use-voice-recorder";
 import { portalClientState, type ClientState } from "@/app/lib/qa-visual/client-state";
+import { carouselOrder } from "@/app/lib/qa-visual/piece-filters";
 import { ProgressSummary } from "./ProgressSummary";
 
-type Tab = "pending" | "changes" | "approved" | "all";
+type Tab = "pending" | "changes" | "approved";
 type PieceData = FunctionReturnType<typeof api.qaVisual.clientPortal.piece>;
 
 const media = (params: Record<string, string>) =>
@@ -36,7 +37,6 @@ const errorText = (error: unknown, fallback: string) => {
   return typeof data === "string" ? data : (data?.message ?? fallback);
 };
 const inTab = (state: ClientState, tab: Tab) =>
-  tab === "all" ||
   (tab === "approved" && state === "approved") ||
   (tab === "changes" && state === "changesRequested") ||
   (tab === "pending" && (state === "sent" || state === "viewed"));
@@ -45,7 +45,10 @@ const inTab = (state: ClientState, tab: Tab) =>
 export function ClientReview({ campaignId }: { campaignId: string }) {
   const id = campaignId as Id<"qaVisualCampaigns">;
   const data = useQuery(api.qaVisual.clientPortal.gallery, { campaignId: id });
-  const [tab, setTab] = useState<Tab>("pending");
+  // Checkbox filters: states add up; «Con comentarios» and «Nuevas versiones» narrow the result.
+  const [states, setStates] = useState<Tab[]>(["pending"]);
+  const [withComments, setWithComments] = useState(false);
+  const [onlyNew, setOnlyNew] = useState(false);
   const [openId, setOpenId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("pieza"),
   );
@@ -56,15 +59,21 @@ export function ClientReview({ campaignId }: { campaignId: string }) {
     window.history.replaceState(window.history.state, "", url);
   }, [openId]);
   const items = useMemo(
-    () => (data?.items ?? []).filter((item) => inTab(item.state, tab)),
-    [data, tab],
+    () =>
+      (data?.items ?? []).filter(
+        (item) =>
+          (!states.length || states.some((t) => inTab(item.state, t))) &&
+          (!withComments || item.comments > 0) &&
+          (!onlyNew || item.isNew),
+      ),
+    [data, states, withComments, onlyNew],
   );
-  // Default to «Todas» when nothing is pending, so the client never lands on an empty tab.
+  // Show everything when nothing is pending, so the client never lands on an empty gallery.
   const firstLoad = useRef(true);
   useEffect(() => {
     if (!data || !firstLoad.current) return;
     firstLoad.current = false;
-    if (!data.items.some((i) => inTab(i.state, "pending"))) setTab("all");
+    if (!data.items.some((i) => inTab(i.state, "pending"))) setStates([]);
   }, [data]);
   if (data === undefined)
     return (
@@ -72,13 +81,20 @@ export function ClientReview({ campaignId }: { campaignId: string }) {
         <LoaderCircle size={20} className="animate-spin" />
       </div>
     );
-  const order = items.length && openId && items.some((i) => i.id === openId) ? items : (data.items ?? []);
+  // The carousel keeps the gallery filter: a piece just approved stays open, but «next» skips approved ones.
+  const order = openId
+    ? carouselOrder(
+        items.map((i) => i.id),
+        data.items.map((i) => i.id),
+        openId,
+      )
+    : [];
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: "pending", label: "Por revisar", count: data.counts.pending },
     { key: "changes", label: "Cambios solicitados", count: data.counts.changes },
     { key: "approved", label: "Aprobadas", count: data.counts.approved },
-    { key: "all", label: "Todas", count: data.counts.total },
   ];
+  const filtered = states.length > 0 || withComments || onlyNew;
   return (
     <>
       <section className="qa-portal-hero">
@@ -103,20 +119,61 @@ export function ClientReview({ campaignId }: { campaignId: string }) {
         </div>
         <ProgressSummary counts={data.counts} />
       </section>
-      <nav className="qa-portal-tabs" aria-label="Filtrar piezas">
+      <div className="qa-portal-tabs qa-filters" role="group" aria-label="Filtrar piezas">
         {tabs.map((t) => (
-          <button key={t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
-            {t.label} <span>{t.count}</span>
-          </button>
+          <label key={t.key} className={`qa-filter-check ${states.includes(t.key) ? "on" : ""}`}>
+            <input
+              type="checkbox"
+              checked={states.includes(t.key)}
+              onChange={() =>
+                setStates((prev) => (prev.includes(t.key) ? prev.filter((k) => k !== t.key) : [...prev, t.key]))
+              }
+            />
+            <span>{t.label}</span>
+            <em>{t.count}</em>
+          </label>
         ))}
-      </nav>
+        <span className="qa-filter-divider" />
+        <label className={`qa-filter-check ${withComments ? "on" : ""}`}>
+          <input type="checkbox" checked={withComments} onChange={() => setWithComments((v) => !v)} />
+          <span>Con comentarios</span>
+        </label>
+        <label className={`qa-filter-check ${onlyNew ? "on" : ""}`}>
+          <input type="checkbox" checked={onlyNew} onChange={() => setOnlyNew((v) => !v)} />
+          <span>Nuevas versiones</span>
+        </label>
+        <span className="qa-gallery-count">
+          {filtered ? `${items.length} de ${data.counts.total} piezas` : `${data.counts.total} piezas`}
+        </span>
+        {filtered && (
+          <button
+            type="button"
+            className="qa-filter-clear"
+            onClick={() => {
+              setStates([]);
+              setWithComments(false);
+              setOnlyNew(false);
+            }}
+          >
+            <X size={12} /> Ver todas
+          </button>
+        )}
+      </div>
       <GalleryGrid
         onOpen={setOpenId}
-        empty={<p>No hay piezas en esta pestaña.</p>}
+        empty={<p>No hay piezas con estos filtros.</p>}
         items={items.map((item) => {
           const label = portalClientState(item.state);
           return {
             id: item.id,
+            accent:
+              item.state === "changesRequested"
+                ? ("danger" as const)
+                : item.state === "approved"
+                  ? ("success" as const)
+                  : item.isNew
+                    ? ("client" as const)
+                    : undefined,
             title: item.title,
             meta: item.format,
             src: media({ item: item.id, variant: "preview" }),
@@ -143,7 +200,7 @@ export function ClientReview({ campaignId }: { campaignId: string }) {
       />
       {openId && order.length > 0 && (
         <ClientCarousel
-          order={order.map((i) => i.id)}
+          order={order}
           currentId={openId}
           onChange={setOpenId}
           onClose={() => setOpenId(null)}

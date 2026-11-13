@@ -9,6 +9,7 @@ import {
   UserRound,
   RotateCcw,
   Building2,
+  BadgeCheck,
 } from "lucide-react";
 import type {
   AiReviewState,
@@ -16,7 +17,7 @@ import type {
   ReviewTone,
 } from "@/app/lib/qa-visual/review-state";
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
-import { internalClientState } from "@/app/lib/qa-visual/client-state";
+import { finalApprovalState, internalClientState } from "@/app/lib/qa-visual/client-state";
 import type { PieceClientStatus } from "@/convex/qaVisual/clientReview";
 
 function StateIcon({
@@ -116,10 +117,12 @@ export function ReviewStatusBar({
   reanalyzing?: boolean;
   client?: PieceClientStatus | null;
 }) {
-  const clientState = client ? internalClientState(client) : null;
+  // The client card is always visible: internal approval alone does not finish a piece.
+  const clientState = internalClientState(client);
+  const final = finalApprovalState(client, human.tone === "success");
   return (
     <section
-      className={`review-status-strip ${clientState ? "with-client" : ""}`}
+      className="review-status-strip with-client"
       aria-label="Estado de revisión IA y aprobación humana"
     >
       <div className="ai-state-wrap">
@@ -197,22 +200,43 @@ export function ReviewStatusBar({
           )}
         </button>
       </div>
-      {clientState && (
-        <div
-          className={`review-state-card client-state-card tone-${clientState.tone}`}
-          role="group"
-          aria-label={`Revisión del cliente: ${clientState.label}`}
-        >
-          <span className="review-identity">
-            <Building2 size={20} />
+      <div
+        className={`review-state-card client-state-card tone-${final?.final ? "success" : clientState.tone} ${final?.final ? "final" : ""}`}
+        role="group"
+        aria-label={`Aprobación final del cliente: ${final?.title ?? clientState.label}`}
+      >
+        <span className="review-identity">
+          {final?.final ? <BadgeCheck size={22} /> : <Building2 size={20} />}
+        </span>
+        <span className="review-state-copy">
+          <span className="review-state-eyebrow">CLIENTE · APROBACIÓN FINAL</span>
+          <strong className="review-state-title">{final?.final ? "Aprobación final" : clientState.label}</strong>
+          <span className="review-state-detail">
+            {final && !final.final ? final.detail : clientState.detail}
           </span>
-          <span className="review-state-copy">
-            <span className="review-state-eyebrow">CLIENTE · DEFINITORIA</span>
-            <strong className="review-state-title">{clientState.label}</strong>
-            <span className="review-state-detail">{clientState.detail}</span>
-          </span>
-        </div>
-      )}
+        </span>
+      </div>
     </section>
+  );
+}
+
+/** Highlights whether the piece is finished: only the client's approval closes it. */
+export function FinalApprovalBanner({
+  client,
+  humanApproved,
+}: {
+  client?: PieceClientStatus | null;
+  humanApproved: boolean;
+}) {
+  const state = finalApprovalState(client, humanApproved);
+  if (!state) return null;
+  return (
+    <div className={`qa-final-banner tone-${state.tone} ${state.final ? "final" : ""}`} role="status">
+      {state.final ? <BadgeCheck size={18} /> : <Building2 size={16} />}
+      <div>
+        <b>{state.title}</b>
+        <span>{state.detail}</span>
+      </div>
+    </div>
   );
 }

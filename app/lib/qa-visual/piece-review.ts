@@ -10,7 +10,7 @@ import {
 import { buildAnalysisFeed } from "./analysis-feed";
 import { toReviewPieces } from "./piece-inventory";
 import { pieceKey } from "@/convex/qaVisual/model/normalize";
-import { internalClientState } from "./client-state";
+import { matchesPieceFilters, type PieceFilters } from "./piece-filters";
 
 /** Projects persisted review data without changing the AI result or stored threads. */
 export function buildPieceReview({
@@ -22,7 +22,7 @@ export function buildPieceReview({
   campaignId,
   filter,
   query,
-  statusFilter,
+  filters,
 }: {
   pieces: Piece[];
   currentPiece: Piece;
@@ -32,7 +32,7 @@ export function buildPieceReview({
   campaignId: string;
   filter: string;
   query: string;
-  statusFilter: string;
+  filters: PieceFilters;
 }) {
   const snapshotPiece = data?.file
     ? toReviewPieces(
@@ -266,14 +266,14 @@ export function buildPieceReview({
       `${p.name} ${p.phase} ${p.format} ${p.filename}`
         .toLowerCase()
         .includes(query.toLowerCase()) &&
-      (statusFilter === "all" ||
-        (statusFilter.startsWith("client:")
-          ? internalClientState(p.client).key === statusFilter.slice(7) ||
-            (statusFilter === "client:sent" && internalClientState(p.client).key === "viewed")
-          : statusFilter.startsWith("ai:")
-          ? results[p.id]?.[p.currentVersion ?? 1] === statusFilter.slice(3)
-          : (statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status) ===
-            statusFilter)),
+      matchesPieceFilters(
+        {
+          ai: results[p.id]?.[p.currentVersion ?? 1],
+          human: statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status,
+          client: p.client,
+        },
+        filters,
+      ),
   );
   const pieceMarks: Mark[] = (data?.threads ?? []).flatMap((thread): Mark[] => {
     const a = thread.anchor;

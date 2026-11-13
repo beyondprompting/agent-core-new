@@ -1,5 +1,7 @@
-import { Bot, Building2, Search, ShieldCheck, X } from "lucide-react";
-import { GalleryGrid } from "@/app/components/qa-visual/gallery/GalleryGrid";
+import { BadgeCheck, Bot, Building2, Search, ShieldCheck, X } from "lucide-react";
+import { GalleryGrid, type GalleryItem } from "@/app/components/qa-visual/gallery/GalleryGrid";
+import { PieceFilterMenu } from "@/app/components/qa-visual/gallery/PieceFilterMenu";
+import { clientFilterState, hasFinalApproval, needsAttention } from "@/app/lib/qa-visual/piece-filters";
 import { getAiReviewState, getHumanReviewState } from "@/app/lib/qa-visual/review-state";
 import { internalClientState, previewSrc } from "@/app/lib/qa-visual/client-state";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
@@ -20,7 +22,8 @@ export function InternalGallery({
   onClearSelection: () => void;
   onSend?: () => void;
 }) {
-  const { filteredPieces, results, statuses, query, setQuery, statusFilter, setStatusFilter } = session;
+  const { pieces, filteredPieces, results, statuses, query, setQuery, filters, setFilters } = session;
+  const finalCount = pieces.filter((p) => hasFinalApproval(p.client)).length;
   return (
     <section className="qa-gallery-view" aria-label="Galería de piezas">
       <div className="qa-gallery-toolbar">
@@ -38,33 +41,16 @@ export function InternalGallery({
             </button>
           )}
         </div>
-        <select
-          aria-label="Filtrar piezas por estado"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="all">Todos los estados</option>
-          <optgroup label="Revisión IA">
-            <option value="ai:findings">IA · Con hallazgos</option>
-            <option value="ai:validated">IA · Validada</option>
-            <option value="ai:partial">IA · Incompleta</option>
-            <option value="ai:failed">IA · Error</option>
-            <option value="ai:stale">IA · Desactualizada</option>
-          </optgroup>
-          <optgroup label="Aprobación interna">
-            <option value="Pendiente">Interna · Pendiente</option>
-            <option value="En revisión">Interna · En revisión</option>
-            <option value="Cambios solicitados">Interna · Cambios</option>
-            <option value="Aprobada">Interna · Aprobada</option>
-          </optgroup>
-          <optgroup label="Revisión del cliente">
-            <option value="client:none">Cliente · Sin enviar</option>
-            <option value="client:sent">Cliente · Por revisar</option>
-            <option value="client:changesRequested">Cliente · Pidió cambios</option>
-            <option value="client:approved">Cliente · Aprobada</option>
-          </optgroup>
-        </select>
-        <span className="qa-gallery-count">{filteredPieces.length} piezas</span>
+        <PieceFilterMenu filters={filters} onChange={setFilters} />
+        <span className="qa-gallery-count">
+          {filteredPieces.length === pieces.length
+            ? `${pieces.length} piezas`
+            : `${filteredPieces.length} de ${pieces.length} piezas`}
+          {" · "}
+          <span className="qa-final-count" title="Aprobadas por el cliente en su versión actual">
+            <BadgeCheck size={12} /> {finalCount} con aprobación final
+          </span>
+        </span>
         <span className="qa-grow" />
         {selected.size > 0 && (
           <div className="qa-selection-bar">
@@ -95,11 +81,28 @@ export function InternalGallery({
         }
         items={filteredPieces.map((p) => {
           const version = p.currentVersion ?? 1;
-          const ai = getAiReviewState(results[p.id]?.[version], []);
+          const aiStatus = results[p.id]?.[version];
+          const ai = getAiReviewState(aiStatus, []);
           const humanStatus = statuses[`${p.id}-${version}`] ?? p.status;
           const human = getHumanReviewState(humanStatus);
           const client = internalClientState(p.client);
           const versionId = p.pieceVersionId;
+          const final = hasFinalApproval(p.client);
+          const clientState = clientFilterState(p.client);
+          const accent: GalleryItem["accent"] = final
+            ? "success"
+            : clientState === "changesRequested" || humanStatus === "Cambios solicitados"
+              ? "danger"
+              : needsAttention({ ai: aiStatus, human: humanStatus, client: p.client })
+                ? "warning"
+                : undefined;
+          // Internal approval is a step; the client's approval of the current version closes the piece.
+          const flag =
+            humanStatus !== "Aprobada" || final ? undefined : clientState === "none" || clientState === "outdated" ? (
+              <span className="qa-flag info">Lista para enviar</span>
+            ) : clientState === "sent" ? (
+              <span className="qa-flag client">Esperando al cliente</span>
+            ) : undefined;
           return {
             id: p.id,
             title: p.name,
@@ -110,10 +113,13 @@ export function InternalGallery({
             unavailable: p.imageError,
             selectable: Boolean(versionId) && humanStatus === "Aprobada",
             selected: Boolean(versionId && selected.has(versionId)),
-            flags:
-              p.client?.internalAhead && humanStatus === "Aprobada" ? (
-                <span className="qa-flag info">Lista para enviar</span>
-              ) : undefined,
+            accent,
+            flags: flag,
+            badge: final ? (
+              <span className="qa-final-stamp" title={client.detail}>
+                <BadgeCheck size={13} /> Aprobación final
+              </span>
+            ) : undefined,
             footer: (
               <span className="qa-tri">
                 <span className={`qa-chip tone-${ai.tone}`} title={`IA · ${ai.title}`}>

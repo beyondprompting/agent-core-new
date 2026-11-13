@@ -21,7 +21,10 @@ export function internalClientState(status: PieceClientStatus | null | undefined
       : "";
   switch (status.state) {
     case "approved":
-      return { key: "approved", label: "Aprobada por el cliente", short: "Aprobada", detail: round + extra, tone: "success" };
+      // Only the client's approval of the current internal version is the final approval.
+      return status.internalAhead
+        ? { key: "approved", label: "El cliente aprobó una versión anterior", short: "Aprobó V ant.", detail: round + extra, tone: "neutral" }
+        : { key: "approved", label: "Aprobación final del cliente", short: "Aprobada", detail: round + extra, tone: "success" };
     case "changesRequested":
       return { key: "changesRequested", label: "El cliente pidió cambios", short: "Cambios", detail: round + extra, tone: "danger" };
     case "viewed":
@@ -40,3 +43,27 @@ export function portalClientState(state: ClientState) {
 
 export const previewSrc = (thumbnail?: string) =>
   thumbnail?.replace("variant=thumbnail", "variant=preview");
+
+/**
+ * Overall closing state of a piece. Internal approval is a step: the piece is only finished
+ * when the client approves the version that is current internally (§23.4).
+ */
+export function finalApprovalState(
+  status: PieceClientStatus | null | undefined,
+  internallyApproved: boolean,
+): { title: string; detail: string; tone: ClientTone | "warning"; final: boolean } | null {
+  const round = status ? `Ronda ${status.deliveryNumber} · V${status.clientVersion}` : "";
+  if (status?.state === "approved" && !status.internalAhead)
+    return { title: "Aprobación final", detail: `El cliente aprobó esta versión · ${round}`, tone: "success", final: true };
+  if (status?.state === "changesRequested" && !status.internalAhead)
+    return { title: "El cliente pidió cambios", detail: `Falta la aprobación final · ${round}`, tone: "danger", final: false };
+  if (!internallyApproved) return null;
+  if (!status || status.internalAhead)
+    return {
+      title: "Aprobada por el equipo · falta el cliente",
+      detail: status ? "Hay una versión nueva sin enviar. Enviala para la aprobación final." : "Enviala al cliente para la aprobación final.",
+      tone: "warning",
+      final: false,
+    };
+  return { title: "Aprobada por el equipo · esperando al cliente", detail: `La aprobación final es del cliente · ${round}`, tone: "client", final: false };
+}

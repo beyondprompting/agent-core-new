@@ -17,6 +17,8 @@ import {
 } from "@/app/lib/qa-visual/review-state";
 import { CampaignResources } from "./CampaignResources";
 import { internalClientState } from "@/app/lib/qa-visual/client-state";
+import { hasFinalApproval } from "@/app/lib/qa-visual/piece-filters";
+import { PieceFilterMenu } from "@/app/components/qa-visual/gallery/PieceFilterMenu";
 import { CampaignSummary } from "./CampaignSummary";
 import { usePieceKeyboardNavigation } from "@/app/hooks/qa-visual/use-piece-keyboard-navigation";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
@@ -31,8 +33,8 @@ export function FilesPanel({
     comments,
     query,
     setQuery,
-    statusFilter,
-    setStatusFilter,
+    filters,
+    setFilters,
     setLeftOpen,
     statuses,
     results,
@@ -62,7 +64,7 @@ export function FilesPanel({
     if (card.top < viewport.top) list.scrollTop += card.top - viewport.top;
     else if (card.bottom > viewport.bottom)
       list.scrollTop += card.bottom - viewport.bottom;
-  }, [activeId, leftTab, query, statusFilter, listRef]);
+  }, [activeId, leftTab, query, filters, listRef]);
 
   return (
     <aside className="files-panel" aria-label="Archivos de campaña">
@@ -108,32 +110,7 @@ export function FilesPanel({
             </div>
             <div className="file-filter">
               <span>PIEZAS DE LA CAMPAÑA</span>
-              <select
-                aria-label="Filtrar piezas por estado"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="all">Todos los estados</option>
-                <optgroup label="Revisión IA">
-                  <option value="ai:findings">IA · Con hallazgos</option>
-                  <option value="ai:validated">IA · Validada</option>
-                  <option value="ai:partial">IA · Incompleta</option>
-                  <option value="ai:analyzing">IA · Analizando</option>
-                  <option value="ai:failed">IA · Error</option>
-                </optgroup>
-                <optgroup label="Aprobación humana">
-                  <option value="Pendiente">Humana · Pendiente</option>
-                  <option value="En revisión">Humana · En revisión</option>
-                  <option value="Cambios solicitados">Humana · Cambios</option>
-                  <option value="Aprobada">Humana · Aprobada</option>
-                </optgroup>
-                <optgroup label="Revisión del cliente">
-                  <option value="client:none">Cliente · Sin enviar</option>
-                  <option value="client:sent">Cliente · Por revisar</option>
-                  <option value="client:changesRequested">Cliente · Pidió cambios</option>
-                  <option value="client:approved">Cliente · Aprobada</option>
-                </optgroup>
-              </select>
+              <PieceFilterMenu filters={filters} onChange={setFilters} quick={false} />
             </div>
           </div>
           <div
@@ -194,7 +171,9 @@ export function FilesPanel({
                           className={`qa-client-chip tone-${internalClientState(p.client).tone}`}
                           title={internalClientState(p.client).detail}
                         >
-                          Cliente · {internalClientState(p.client).short}
+                          {hasFinalApproval(p.client)
+                            ? "✓ Aprobación final"
+                            : `Cliente · ${internalClientState(p.client).short}`}
                         </span>
                       )}
                       {conversationCount > 0 && (
@@ -219,7 +198,7 @@ export function FilesPanel({
                 <button
                   onClick={() => {
                     setQuery("");
-                    setStatusFilter("all");
+                    setFilters([]);
                   }}
                 >
                   Limpiar filtros

@@ -1804,3 +1804,276 @@ Las transcripciones usan `SPEECH_KEY` y `SPEECH_REGION`, que la app ya tiene con
 - `ANALYSIS_POLICY_VERSION` pasa de `qa-visual-4` a `qa-visual-5`. Las revisiones anteriores se conservan como historial y quedan desactualizadas; no se reescriben sus dictámenes ni se reclasifican solo en la UI. Para aplicar la política a una campaña existente, **Actualizar desde Drive** genera entradas con la política nueva y luego se deben volver a analizar las piezas. Este cambio no ejecuta análisis automáticamente.
 - Pruebas de regresión en `qaVisualControls.test.ts`, `qaVisualDomain.test.ts` y `qaVisualVerdict.test.ts`: omisión de mes, componentes de fecha, formatos equivalentes, cantidades y CTA faltantes, ausencia frente a ilegibilidad, evaluación semántica de formatos no soportados, prioridad de hallazgos y conteo en la UI.
 - La evaluación con imágenes reales de §16 sigue siendo necesaria para medir errores de lectura y clasificación del modelo. Las pruebas deterministas no sustituyen esa evaluación visual.
+
+## 25 Plan: QA Visual para cualquier tipo de pieza gráfica
+
+> Plan sin implementar (13/11/2026). Objetivo: que QA Visual analice cualquier pieza gráfica sin suponer que tiene precio, fecha, producto u oferta. Lo único fijo es la estructura de carpetas y archivos de la campaña. El diseño de las piezas y el contenido del pedido pueden cambiar.
+
+### 25.1 Diagnóstico: dónde está acoplado hoy
+
+Hoy el sistema funciona bien con piezas promocionales de comida rápida: una oferta numerada, un precio, una fecha o "HOY", un canal (Domicilio, Express o Auto Rápido) y, a veces, un CTA. Ese supuesto aparece en todas las capas:
+
+| Capa | Archivo | Supuesto fijo | Qué pasa con otra pieza |
+| --- | --- | --- | --- |
+| Catálogo de controles | `convex/qaVisual/model/requirements.ts` (`ids`), `analysisInput.node.ts` (`baseline`) | Siempre los mismos 6 controles: `format`, `dimensions`, `product`, `price`, `date`, `cta`. | Una pieza institucional, de marca o de evento queda con `product`, `price` y `date` en "sin referencia" o "no verificable". El veredicto sale "incompleta" aunque la pieza esté bien, y no se controla lo que sí importa (titular, legales, logo, hashtag, URL, dirección, horario). |
+| Lectura de la matriz | `requirements.ts`, `clientMatrix.node.ts` | Pestañas `PRODUCCION`, `LEYENDA` y `REGLAS`, y celdas fijas: A–E identidad de la fila, G formato, I/J dimensiones, K ofertas numeradas, L precios numerados, P notas/CTA, `LEYENDA!C11` y `REGLAS!B6`. | Si la matriz de otro cliente u otra campaña usa otras columnas u otro idioma, los requisitos quedan vacíos o, peor, se leen de una columna equivocada. |
+| Lectura del CSV | `model/productionCsv.ts` | Columnas `TXT_PRODUCTO`, `TXT_PRECIO`, `SLOT_CTA`, `SLOT_FECHA`, `CAMPAÑA`, `FASE`, `CANAL`, `MEDIO_PLATAFORMA`, `FORMATO_TIPO`, `ANCHO_PX` y `ALTO_PX`, mapeadas a un tipo `ProductionFields` cerrado. | Cualquier otra columna del CSV (`TXT_TITULAR`, `TXT_LEGAL`, `URL`, `HASHTAG`…) se ignora. |
+| Vinculación de oferta | `model/linking.ts`, `model/offers.ts`, `model/normalize.ts` | Ofertas como lista numerada `1. …`, prefijos de canal `DOMICILIO\|EXPRESS\|AUTORAPIDO` y fechas en español (`temporal`, meses en español). | Sin lista numerada no hay vínculo. Otros canales u otros idiomas no se reconocen. |
+| Comparadores deterministas | `model/controls.ts`, `model/offers.ts` (`priceAmount`), `model/visibleDate.ts` | Solo `price` (formato `$8,99`) y `date` (día/mes en español). | Montos con miles, otras monedas, porcentajes ("-30 %"), cuotas ("12 cuotas sin interés") o rangos horarios no tienen comparador. |
+| Prompt | `model/prompt.ts` | Rol de "piezas publicitarias" con ejemplos de precio, fecha, "JUEVES 15", la app y "descargar". | El modelo recibe instrucciones irrelevantes y sesgos ("mencionar la app no equivale a invitar a descargarla") en piezas que no tienen nada de eso. |
+| Veredicto | `model/verdict.ts` | Un control es visual si no es `format` ni `dimensions`. | Un control técnico nuevo (peso, perfil de color, transparencia) se contaría como visual. |
+| Ficha del cliente | `model/clientBrief.ts` | Campos `product`, `price`, `date`, `cta` y canales `DOMICILIO/EXPRESS/AUTORAPIDO` para título y canal. | La ficha queda vacía o con títulos mal armados. |
+| Frontend | `app/lib/qa-visual/piece-inventory.ts`, `review-model.ts`, `PieceDetails.tsx`, `CommentCard.tsx`, `FilesPanel.tsx` | El tipo de pieza tiene `product`, `price`, `validity`, `cta`, `channel` y `phase`, con etiquetas fijas ("Oferta del cliente", "Precio solicitado", "Vigencia solicitada"). La selección manual de candidatos se llama "Oferta del cliente". | Los paneles muestran "—" en campos sin sentido para la pieza y no muestran los requisitos reales. |
+| Configuración heredada | `QA_VISUAL_RULES_JSON` + `QA_VISUAL_GOOGLE_FOLDER_ID` | Reglas extra por variable de entorno y para una sola carpeta. | No escala a varias campañas ni a varios clientes. |
+
+Lo que **no** está acoplado y se conserva tal cual: lectura de Drive en solo lectura, inventario de carpetas, identidad de piezas y versiones por `contentHash`, preparación de imágenes, los pools de análisis y el runner, la política de reintentos, la localización de comentarios (`box_2d` → región), los hilos, las aprobaciones, la revisión del cliente, la galería y el carrusel.
+
+### 25.2 Contrato estable: qué se puede seguir asumiendo
+
+1. **Carpetas:** la campaña tiene `RECURSOS`, `EDITABLES` y `DESPLIEGUE`. Las piezas finales están en `DESPLIEGUE`.
+2. **Archivos de referencia:** en `RECURSOS` hay una matriz del cliente (`.xlsx`) y un CSV de producción (`*_CONVERTED.csv`). El CSV tiene una columna de identidad de pieza (hoy `ID_PIEZA`) que coincide con el nombre del archivo de la pieza.
+3. **Pieza:** una imagen (hoy PNG o JPEG) por archivo, con dimensiones y formato reales que se pueden leer sin IA.
+
+Todo lo demás pasa a ser **configuración por campaña** o **contenido extraído del pedido**: nombres de columnas, pestañas, qué elementos se piden, cómo se comparan y cómo se muestran.
+
+### 25.3 Principios del rediseño
+
+1. **El pedido define los controles; el código no.** Una pieza se evalúa contra los elementos que el pedido exige para *esa* pieza, no contra una lista fija. Si el pedido no pide precio, no existe el control de precio (ni siquiera como "no aplica").
+2. **Tipos de control, no controles con nombre de dominio.** El código conoce *tipos* genéricos (texto requerido, importe, fecha o vigencia, llamado a la acción, logo o marca, texto legal, URL o contacto, elemento visual, técnico…). Cada requisito de una pieza es una *instancia* de un tipo, con una etiqueta legible que viene del pedido ("Titular", "Precio", "Hashtag de la campaña").
+3. **Mapeo de fuentes declarativo.** Cómo se lee la matriz y el CSV se describe en un **perfil de fuentes** (datos), no en `if` con letras de columna. El comportamiento actual pasa a ser el perfil `promo-ofertas-v1`.
+4. **Determinista cuando se puede, semántico cuando no.** Los comparadores deterministas quedan como *mejoras opcionales* por tipo. Si no reconocen el formato, se conserva la evaluación del modelo (misma política de §9.2.1).
+5. **Prompt compuesto.** Un prompt base sin ejemplos de dominio, más bloques por tipo de control presente en la pieza. Nada de "la app", "descargar" ni "JUEVES 15" en el prompt base.
+6. **Mismo contrato de salida.** El modelo sigue devolviendo un control por `ruleId` con `outcome`, `evidenceStatus`, `visibleText`, `missingElements` y `box_2d`. El runner, la validación de salida y la localización no cambian.
+7. **Paso a paso y reversible.** La primera etapa reproduce exactamente el comportamiento actual con la arquitectura nueva; las pruebas existentes deben seguir pasando sin cambios de resultado.
+8. **Alcance QA Visual.** No se toca la lógica de agentes que crean briefs y publicaciones del resto del proyecto. Si en el futuro se quiere usar ese brief como fuente, se lee como una fuente más en solo lectura (§25.6.4), sin modificar esos agentes.
+
+### 25.4 Catálogo de tipos de control
+
+Archivo nuevo: `convex/qaVisual/model/controlTypes.ts`. Cada tipo declara:
+
+```ts
+type ControlType = {
+  kind: string;                    // "text" | "amount" | "date" | ...
+  family: "technical" | "visual";  // reemplaza el if de verdict.ts
+  defaultSeverity: "warning" | "blocking";
+  defaultLabel: string;            // "Texto requerido"
+  promptBlock: string;             // instrucciones específicas del tipo (§25.7)
+  compare?: (expected: string, visible: string, ctx: CompareContext) => Comparison | undefined;
+  technical?: (expected: string, snapshot: ImageSnapshot) => { outcome: "pass" | "fail"; observed: string };
+};
+```
+
+Tipos iniciales:
+
+| `kind` | Familia | Qué controla | Comparador determinista | Notas |
+| --- | --- | --- | --- | --- |
+| `format` | technical | Formato real del archivo | Sí (actual) | Igual que hoy. |
+| `dimensions` | technical | Ancho × alto reales | Sí (actual) | Igual que hoy. Admitir tolerancia opcional. |
+| `fileSize` | technical | Peso máximo | Sí | Opcional, desde el perfil o una regla de la campaña. |
+| `text` | visual | Un texto que debe aparecer (titular, subtítulo, hashtag, nombre de producto o servicio) | Normalización opcional (mayúsculas, tildes, espacios) | `params.match`: `semantic` (por defecto), `exact` o `contains`. |
+| `amount` | visual | Importes, precios, porcentajes, cuotas, cantidades | Sí, con locale y moneda | Generaliza `priceAmount`: separadores de miles, `$`, `USD`, `€`, `%`, "x2". |
+| `date` | visual | Fecha, rango, vigencia, horario | Sí, con locale | Generaliza `visibleDate`: meses en varios idiomas, rangos "del 1 al 15", horarios. Mantiene la regla "no inferir el mes o año ausente". |
+| `cta` | visual | Llamado a la acción por intención | No | Evalúa la intención pedida (comprar, descargar, reservar, visitar). Sin ejemplos de dominio fijos. |
+| `legal` | visual | Texto legal, condiciones, bases | Opcional (presencia de frases clave) | Suele ser chico: el bloque del prompt pide indicar `unreadable` si no se puede leer y no inventar. |
+| `contact` | visual | URL, teléfono, dirección, @usuario | Sí (normalización de URL y teléfono) | |
+| `brand` | visual | Presencia de un logo o marca | No | Sin imagen de referencia, se evalúa por descripción ("logo de la marca X arriba a la derecha"). Con referencia, ver §25.6.3. |
+| `visual` | visual | Un elemento visual pedido ("foto del producto", "mostrar a dos personas") | No | Evaluación semántica pura. |
+| `prohibited` | visual | Algo que **no** debe aparecer (precio viejo, marca competidora, texto de otra campaña) | Opcional | Invierte la lógica: presencia confirmada = `fail`. |
+
+El `ruleId` de cada requisito pasa a ser un identificador estable por pieza (`text:titular`, `amount:precio`, `legal:bases`), y el `kind` determina el tipo. Los `ruleId` actuales (`product`, `price`, `date`, `cta`) se conservan en el perfil `promo-ofertas-v1` como alias de `text`, `amount`, `date` y `cta` para no invalidar el historial.
+
+### 25.5 Modelo de requisito genérico
+
+Cambios en `model/contracts.ts`:
+
+```ts
+requirement = {
+  ruleId: string,             // estable dentro de la pieza
+  kind: string,               // tipo del catálogo (§25.4)
+  label: string,              // "Titular", "Precio", "Bases legales": viene del perfil o del pedido
+  criterion?: string,         // instrucción específica opcional ("debe invitar a reservar")
+  params?: Record<string, string | number | boolean>, // match, locale, moneda, tolerancia
+  status, basis, expected, display, expectedAlternatives, sources, issueIds, // sin cambios
+  severity?: "warning" | "blocking", // si falta, se usa defaultSeverity del tipo
+}
+```
+
+- `source.file` suma `"brief"` (§25.6.4) y `"profile"` (valor fijo del perfil).
+- `issue.affects` sigue usando `ruleId`; las etiquetas para la UI salen de `requirement.label`.
+- `ANALYSIS_POLICY_VERSION` pasa a `qa-visual-6` y `PARSER_VERSION` a `6`. Las revisiones anteriores quedan como historial desactualizado (igual que en §24.5). La UI usa un mapa de compatibilidad (`product` → "Producto", `price` → "Precio"…) para mostrar resultados viejos sin `label`.
+- `qaVisualRuleSets` guarda la lista de `{ ruleId, kind, label, criterion, severity }` efectiva por campaña. La pieza solo recibe los que su pedido exige.
+
+### 25.6 Fuentes del pedido: perfiles de lectura
+
+#### 25.6.1 Perfil de fuentes
+
+Tabla nueva `qaVisualSourceProfiles` (o un campo `sourceProfile` en la campaña, si el perfil es propio de cada campaña):
+
+```ts
+{
+  key: "promo-ofertas-v1",
+  label: "Promoción con ofertas numeradas",
+  csv: {
+    pieceIdColumn: "ID_PIEZA",
+    identity: { campaign: "CAMPAÑA", phase: "FASE", channel: "CANAL", platform: "MEDIO_PLATAFORMA", format: "FORMATO_TIPO", width: "ANCHO_PX", height: "ALTO_PX" },
+    fields: [ // cada columna con contenido se convierte en un requisito de basis "production"
+      { column: "TXT_PRODUCTO", ruleId: "product", kind: "text", label: "Producto" },
+      { column: "TXT_PRECIO",   ruleId: "price",   kind: "amount", label: "Precio" },
+      { column: "SLOT_FECHA",   ruleId: "date",    kind: "date", label: "Vigencia" },
+      { column: "SLOT_CTA",     ruleId: "cta",     kind: "cta", label: "Llamado a la acción" },
+    ],
+  },
+  matrix: {
+    sheet: "PRODUCCION",
+    headerMatch: { column: "A", text: "CAMPAÑA" },
+    rowKey: [ { column: "A", csv: "campaign" }, { column: "B", csv: "phase" }, { column: "C", csv: "channel" }, { column: "D", csv: "platform" }, { column: "E", csv: "format", normalize: "formatLabel" } ],
+    fields: [
+      { column: "G", ruleId: "format", kind: "format" },
+      { columns: ["I", "J"], ruleId: "dimensions", kind: "dimensions" },
+      { column: "K", strategy: "numberedList", ruleId: "product", kind: "text", label: "Producto", linkBy: ["channel", "date"] },
+      { column: "L", strategy: "numberedList", ruleId: "price", kind: "amount", label: "Precio", sameOrdinalAs: "product" },
+      { column: "P", strategy: "linesMatching", pattern: "call to action|\\bcta\\b|^cpa\\s*:|^tagline\\s*:", ruleId: "cta", kind: "cta" },
+    ],
+    checks: [ "dimensionsLegend:LEYENDA!C11", "storiesWithoutOffer:REGLAS!B6" ],
+  },
+  vocabulary: { channels: ["DOMICILIO", "EXPRESS", "AUTORAPIDO"], language: "es", currency: "USD" },
+}
+```
+
+Puntos clave:
+
+- **Estrategias de lectura** reutilizables en `model/sourceStrategies.ts`: `cell` (valor directo), `numberedList` (lo que hoy hace `numbered` + `linkOffer`), `linesMatching` (lo que hoy hace la búsqueda de CTA en la columna P), `freeText` (texto completo como criterio, para notas libres) y `csvColumn`. `linking.ts` y `offers.ts` pasan a ser la implementación de `numberedList`, sin canales fijos: los prefijos se toman de `vocabulary.channels`.
+- **Columnas del CSV por convención:** además del mapeo explícito, toda columna con prefijo `TXT_` que no esté mapeada genera un requisito `kind: "text"` con la etiqueta derivada del nombre (`TXT_TITULAR` → "Titular"). Así, una campaña nueva con más textos en el CSV funciona sin tocar código. Las columnas `SLOT_*` (nombres de assets) siguen siendo solo referencia, no texto esperado.
+- **Chequeos del perfil**, como la leyenda de dimensiones o la regla de Stories sin oferta, quedan como funciones con nombre que el perfil activa. No se ejecutan en campañas que no las declaran.
+- `normalize.offerChannel`, `clientBrief.pieceChannel` y los regex de prefijos de `linking.ts` leen `vocabulary.channels` en lugar de la constante fija.
+- `ProductionFields` pasa de un tipo cerrado a `{ pieceId, identity: {...}, values: Record<string, string>, csvLine, duplicates }`.
+
+#### 25.6.2 Selección del perfil al dar de alta la campaña
+
+- En la verificación de la carpeta (`campaignRegistration.ts`, `driveSource.node.ts`) se **detecta** el perfil: se prueban los perfiles conocidos contra los encabezados del CSV y las pestañas y encabezados de la matriz, y se elige el de mayor coincidencia.
+- Si ninguno supera el umbral, la campaña se registra con el perfil `generico-csv-v1`: solo controles técnicos más las columnas `TXT_*` del CSV, más la extracción asistida de §25.6.3 si está habilitada.
+- La lista de verificación del alta suma una línea "Cómo se lee el pedido: *Promoción con ofertas numeradas*" con la cantidad de requisitos detectados por pieza (mín/máx). **Nota:** esto toca la pantalla de alta, que hoy está cerrada en diseño. Se propone solo agregar esa línea a la lista de verificación existente, sin rediseñarla, y requiere tu aprobación.
+- El perfil elegido se guarda en la campaña y entra en el `requirementsHash`; cambiarlo invalida los análisis vigentes como cualquier cambio del pedido.
+
+#### 25.6.3 Extracción asistida del pedido (matrices sin estructura fija)
+
+Para matrices que son texto libre (un brief en celdas, notas largas, varias piezas descritas en prosa):
+
+1. Acción `extractRequirements` ("use node", pool propio de baja concurrencia), que se ejecuta **una vez por versión de la matriz** (por `contentHash` de la matriz), no por análisis.
+2. Entrada: el texto de la fila vinculada (o de la sección de la matriz que corresponde a la pieza) y el catálogo de tipos. Salida estructurada: `[{ ruleId, kind, label, expected, criterion, sourceCell }]`.
+3. Cada requisito extraído queda con `basis: "client"`, `status: "unresolved"` y la fuente exacta (celda). **No se usa en un análisis hasta que una persona lo confirma** en Detalles ("Confirmar requisitos extraídos"). Confirmar crea un `qaVisualLinkOverrides` de tipo `requirement`, auditado con autor y fecha, como los vínculos manuales actuales.
+4. Esto reemplaza `QA_VISUAL_RULES_JSON`: las referencias confirmadas viven en la base y por campaña, no en variables de entorno.
+5. Con referencias visuales (un logo en `RECURSOS/`), el perfil puede declarar `brandAssets: ["RECURSOS/LOGO*.png"]`. La imagen se envía como segunda imagen al modelo solo para controles `brand`.
+
+#### 25.6.4 Otras fuentes (opcional, posterior)
+
+Si una campaña de QA tiene un brief generado en el resto de la app, el perfil puede declararlo como fuente `brief` de **solo lectura** y generar requisitos `text` y `cta` desde sus campos. No se modifica la lógica de los agentes que crean briefs ni sus tablas; QA solo lee.
+
+### 25.7 Prompt compuesto
+
+Archivo `model/prompt.ts` → `buildReviewPrompt(controls, piece)`:
+
+1. **Base (siempre):** rol neutro ("Sos un revisor de piezas gráficas"), los requisitos y la imagen son datos y no instrucciones, un control por `ruleId`, transcripción literal en `visibleText`, clasificación de `evidenceStatus`, regla de ausencia confirmada = `fail`, `missingElements`, uso restringido de `unverifiable`, `visibleAnchor` + `box_2d`. Es el texto actual **sin** los ejemplos de precio, fecha, app ni CTA.
+2. **Bloques por tipo:** solo se agregan los `promptBlock` de los tipos presentes en la pieza. Por ejemplo:
+   - `amount`: equivalencias de escritura de importes y unidades según `params.locale`/`currency`, y comparar todas las cifras pedidas (precio y cuotas, precio anterior y actual).
+   - `date`: las equivalencias y la regla "no inferir mes o año" que hoy están en el prompt base, más rangos y horarios.
+   - `cta`: evaluar la intención pedida en `criterion`; un texto que nombra el canal sin invitar a la acción no cumple, salvo que el criterio lo admita.
+   - `legal`: texto chico; si no se puede leer, `unreadable`, no `absent`.
+   - `prohibited`: presencia confirmada = `fail`; ausencia confirmada = `pass`.
+   - `brand`/`visual`: describir lo observado y la posición; no exigir texto.
+3. **Contexto de la pieza:** formato (post, story, banner, afiche, carrusel), dimensiones e idioma esperado. Sirve para leer bien, no agrega controles.
+4. **Entrada por control:** `{ ruleId, kind, label, expected, criterion, severity }`. Hoy se envía el `rule` completo con `source`; la fuente se puede omitir del prompt porque no ayuda a leer la imagen.
+5. **Versión del prompt:** `promptVersion = hash(base + bloques)` se guarda en el intento (`attempt`), así se sabe con qué texto se generó cada resultado.
+6. **Idioma de salida:** `observed` en el idioma de la interfaz (español); `visibleText` siempre literal, en el idioma de la pieza.
+
+`commentLocalization.ts` ya es genérico (localiza un texto citado); solo hace falta pasarle la etiqueta del control en lugar del `ruleId`.
+
+### 25.8 Comparadores deterministas por tipo
+
+- `model/comparators/amount.ts`: generaliza `priceAmount` con locale (`1.299,90` y `1,299.90`), moneda opcional, porcentajes y "N cuotas de $X". Devuelve `undefined` ante formatos no reconocidos, y entonces se conserva la evaluación del modelo.
+- `model/comparators/date.ts`: generaliza `visibleDate`/`temporal` con meses y días en `es`, `en` y `pt`, rangos ("del 1 al 15 de octubre", "1–15/10"), "hasta el …" y horarios. Mantiene el chequeo de componentes omitidos (día, mes, año).
+- `model/comparators/text.ts`: normalización (tildes, mayúsculas, espacios, comillas tipográficas) para `match: "exact" | "contains"`. Con `semantic` no hay comparador.
+- `model/comparators/contact.ts`: URL (sin protocolo, sin `www`, sin barra final) y teléfono (solo dígitos).
+- `resolveVisualControl` (`controls.ts`) cambia `["price", "date"].includes(ruleId)` por `controlTypes[kind].compare`, sin cambiar la política de §9.2.1.
+- `worker.ts` cambia `rule.id === "dimensions" || rule.id === "format"` por `controlTypes[kind].family === "technical"` y llama a `technical()`.
+
+### 25.9 Controles generales sin pedido (opcional por campaña)
+
+Hay errores que importan en cualquier pieza aunque el pedido no los mencione: faltas de ortografía, texto cortado por el borde, texto ilegible por contraste, elementos fuera de la zona segura de Stories, o adaptaciones de la misma pieza con textos distintos.
+
+- Se agregan como **observaciones de calidad**, separadas de los controles del pedido: `generalChecks: ["spelling", "cutText", "contrast", "safeArea"]` en la campaña.
+- El modelo los devuelve en un arreglo aparte `observations[]` (`{ kind, observed, visibleAnchor, box_2d, confidence }`), en la misma llamada.
+- **No cambian el veredicto** (Validada, Con hallazgos, Incompleta) salvo que la campaña los marque como bloqueantes. En la UI se muestran como comentarios del agente con la etiqueta "Calidad" y se pueden descartar.
+- Zona segura: depende del formato (por ejemplo, Story 1080 × 1920 con márgenes superior e inferior). Se define en el perfil por formato y se envía como contexto.
+- **Consistencia entre adaptaciones** (post y story de la misma oferta con textos distintos): se resuelve después, comparando los `visibleText` ya guardados de piezas del mismo grupo, sin otra llamada al modelo. Queda para una etapa posterior.
+
+### 25.10 Veredicto y cobertura
+
+- `verdict.ts`: `visual = controlTypes[requirement.kind].family === "visual"`. El resto del cálculo no cambia.
+- Las razones del veredicto usan `requirement.label` ("Falta el titular", "El precio no coincide") en lugar de nombres fijos.
+- Una pieza **sin requisitos visuales** (solo técnicos) sigue pudiendo quedar Validada. La UI debe aclararlo: "Solo se verificaron formato y dimensiones: el pedido no indica contenido para esta pieza". Así se evita que "Validada" parezca una revisión de contenido.
+
+### 25.11 Cambios en el frontend (solo QA Visual)
+
+| Archivo | Cambio |
+| --- | --- |
+| `app/lib/qa-visual/review-model.ts`, `piece-inventory.ts` | Se reemplazan `product`, `price`, `validity`, `cta`, `channel` y `phase` por `attributes: { key, label, value }[]` (identidad de la fila: campaña, fase, canal, plataforma, si el perfil los define) y `requirements: { ruleId, label, expected }[]`. El título de la pieza sale de una plantilla del perfil (`titleTemplate: "{product} · {channel}"`) o, si falta, del nombre del archivo. |
+| `piece/PieceDetails.tsx` | La lista "Qué se pidió" se arma dinámicamente con `label` + `expected` + cadena de origen. Se eliminan las etiquetas fijas "Oferta del cliente", "Precio solicitado" y "Vigencia solicitada". |
+| `comments/CommentCard.tsx` | "Afecta: …" usa las etiquetas de los requisitos. El selector de candidatos ("Oferta del cliente") pasa a "Elegí la referencia correcta" y solo aparece si la estrategia es `numberedList`. |
+| `campaign/FilesPanel.tsx`, galería | Los filtros por canal y fase se generan a partir de los `attributes` presentes. Si la campaña no tiene canal, el filtro no aparece. |
+| `model/clientBrief.ts` + portal del cliente | La ficha del pedido muestra los requisitos `basis: "client"` listos con su `label`, sin la lista fija `product/price/date/cta`. `availableFields` se calcula desde los requisitos de las piezas enviadas. |
+| Bloque IA del editor y del carrusel | El detalle "5 de 6 controles cumplen" no cambia. El texto de los controles agrupados ("formato, dimensiones, producto, precio y vigencia") se arma con las etiquetas reales. |
+| Detalles → requisitos extraídos | Bloque nuevo "Requisitos sugeridos por IA, sin confirmar" con **Confirmar** / **Descartar** por requisito (§25.6.3). |
+
+### 25.12 Formatos de pieza
+
+- Hoy: PNG y JPEG. Agregar **WEBP** (misma preparación de imagen) en la primera etapa.
+- **PDF de una página** (afiches, flyers): rasterizar la primera página en la preparación (`imagePreparation.node.ts`) y tratarla como imagen. Si tiene varias páginas, cada página es una pieza o el perfil declara "solo la página 1". Hay que decidir cuál.
+- **Carruseles:** hoy cada imagen es una pieza. Agrupar las placas de un carrusel por prefijo de nombre (`…_CARRUSEL_01`, `_02`) para mostrarlas juntas y evaluar requisitos que aplican al conjunto ("el precio aparece en alguna placa"). Es una etapa posterior: requiere un control de alcance `group`.
+- **GIF o video:** fuera de alcance. Se listan en el inventario como "formato no admitido para análisis", sin error de importación.
+
+### 25.13 Evaluación (requisito antes de activar)
+
+Ampliar el dataset de §16 y de la etapa 7 con piezas **distintas** a las de prueba actuales:
+
+| Grupo | Ejemplos | Qué mide |
+| --- | --- | --- |
+| Promoción con precio (actual) | Las piezas de Semana de Locura | Que la etapa A no cambie resultados (regresión). |
+| Marca o institucional sin precio | Titular + logo + claim | Que no aparezcan controles de precio o fecha y que se evalúe el titular. |
+| Evento | Fecha y hora, lugar, URL de entradas | `date` con horario, `contact`. |
+| Financiera o retail | "12 cuotas sin interés", "-30 %", precio anterior tachado | `amount` con varias cifras, `prohibited`. |
+| Legales largos | Bases y condiciones en letra chica | `legal` con `unreadable` correcto. |
+| Otro idioma | Pieza en inglés o portugués | Locale de comparadores y `visibleText` literal. |
+| Sin pedido | Pieza sin fila en CSV ni matriz | Solo técnicos + aviso claro, sin "Incompleta" engañosa. |
+| Story con zona segura | Texto pegado al borde | Observación `safeArea` (§25.9). |
+
+Métricas por **tipo de control**: falsos positivos (`fail` en pieza correcta), falsos negativos, tasa de `unverifiable`, precisión de `box_2d` y costo y latencia por pieza. Un cambio de prompt o de comparador solo se activa si no empeora ninguna métrica del grupo de regresión.
+
+Pruebas deterministas nuevas: `qaVisualControlTypes.test.ts` (catálogo y familias), `qaVisualSourceProfiles.test.ts` (perfil `promo-ofertas-v1` = resultados idénticos a los de hoy sobre las matrices de prueba; perfil genérico con columnas `TXT_*`), `qaVisualComparators.test.ts` (importes y fechas por locale) y `qaVisualPrompt.test.ts` (el prompt de una pieza sin precio no contiene el bloque `amount`).
+
+### 25.14 Etapas de implementación
+
+Cada etapa se puede publicar sola y no rompe las campañas existentes.
+
+| Etapa | Contenido | Archivos principales | Criterio de terminado |
+| --- | --- | --- | --- |
+| **A. Refactor sin cambio de comportamiento** | Catálogo de tipos (§25.4) con `format`, `dimensions`, `text`, `amount`, `date` y `cta`. Requisito con `kind` y `label`. Perfil `promo-ofertas-v1` que reproduce las reglas actuales (columnas, `numberedList`, chequeos de LEYENDA y REGLAS). `verdict.ts`, `controls.ts` y `worker.ts` despachan por `kind`. | `model/controlTypes.ts`, `model/sourceProfiles.ts`, `model/sourceStrategies.ts`, `requirements.ts`, `productionCsv.ts`, `controls.ts`, `verdict.ts`, `worker.ts`, `contracts.ts` | Todas las pruebas QA actuales pasan sin cambiar los resultados esperados. La política pasa a `qa-visual-6`. |
+| **B. Prompt compuesto** | Prompt base neutro + bloques por tipo + contexto de pieza + `promptVersion`. | `model/prompt.ts`, `worker.ts`, `commentLocalization.ts` | Prueba de prompt por tipo. Evaluación del grupo de regresión sin empeorar. |
+| **C. UI dinámica** | `attributes`/`requirements` en el modelo de pieza, Detalles, comentarios, filtros, ficha del cliente y título por plantilla. Compatibilidad con resultados viejos. | §25.11 | Una campaña con perfil genérico se ve sin campos "—" ni etiquetas de oferta. |
+| **D. Perfiles configurables y detección** | Tabla de perfiles, detección en el alta, perfil `generico-csv-v1`, columnas `TXT_*` por convención, vocabulario de canales. | `tables.ts`, `campaignRegistration.ts`, `driveSource.node.ts`, `analysisInput.node.ts` | Una carpeta con otro CSV (otras columnas `TXT_*`) genera requisitos correctos sin tocar código. |
+| **E. Tipos nuevos y comparadores** | `legal`, `contact`, `brand`, `visual`, `prohibited`, `fileSize`. Comparadores por locale. WEBP. | `model/comparators/*`, `controlTypes.ts`, `imagePreparation.node.ts` | Pruebas de comparadores y evaluación de los grupos Evento, Financiera y Otro idioma. |
+| **F. Extracción asistida y confirmación** | `extractRequirements` + bloque de confirmación en Detalles. Retiro de `QA_VISUAL_RULES_JSON`. | `extractRequirements.ts` (nuevo), `overrides.ts`, `PieceDetails.tsx` | Una matriz en texto libre produce requisitos sugeridos que, una vez confirmados, se analizan. Sin confirmación no se usan. |
+| **G. Controles generales** | `observations[]`, zona segura por formato, opción por campaña. | `prompt.ts`, `worker.ts`, `validators.ts`, UI de comentarios | Las observaciones no cambian el veredicto salvo que estén configuradas como bloqueantes. |
+| **H. Posterior** | PDF, carruseles agrupados, consistencia entre adaptaciones, brief de la app como fuente de solo lectura. | — | Según §25.15. |
+
+Orden recomendado: A → B → C (con eso, piezas sin precio ya se ven y se evalúan bien con las columnas actuales) → D → E → F → G.
+
+### 25.15 Riesgos y decisiones abiertas
+
+1. **Matrices sin estructura:** si la matriz de otro cliente no tiene filas por pieza, la única vía es la extracción asistida (§25.6.3). Su calidad depende del modelo y siempre requiere confirmación humana, lo que suma trabajo al equipo. Decisión: ¿se acepta ese paso manual o se exige al cliente una plantilla mínima?
+2. **Columnas `TXT_*` por convención:** es simple y potente, pero una columna con texto interno (notas de producción) se convertiría en requisito. Mitigación: el perfil puede excluir columnas y la lista de verificación del alta las muestra.
+3. **Controles generales y ruido:** la ortografía y el contraste generan falsos positivos. Por eso son observaciones descartables y no cuentan para el veredicto por defecto.
+4. **Costo:** más tipos y bloques significan prompts algo más largos, pero se envían solo los bloques presentes. La extracción asistida corre una vez por versión de la matriz, no por análisis.
+5. **Compatibilidad:** los resultados con `qa-visual-5` se conservan como historial. No se reclasifican; se vuelve a analizar como en §24.5.
+6. **Alta de campaña:** la detección de perfil agrega una línea a la lista de verificación existente. Hay que confirmar si se acepta ese cambio mínimo en una pantalla ya cerrada.
+7. **PDF multipágina y carruseles:** hay que decidir si cada página o placa es una pieza o si se agrupan.

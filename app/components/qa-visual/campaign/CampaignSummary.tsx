@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  BadgeCheck,
   Check,
   Eye,
   FileImage,
@@ -15,6 +16,7 @@ import type {
   ReviewFeed,
 } from "@/app/lib/qa-visual/review-model";
 import { getAiReviewState } from "@/app/lib/qa-visual/review-state";
+import { hasFinalApproval } from "@/app/lib/qa-visual/piece-filters";
 
 export function CampaignSummary({
   items,
@@ -35,6 +37,7 @@ export function CampaignSummary({
     (p) =>
       (statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status) === "Aprobada",
   ).length;
+  const finalApproved = items.filter((p) => hasFinalApproval(p.client)).length;
   const unresolved =
     items.reduce((total, p) => total + (p.openThreads ?? 0), 0) +
     comments.filter(
@@ -69,7 +72,14 @@ export function CampaignSummary({
           <strong>
             {approved} / {items.length}
           </strong>
-          <span>Aprobadas por personas</span>
+          <span>Aprobadas por el equipo</span>
+        </div>
+        <div className="overview-final">
+          <BadgeCheck size={16} />
+          <strong>
+            {finalApproved} / {items.length}
+          </strong>
+          <span>Aprobación final del cliente</span>
         </div>
         <div>
           <Layers size={16} />

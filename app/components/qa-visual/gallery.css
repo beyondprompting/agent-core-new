@@ -227,3 +227,58 @@ html.dark .qa-visual .button.qa-approve,.dark .qa-visual .button.qa-approve{colo
 .qa-visual .qa-gallery-toolbar select{height:34px}
 .qa-visual .campaign-actions{min-width:0}
 @media (max-width:1440px){.qa-visual .campaign-actions .qa-collapsible-label{display:none}.qa-visual .campaign-actions .button:has(.qa-collapsible-label){padding:0 9px}}
+
+/* Cards destacadas: hallazgos (ámbar), cambios pedidos (rojo), aprobación final (verde) */
+.qa-visual .qa-gallery-card.accent{background:linear-gradient(var(--tone-bg),var(--tone-bg)) padding-box,var(--surface);box-shadow:0 1px 2px #0000000a,0 0 0 1.5px color-mix(in srgb,var(--tone) 55%,transparent)}
+.qa-visual .qa-gallery-card.accent::before{content:"";position:absolute;left:14px;right:14px;top:0;height:3px;border-radius:0 0 3px 3px;background:var(--tone)}
+.qa-visual .qa-gallery-card.accent.selected{box-shadow:0 0 0 2px var(--primary-color)}
+.qa-visual .qa-gallery-card.accent .qa-gallery-open strong{color:var(--text)}
+.qa-visual .qa-final-stamp{position:absolute;left:8px;bottom:8px;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:6px;font-size:11px;font-weight:750;background:var(--success);color:#fff;box-shadow:0 2px 8px #0004}
+html.dark .qa-visual .qa-final-stamp,.dark .qa-visual .qa-final-stamp{color:#0f1f19}
+.qa-visual .qa-flag.client{color:var(--client)}
+.qa-visual .qa-final-count{display:inline-flex;align-items:center;gap:4px;color:var(--success);font-weight:650}
+
+/* Filtros con checkbox */
+.qa-visual .qa-filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.qa-visual .qa-filter-check{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted-text);font-size:12px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
+.qa-visual .qa-filter-check:hover{border-color:var(--primary-medium)}
+.qa-visual .qa-filter-check input{width:14px;height:14px;margin:0;accent-color:var(--primary-color);cursor:pointer}
+.qa-visual .qa-filter-check.on{background:var(--primary-soft);border-color:var(--primary-medium);color:var(--primary-color)}
+.qa-visual .qa-filter-check em{font-style:normal;font-size:11px;padding:0 6px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line)}
+.qa-visual .qa-filter-menu{position:relative}
+.qa-visual .qa-filter-button{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted-text);font-size:12px;font-weight:600;white-space:nowrap}
+.qa-visual .qa-filter-button.on{border-color:var(--primary-medium);color:var(--primary-color)}
+.qa-visual .qa-filter-count{display:inline-grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--primary-color);color:#fff;font-size:10.5px}
+.qa-visual .qa-filter-popover{position:absolute;top:calc(100% + 6px);z-index:30;width:260px;max-height:min(70dvh,520px);overflow:auto;padding:8px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow,0 12px 36px #1e294919);display:flex;flex-direction:column;gap:4px}
+.qa-visual .qa-filter-popover.left{left:0}.qa-visual .qa-filter-popover.right{right:0}
+.qa-visual .qa-filter-popover fieldset{border:0;margin:0;padding:4px 0 6px;display:flex;flex-direction:column;gap:2px;border-bottom:1px solid var(--line)}
+.qa-visual .qa-filter-popover fieldset:last-of-type{border-bottom:0}
+.qa-visual .qa-filter-popover legend{padding:4px 6px;font-size:10.5px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.05em}
+.qa-visual .qa-filter-popover .qa-filter-check{height:30px;border:0;background:transparent;border-radius:7px;padding:0 6px;color:var(--text);font-weight:500;white-space:normal}
+.qa-visual .qa-filter-popover .qa-filter-check:hover{background:var(--surface-hover)}
+.qa-visual .qa-filter-popover .qa-filter-check.on{background:var(--primary-soft);color:var(--primary-color)}
+.qa-visual .qa-filter-help{margin:4px 6px 2px;font-size:11px;color:var(--subtle);line-height:1.4}
+.qa-visual .qa-filter-clear{display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 8px;border-radius:8px;font-size:12px;font-weight:600;color:var(--primary-color)}
+.qa-visual .qa-filter-clear:hover{background:var(--primary-soft)}
+.qa-visual .qa-filter-divider{width:1px;height:20px;background:var(--line);margin:0 4px}
+.qa-visual .file-filter .qa-filters{gap:4px}
+.qa-visual .file-filter .qa-filter-button,.qa-visual .file-filter .qa-filter-clear{height:28px;font-size:11px;padding:0 8px}
+.qa-portal-tabs.qa-filters{align-items:center}
+.qa-portal-tabs .qa-gallery-count{margin-left:6px}
+
+/* Aprobación final del cliente */
+.qa-visual .qa-carousel-filter{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border-radius:8px;background:#a49aff33;color:#d6d0ff;font-size:12px;font-weight:650;white-space:nowrap}
+.qa-visual .qa-final-banner{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--tone-bg);color:var(--tone);border:1px solid color-mix(in srgb,var(--tone) 35%,transparent)}
+.qa-visual .qa-final-banner>div{display:flex;flex-direction:column;gap:2px;min-width:0;line-height:1.3}
+.qa-visual .qa-final-banner b{font-size:13px}
+.qa-visual .qa-final-banner span{font-size:11.5px;color:var(--muted-text)}
+.qa-visual .qa-final-banner.final{background:var(--success);color:#fff;border-color:transparent}
+.qa-visual .qa-final-banner.final span{color:#ffffffd9}
+html.dark .qa-visual .qa-final-banner.final,.dark .qa-visual .qa-final-banner.final{color:#0f1f19}
+html.dark .qa-visual .qa-final-banner.final span,.dark .qa-visual .qa-final-banner.final span{color:#0f1f19cc}
+.qa-visual .qa-state.final{box-shadow:inset 0 0 0 1.5px var(--success)}
+.qa-visual .client-state-card.final{box-shadow:inset 0 0 0 1.5px var(--success)}
+.qa-visual .overview-stat-grid>.overview-final svg{color:var(--success)}
+@media (max-width:767px){
+  .qa-visual .qa-gallery-toolbar .qa-filter-check span{max-width:150px;overflow:hidden;text-overflow:ellipsis}
+}

@@ -596,7 +596,7 @@ test("completed results from a previous policy are stale before reimport and req
     campaignId: s.campaignId,
     filter: "all",
     query: "",
-    statusFilter: "all",
+    filters: [],
   });
   assert.equal(projection.aiReview.status, "stale");
   assert.equal(projection.aiReview.tone, "neutral");

@@ -14,6 +14,8 @@ export type GalleryItem = {
   selectable?: boolean;
   selected?: boolean;
   unavailable?: string;
+  /** Colors the card so pieces that need attention (or are finished) stand out. */
+  accent?: "warning" | "danger" | "success" | "client";
 };
 
 /** Grid of pieces in their real proportion (Post 1:1, Story 9:16), shared by the editor and the portal. */
@@ -36,7 +38,10 @@ export function GalleryGrid({
       {items.map((item) => {
         const portrait = item.width && item.height ? item.height > item.width * 1.15 : false;
         return (
-          <li key={item.id} className={`qa-gallery-card ${item.selected ? "selected" : ""}`}>
+          <li
+            key={item.id}
+            className={`qa-gallery-card ${item.selected ? "selected" : ""} ${item.accent ? `accent tone-${item.accent}` : ""}`}
+          >
             {item.selectable && onToggle && (
               <button
                 type="button"

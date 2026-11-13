@@ -15,6 +15,7 @@ import {
 import { usePieceReview } from "./use-piece-review";
 import { uploadRecording, type Recording } from "./use-voice-recorder";
 import type { QaInventory } from "@/app/lib/qa-visual/source";
+import type { PieceFilterKey } from "@/app/lib/qa-visual/piece-filters";
 import type { ReviewLocation } from "@/app/lib/qa-visual/review-location";
 import type { Anchor } from "@/convex/qaVisual/model/collaboration";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -65,7 +66,7 @@ export function useReviewSession(
   } | null>(null);
   const [filter, setFilter] = useState("all"),
     [query, setQuery] = useState(""),
-    [statusFilter, setStatusFilter] = useState("all");
+    [filters, setFilters] = useState<PieceFilterKey[]>([]);
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyToState] = useState<Comment["id"] | null>(null);
   // In client threads a reply is a private note unless the reviewer chooses to answer the client.
@@ -140,7 +141,7 @@ export function useReviewSession(
     campaignId,
     filter,
     query,
-    statusFilter,
+    filters,
   });
   const activePieces = pieces;
   if (pendingMark) pieceMarks.push(pendingMark);
@@ -483,12 +484,12 @@ export function useReviewSession(
     setRightTab,
     setSelected,
     setShowPins,
-    setStatusFilter,
+    setFilters,
     setToast,
     setTool,
     setZoom,
     showPins,
-    statusFilter,
+    filters,
     statuses,
     toast,
     toggleResolved,

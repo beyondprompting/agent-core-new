@@ -1,6 +1,8 @@
 "use client";
 
-import { Bot, Building2, CheckCheck, Columns3, MessageSquare, RotateCcw, ShieldCheck } from "lucide-react";
+import { BadgeCheck, Bot, Building2, CheckCheck, Columns3, ListFilter, MessageSquare, RotateCcw, ShieldCheck } from "lucide-react";
+import { FinalApprovalBanner } from "@/app/components/qa-visual/piece/review-status";
+import { carouselOrder, hasFinalApproval } from "@/app/lib/qa-visual/piece-filters";
 import { CarouselShell } from "@/app/components/qa-visual/carousel/CarouselShell";
 import { internalClientState } from "@/app/lib/qa-visual/client-state";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
@@ -21,13 +23,20 @@ export function InternalCarousel({
 }) {
   const { filteredPieces, piece, activeId, choosePiece, aiReview, humanReview, pieceComments, version } =
     session;
-  const order = filteredPieces.length ? filteredPieces : session.pieces;
-  const index = Math.max(0, order.findIndex((p) => p.id === activeId));
+  // The carousel walks the filtered gallery; the open piece stays until the reviewer moves on.
+  const order = carouselOrder(
+    filteredPieces.map((p) => p.id),
+    session.pieces.map((p) => p.id),
+    activeId,
+  );
+  const index = Math.max(0, order.indexOf(activeId));
   const go = (delta: number) => {
     if (order.length < 2) return;
-    choosePiece(order[(index + delta + order.length) % order.length].id);
+    choosePiece(order[(index + delta + order.length) % order.length]);
   };
   const client = internalClientState(piece.client);
+  const final = hasFinalApproval(piece.client);
+  const filtered = session.filters.length > 0 || session.query.trim().length > 0;
   const clientThreads = (session.detail?.threads ?? []).filter((t) => t.audience === "client");
   const markers = pieceComments.filter((c) => c.pin);
   const ratio = piece.width && piece.height ? piece.width / piece.height : 1;
@@ -42,10 +51,17 @@ export function InternalCarousel({
       onClose={onClose}
       onComment={onOpenDetailed}
       toolbar={
+        <>
+        {filtered && (
+          <span className="qa-carousel-filter" title="El carrusel recorre solo las piezas del filtro activo">
+            <ListFilter size={13} /> Filtrado
+          </span>
+        )}
         <button className="qa-carousel-btn" onClick={onOpenDetailed}>
           <Columns3 size={14} />
           Abrir en revisión detallada
         </button>
+        </>
       }
       stage={
         <div
@@ -80,6 +96,7 @@ export function InternalCarousel({
       panel={
         <>
           <div className="qa-panel-section">
+            <FinalApprovalBanner client={piece.client} humanApproved={humanReview.tone === "success"} />
             <h4>Estados de esta versión</h4>
             <div className={`qa-state tone-${aiReview.tone}`}>
               <Bot size={15} />
@@ -108,8 +125,8 @@ export function InternalCarousel({
                 <span>{humanReview.detail}</span>
               </div>
             </div>
-            <div className={`qa-state tone-${client.tone}`}>
-              <Building2 size={15} />
+            <div className={`qa-state tone-${client.tone} ${final ? "final" : ""}`}>
+              {final ? <BadgeCheck size={15} /> : <Building2 size={15} />}
               <div>
                 <small>Cliente · definitoria</small>
                 <b>{client.label}</b>
