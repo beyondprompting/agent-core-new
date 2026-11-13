@@ -138,10 +138,10 @@ export function ReviewStatusBar({
           <RotateCcw size={13} />
         </button>
       )}
-      <button
-        className={`review-state-card ai-state-card state-${ai.tone}`}
-        onClick={onOpenAi}
-        aria-label={`Revisión IA: ${ai.title}. Ver resultado`}
+      <div
+        className={`review-state-card review-action-card ai-state-card state-${ai.tone}`}
+        role="group"
+        aria-label={`Revisión IA: ${ai.title}`}
       >
         <span className="review-identity robot-identity">
           <Avatar type="robot" />
@@ -154,16 +154,21 @@ export function ReviewStatusBar({
           <strong className="review-state-title">{ai.title}</strong>
           <span className="review-state-detail">{ai.detail}</span>
         </span>
-        <span className="review-state-action">
+        <button
+          type="button"
+          className="button secondary piece-review-action"
+          onClick={onOpenAi}
+          aria-label={`Revisión IA: ${ai.title}. Ver resultado`}
+        >
           <span>
             {ai.status === "findings" ? "Ver hallazgos" : "Ver revisión"}
           </span>
           <ArrowUpRight size={14} />
-        </span>
-      </button>
+        </button>
+      </div>
       </div>
       <div
-        className={`review-state-card human-state-card state-${human.tone}`}
+        className={`review-state-card review-action-card human-state-card state-${human.tone}`}
         role="group"
         aria-label={`Aprobación humana de ${pieceName}, versión ${version}: ${human.title}`}
       >
@@ -183,7 +188,7 @@ export function ReviewStatusBar({
           <span className="review-state-detail">{human.detail}</span>
         </span>
         <button
-          className={`button ${human.tone === "success" ? "secondary" : "primary"} piece-approval-action`}
+          className={`button ${human.tone === "success" ? "secondary" : "primary"} piece-review-action`}
           onClick={onOpenHuman}
           aria-label={`${human.tone === "success" ? "Ver decisión" : "Aprobar esta versión"}: ${pieceName}, versión ${version}`}
         >

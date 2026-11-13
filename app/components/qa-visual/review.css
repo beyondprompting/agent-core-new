@@ -120,17 +120,18 @@ html.dark .qa-visual .workspace{--primary-color:#a49aff;--primary-soft:#2c2850;-
 
 .qa-visual .qa-summary.state-success{background:var(--success-bg)}.qa-visual .qa-summary.state-success .ai-badge{color:var(--success)}.qa-visual .qa-summary.state-danger{background:var(--danger-bg)}.qa-visual .qa-summary.state-danger .ai-badge{color:var(--danger)}.qa-visual .qa-summary.state-progress{background:var(--primary-soft)}.qa-visual .qa-summary.state-progress .ai-badge{color:var(--primary-color)}
 
-/* The approval action belongs to the selected piece and version. */
-.qa-visual .human-state-card{display:grid;grid-template-columns:37px minmax(0,1fr);cursor:default}
-.qa-visual .human-state-card:hover{border-color:var(--line);box-shadow:none}
-.qa-visual .human-state-card .review-state-copy{overflow-wrap:anywhere}
-.qa-visual .human-state-card .review-state-detail{white-space:normal}
-.qa-visual .human-state-card .piece-approval-action{grid-column:2;justify-self:start;min-width:0;max-width:100%;min-height:32px;height:auto;padding:6px 10px;gap:6px;font-size:11.5px;white-space:normal}
-.qa-visual .human-state-card .piece-approval-action svg{flex-shrink:0}
-.qa-visual .human-state-card.state-success .piece-approval-action{color:var(--success);border-color:color-mix(in srgb,var(--success) 25%,var(--line));background:var(--success-bg)}
-@media(max-width:1250px){.qa-visual .human-state-card{grid-template-columns:32px minmax(0,1fr);column-gap:9px;row-gap:9px}.qa-visual .human-state-card .piece-approval-action{grid-column:2;justify-self:start}}
-@media(max-width:1050px){.qa-visual .human-state-card{grid-template-columns:29px minmax(0,1fr);gap:8px}.qa-visual .human-state-card .piece-approval-action{font-size:11px;padding:6px 8px;min-height:30px}}
-@media(max-width:620px){.qa-visual .human-state-card .piece-approval-action{grid-column:1/-1;justify-self:stretch;justify-content:center;font-size:10.5px;gap:4px;padding:0 5px}.qa-visual .human-state-card .piece-approval-action svg{width:12px}}
+/* AI and human review share an action row below their status. */
+.qa-visual .review-action-card{display:grid;grid-template-columns:37px minmax(0,1fr);grid-template-rows:1fr auto;cursor:default}
+.qa-visual .review-action-card:hover{border-color:var(--line);box-shadow:none}
+.qa-visual .review-action-card .review-state-copy{overflow-wrap:anywhere}
+.qa-visual .review-action-card .review-state-detail{white-space:normal}
+.qa-visual .review-action-card .piece-review-action{grid-column:2;justify-self:start;min-width:0;max-width:100%;min-height:32px;height:auto;padding:6px 10px;gap:6px;font-size:11.5px;white-space:normal}
+.qa-visual .review-action-card .piece-review-action svg{flex-shrink:0}
+.qa-visual .review-action-card.ai-state-card .piece-review-action{color:var(--primary-color)}
+.qa-visual .review-action-card.state-success .piece-review-action{color:var(--success);border-color:color-mix(in srgb,var(--success) 25%,var(--line));background:var(--success-bg)}
+@media(max-width:1250px){.qa-visual .review-action-card{grid-template-columns:32px minmax(0,1fr);column-gap:9px;row-gap:9px}.qa-visual .review-action-card .piece-review-action{grid-column:2;justify-self:start}}
+@media(max-width:1050px){.qa-visual .review-action-card{grid-template-columns:29px minmax(0,1fr);gap:8px}.qa-visual .review-action-card .piece-review-action{font-size:11px;padding:6px 8px;min-height:30px}}
+@media(max-width:620px){.qa-visual .review-action-card .piece-review-action{grid-column:1/-1;justify-self:stretch;justify-content:center;font-size:10.5px;gap:4px;padding:0 5px}.qa-visual .review-action-card .piece-review-action svg{width:12px}}
 
 .qa-visual .global-nav a { display:flex; align-items:center; gap:7px; height:100%; font-size:12px; font-weight:500; color:var(--muted-text); white-space:nowrap; }
 .qa-visual .drive-notices { padding:8px 18px; color:var(--warning); border-bottom:1px solid var(--line); }
