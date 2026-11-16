@@ -1,6 +1,8 @@
 import { useLayoutEffect } from "react";
 import {
   ArrowUpRight,
+  BadgeCheck,
+  Building2,
   FileText,
   MessageCircle,
   PanelLeftClose,
@@ -166,16 +168,6 @@ export function FilesPanel({
                     <strong title={p.name}>{p.name}</strong>
                     <div className="file-meta-row">
                       <span className="file-format">{p.format}</span>
-                      {p.client && (
-                        <span
-                          className={`qa-client-chip tone-${internalClientState(p.client).tone}`}
-                          title={internalClientState(p.client).detail}
-                        >
-                          {hasFinalApproval(p.client)
-                            ? "✓ Aprobación final"
-                            : `Cliente · ${internalClientState(p.client).short}`}
-                        </span>
-                      )}
                       {conversationCount > 0 && (
                         <span
                           className="file-comment-count"
@@ -186,6 +178,20 @@ export function FilesPanel({
                         </span>
                       )}
                     </div>
+                    {p.client && (
+                      // Own row so the client state is never cut or overlaps the format.
+                      <span
+                        className={`file-client-status tone-${hasFinalApproval(p.client) ? "success" : internalClientState(p.client).tone}`}
+                        title={internalClientState(p.client).detail}
+                      >
+                        {hasFinalApproval(p.client) ? <BadgeCheck size={11} /> : <Building2 size={11} />}
+                        <span>
+                          {hasFinalApproval(p.client)
+                            ? "Aprobación final"
+                            : `Cliente · ${internalClientState(p.client).short}`}
+                        </span>
+                      </span>
+                    )}
                   </div>
                   <CompactReviewStatus ai={ai} human={human} />
                 </button>

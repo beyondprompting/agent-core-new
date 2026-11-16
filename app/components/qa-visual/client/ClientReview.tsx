@@ -11,7 +11,12 @@ import {
   LoaderCircle,
   MapPin,
   MessageSquare,
+  MessageSquarePlus,
+  MousePointer2,
   RotateCcw,
+  Eye,
+  FileText,
+  Square,
   Send,
   Trash2,
   X,
@@ -109,7 +114,7 @@ export function ClientReview({ campaignId }: { campaignId: string }) {
             </div>
           )}
           <h1>{data.campaign.name}</h1>
-          <p>Revisá cada pieza, dejá tus comentarios y aprobala cuando esté lista.</p>
+          <p>Revisá cada pieza: cada comentario le llega a la agencia como un cambio a realizar. Aprobala cuando esté lista.</p>
           {data.delivery?.message && (
             <div className="qa-portal-message">
               <b>{data.campaign.agencyLabel}</b>
@@ -210,6 +215,16 @@ export function ClientReview({ campaignId }: { campaignId: string }) {
   );
 }
 
+type Mark =
+  | { kind: "point"; x: number; y: number }
+  | { kind: "rect"; x: number; y: number; width: number; height: number };
+type Tool = "select" | "pin" | "rect";
+const TOOLS: { key: Tool; label: string; shortcut: string; icon: React.ReactNode }[] = [
+  { key: "select", label: "Ver y moverse", shortcut: "V", icon: <MousePointer2 size={15} /> },
+  { key: "pin", label: "Comentar en un punto", shortcut: "C", icon: <MessageSquarePlus size={15} /> },
+  { key: "rect", label: "Marcar un área", shortcut: "R", icon: <Square size={15} /> },
+];
+
 function ClientCarousel({
   order,
   currentId,
@@ -236,18 +251,57 @@ function ClientCarousel({
     if (order.length < 2) return;
     onChange(order[(index + delta + order.length) % order.length]);
   };
-  const [picking, setPicking] = useState(false);
-  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
+  const [tool, setTool] = useState<Tool>("select");
+  const [mark, setMark] = useState<Mark | null>(null);
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x: number; y: number } | null>(null);
+  const artRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const canMark = Boolean(data?.canComment);
   useEffect(() => {
-    setPicking(false);
-    setPoint(null);
+    setTool("select");
+    setMark(null);
+    setDrag(null);
   }, [viewing]);
+  // V / C / R switch tools like the internal viewer; typing in the composer is never intercepted.
+  useEffect(() => {
+    if (!canMark) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || target?.closest("input, textarea, select")) return;
+      const key = event.key.toLowerCase();
+      if (key === "v") setTool("select");
+      else if (key === "r") setTool("rect");
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canMark]);
+  const at = (event: React.PointerEvent) => {
+    const box = artRef.current!.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - box.top) / box.height)),
+    };
+  };
+  const placed = (next: Mark) => {
+    setMark(next);
+    setTool("select");
+    setTimeout(() => composerRef.current?.focus(), 0);
+  };
+  const marking = canMark && tool !== "select";
   const pins = (data?.threads ?? []).flatMap((t, i) =>
-    t.anchor.kind === "point" ? [{ id: t.id, n: i + 1, x: t.anchor.x, y: t.anchor.y }] : [],
+    t.anchor.kind === "point" || t.anchor.kind === "rect" ? [{ id: t.id, n: i + 1, anchor: t.anchor }] : [],
   );
   const dimensions = data?.item.image;
   const ratio = dimensions?.width && dimensions.height ? dimensions.width / dimensions.height : 1;
+  const box = (m: { x: number; y: number; width: number; height: number }) => ({
+    left: `${m.x * 100}%`,
+    top: `${m.y * 100}%`,
+    width: `${m.width * 100}%`,
+    height: `${m.height * 100}%`,
+  });
   return (
     <CarouselShell
       title={data?.item.title ?? "Pieza"}
@@ -260,40 +314,79 @@ function ClientCarousel({
       total={order.length}
       onPrev={() => go(-1)}
       onNext={() => go(1)}
-      onClose={onClose}
+      onClose={() => {
+        // Esc first cancels an active tool or an unsent mark, then closes.
+        if (tool !== "select" || mark) {
+          setTool("select");
+          setMark(null);
+          setDrag(null);
+        } else onClose();
+      }}
       closeLabel="Volver a la galería"
       closeIcon={<ArrowLeft size={18} />}
-      onComment={data?.canComment ? () => composerRef.current?.focus() : undefined}
+      panelClassName="qa-client-panel"
+      onComment={canMark ? () => setTool("pin") : undefined}
       toolbar={
-        data?.canComment ? (
-          <button
-            className={`qa-carousel-btn ${picking ? "on" : ""}`}
-            onClick={() => {
-              setPicking((p) => !p);
-              setPoint(null);
-            }}
-            aria-pressed={picking}
-          >
-            <MapPin size={14} />
-            <span>{picking ? "Tocá la imagen" : "Comentar en la imagen"}</span>
-          </button>
+        canMark ? (
+          <div className="qa-client-tools" role="toolbar" aria-label="Herramientas de comentario">
+            {TOOLS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={tool === t.key ? "on" : ""}
+                aria-pressed={tool === t.key}
+                aria-label={`${t.label} (${t.shortcut})`}
+                title={`${t.label} · ${t.shortcut}`}
+                onClick={() => {
+                  setTool(t.key);
+                  if (t.key !== "select") setMark(null);
+                }}
+              >
+                {t.icon}
+              </button>
+            ))}
+          </div>
         ) : undefined
       }
       stage={
         <div
-          className={`qa-carousel-art ${picking ? "picking" : ""}`}
+          ref={artRef}
+          className={`qa-carousel-art ${marking ? "picking" : ""}`}
           style={{
             aspectRatio: ratio,
             width: `min(100cqw, calc(100cqh * ${ratio}))`,
           }}
-          onClick={(e) => {
-            if (!picking) return;
-            const box = e.currentTarget.getBoundingClientRect();
-            const x = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-            const y = Math.min(1, Math.max(0, (e.clientY - box.top) / box.height));
-            setPoint({ x, y });
-            setPicking(false);
-            setTimeout(() => composerRef.current?.focus(), 0);
+          onPointerDown={(e) => {
+            if (!marking) return;
+            // Keep the gesture out of the swipe navigation.
+            e.stopPropagation();
+            e.preventDefault();
+            const p = at(e);
+            if (tool === "pin") return placed({ kind: "point", ...p });
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setDrag({ x0: p.x, y0: p.y, x: p.x, y: p.y });
+          }}
+          onPointerMove={(e) => {
+            if (!drag) return;
+            const p = at(e);
+            setDrag({ ...drag, x: p.x, y: p.y });
+          }}
+          onPointerUp={(e) => {
+            if (!drag) return;
+            e.stopPropagation();
+            const width = Math.abs(drag.x - drag.x0);
+            const height = Math.abs(drag.y - drag.y0);
+            setDrag(null);
+            // A click with the area tool becomes a point.
+            if (width < 0.02 && height < 0.02) placed({ kind: "point", x: drag.x0, y: drag.y0 });
+            else
+              placed({
+                kind: "rect",
+                x: Math.min(drag.x, drag.x0),
+                y: Math.min(drag.y, drag.y0),
+                width,
+                height,
+              });
           }}
         >
           <img
@@ -302,18 +395,45 @@ function ClientCarousel({
             alt={data?.item.title ?? ""}
             draggable={false}
           />
-          {pins.map((p) => (
+          {pins.map((p) =>
+            p.anchor.kind === "rect" ? (
+              <span key={p.id} className="qa-mark-rect" style={box(p.anchor)}>
+                <span className="qa-pin client">{p.n}</span>
+              </span>
+            ) : (
+              <span
+                key={p.id}
+                className="qa-pin client"
+                style={{ left: `${p.anchor.x * 100}%`, top: `${p.anchor.y * 100}%` }}
+              >
+                {p.n}
+              </span>
+            ),
+          )}
+          {drag && (
             <span
-              key={p.id}
-              className="qa-pin client"
-              style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
-            >
-              {p.n}
+              className="qa-mark-rect draft"
+              style={box({
+                x: Math.min(drag.x, drag.x0),
+                y: Math.min(drag.y, drag.y0),
+                width: Math.abs(drag.x - drag.x0),
+                height: Math.abs(drag.y - drag.y0),
+              })}
+            />
+          )}
+          {mark?.kind === "rect" && (
+            <span className="qa-mark-rect draft" style={box(mark)}>
+              <span className="qa-pin draft">+</span>
             </span>
-          ))}
-          {point && (
-            <span className="qa-pin draft" style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}>
+          )}
+          {mark?.kind === "point" && (
+            <span className="qa-pin draft" style={{ left: `${mark.x * 100}%`, top: `${mark.y * 100}%` }}>
               +
+            </span>
+          )}
+          {marking && (
+            <span className="qa-tool-hint">
+              {tool === "pin" ? "Tocá donde querés el cambio" : "Arrastrá para marcar el área"}
             </span>
           )}
         </div>
@@ -323,8 +443,8 @@ function ClientCarousel({
           <PiecePanel
             data={data}
             onSelectVersion={setViewing}
-            point={point}
-            clearPoint={() => setPoint(null)}
+            mark={mark}
+            clearMark={() => setMark(null)}
             composerRef={composerRef}
           />
         ) : (
@@ -340,58 +460,67 @@ function ClientCarousel({
 function PiecePanel({
   data,
   onSelectVersion,
-  point,
-  clearPoint,
+  mark,
+  clearMark,
   composerRef,
 }: {
   data: PieceData;
   onSelectVersion: (id: string) => void;
-  point: { x: number; y: number } | null;
-  clearPoint: () => void;
+  mark: Mark | null;
+  clearMark: () => void;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const decide = useMutation(api.qaVisual.clientPortal.decide);
-  const [asking, setAsking] = useState(false);
-  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const state = portalClientState(data.item.state);
-  async function submit(decision: "approved" | "changesRequested") {
+  const approved = data.item.state === "approved";
+  const openRequests = data.threads.filter((t) => !t.resolved).length;
+  async function approve() {
     setBusy(true);
     setError("");
     try {
       await decide({
         itemId: data.item.id,
-        decision,
-        ...(note.trim() ? { note: note.trim() } : {}),
+        decision: "approved",
         expectedDecisionId: data.decision?.id ?? null,
       });
-      setAsking(false);
-      setNote("");
     } catch (e) {
-      setError(errorText(e, "No se pudo guardar tu decisión. Intentá de nuevo."));
+      setError(errorText(e, "No se pudo guardar tu aprobación. Intentá de nuevo."));
     } finally {
       setBusy(false);
     }
   }
   return (
     <>
-      <div className="qa-panel-section" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <span className={`qa-chip tone-${state.tone}`}>{state.label}</span>
-        <div className="qa-versions" role="tablist" aria-label="Versiones">
-          {data.versions.map((v) => (
-            <button
-              key={v.id}
-              role="tab"
-              aria-selected={v.id === data.item.id}
-              className={v.id === data.item.id ? "on" : ""}
-              onClick={() => onSelectVersion(v.id)}
-            >
-              V{v.clientVersion}
-              {v.current ? " · actual" : ""}
-            </button>
-          ))}
+      <div className={`qa-cp-head tone-${state.tone}`}>
+        <div className="qa-cp-state">
+          <span className="qa-cp-state-icon">
+            {approved ? <Check size={16} /> : data.item.state === "changesRequested" ? <MessageSquare size={15} /> : <Eye size={15} />}
+          </span>
+          <div>
+            <small>Estado de la pieza</small>
+            <b>{state.label}</b>
+          </div>
         </div>
+        {data.versions.length > 1 ? (
+          <div className="qa-versions" role="tablist" aria-label="Versiones">
+            {data.versions.map((v) => (
+              <button
+                key={v.id}
+                role="tab"
+                aria-selected={v.id === data.item.id}
+                className={v.id === data.item.id ? "on" : ""}
+                onClick={() => onSelectVersion(v.id)}
+              >
+                V{v.clientVersion}
+                {v.current ? " · actual" : ""}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="qa-cp-version">V{data.item.clientVersion}</span>
+        )}
       </div>
       <div className="qa-panel-scroll">
         {data.readOnly && (
@@ -401,7 +530,7 @@ function PiecePanel({
         )}
         {data.previousAsks.length > 0 && (
           <div className="qa-panel-section">
-            <h4>Lo que pediste en la versión anterior</h4>
+            <h4><RotateCcw size={12} /> Lo que pediste en la versión anterior</h4>
             <ul className="qa-prev-asks">
               {data.previousAsks.map((ask, i) => (
                 <li key={i}>{ask.text}</li>
@@ -411,8 +540,8 @@ function PiecePanel({
         )}
         {data.item.fields.length > 0 && (
           <div className="qa-panel-section">
-            <h4>Lo que pediste</h4>
-            <dl className="qa-brief">
+            <h4><FileText size={12} /> Lo que pediste</h4>
+            <dl className="qa-brief qa-cp-brief">
               {data.item.fields.map((f) => (
                 <div key={f.key} style={{ display: "contents" }}>
                   <dt>{f.label}</dt>
@@ -424,39 +553,28 @@ function PiecePanel({
         )}
         <div className="qa-panel-section">
           <h4>
-            <MessageSquare size={12} /> Comentarios · {data.threads.length}
+            <MessageSquare size={12} /> Cambios pedidos
+            <span className="qa-cp-count">{data.threads.length}</span>
           </h4>
           {!data.threads.length && (
-            <p className="qa-muted">
+            <p className="qa-cp-empty">
               {data.canComment
-                ? "Todavía no hay comentarios. Escribí abajo o tocá «Comentar en la imagen»."
+                ? "¿Hay algo para cambiar? Escribilo abajo o usá las herramientas de arriba para marcar un punto o un área de la imagen."
                 : "No hay comentarios en esta versión."}
             </p>
           )}
           {data.threads.map((thread, i) => (
-            <ThreadView key={thread.id} thread={thread} n={thread.anchor.kind === "point" ? i + 1 : undefined} canReply={data.canComment} />
+            <ThreadView
+              key={thread.id}
+              thread={thread}
+              n={thread.anchor.kind === "point" || thread.anchor.kind === "rect" ? i + 1 : undefined}
+              canReply={data.canComment}
+            />
           ))}
         </div>
       </div>
       {data.canComment && (
-        <Composer itemId={data.item.id} point={point} clearPoint={clearPoint} textareaRef={composerRef} />
-      )}
-      {data.decision && (
-        <div className="qa-panel-section">
-          <div className={`qa-decided tone-${data.decision.decision === "approved" ? "success" : "danger"}`}>
-            {data.decision.decision === "approved" ? <Check size={14} /> : <RotateCcw size={14} />}
-            {data.decision.decision === "approved" ? "Aprobada" : "Pediste cambios"} por {data.decision.author} ·{" "}
-            {new Date(data.decision.at).toLocaleString()}
-          </div>
-        </div>
-      )}
-      {asking && (
-        <div className="qa-panel-section">
-          <label className="qa-field">
-            <span>¿Qué hay que cambiar? <small>(opcional si ya dejaste comentarios)</small></span>
-            <textarea value={note} rows={3} maxLength={4000} onChange={(e) => setNote(e.target.value)} />
-          </label>
-        </div>
+        <Composer itemId={data.item.id} mark={mark} clearMark={clearMark} textareaRef={composerRef} />
       )}
       {error && (
         <div className="qa-panel-section">
@@ -464,35 +582,30 @@ function PiecePanel({
         </div>
       )}
       {!data.readOnly && data.mode === "client" && (
-        <div className="qa-panel-actions">
-          {asking ? (
+        <div className="qa-panel-actions qa-decision-bar">
+          {approved ? (
+            <div className="qa-decided tone-success">
+              <Check size={14} />
+              Aprobada{data.decision ? ` por ${data.decision.author} · ${new Date(data.decision.at).toLocaleDateString()}` : ""}
+            </div>
+          ) : data.canApprove ? (
             <>
-              <button className="button secondary" onClick={() => setAsking(false)} disabled={busy}>
-                <X size={14} /> Cancelar
-              </button>
-              <button className="button primary" onClick={() => void submit("changesRequested")} disabled={busy}>
-                {busy ? <LoaderCircle size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                Enviar cambios
+              <p className="qa-decision-hint">
+                {openRequests
+                  ? `Pediste ${openRequests} ${openRequests === 1 ? "cambio" : "cambios"}. Si igual está lista, podés aprobarla.`
+                  : "Si no hay nada para cambiar, aprobala. Tu aprobación es la final."}
+              </p>
+              <button className="button primary qa-approve" onClick={() => void approve()} disabled={busy}>
+                {busy ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
+                Aprobar pieza
               </button>
             </>
           ) : (
-            <>
-              <button className="button secondary" onClick={() => setAsking(true)} disabled={busy}>
-                <RotateCcw size={14} /> Solicitar cambios
-              </button>
-              {data.canApprove ? (
-                <button
-                  className="button primary qa-approve"
-                  onClick={() => void submit("approved")}
-                  disabled={busy || data.item.state === "approved"}
-                >
-                  {busy ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
-                  {data.item.state === "approved" ? "Aprobada" : "Aprobar pieza"}
-                </button>
-              ) : (
-                <span className="qa-muted">La aprobación la realiza otra persona de tu equipo.</span>
-              )}
-            </>
+            <p className="qa-decision-hint">
+              {openRequests
+                ? "Tus comentarios ya le llegaron a la agencia como cambios a realizar."
+                : "Dejá tus comentarios; la aprobación la realiza otra persona de tu equipo."}
+            </p>
           )}
         </div>
       )}
@@ -513,42 +626,60 @@ function ThreadView({
   const [first, ...replies] = thread.comments;
   const [replying, setReplying] = useState(false);
   if (!first) return null;
+  const when = (at: number) =>
+    new Date(at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const entry = (c: typeof first) => (
-    <>
-      <header>
-        <b>{c.author}</b>
-        <small>{new Date(c.at).toLocaleString()}</small>
-        {c.canDelete && (
-          <button
-            className="icon-button"
-            style={{ marginLeft: "auto", width: 24, height: 24 }}
-            aria-label="Borrar comentario"
-            onClick={() => void remove({ commentId: c.id })}
-          >
-            <Trash2 size={12} />
-          </button>
+    <div className={`qa-cp-entry ${c.authorKind === "agency" ? "agency" : "client"}`}>
+      <span className="qa-cp-avatar" aria-hidden>
+        {c.author.replace(/^.*·\s*/, "").slice(0, 1).toUpperCase() || "?"}
+      </span>
+      <div className="qa-cp-entry-body">
+        <header>
+          <b>{c.author}</b>
+          {c.authorKind === "agency" && <span className="qa-cp-tag">Agencia</span>}
+          <small>{when(c.at)}</small>
+          {c.canDelete && (
+            <button
+              className="qa-cp-delete"
+              aria-label="Borrar comentario"
+              title="Borrar comentario"
+              onClick={() => void remove({ commentId: c.id })}
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </header>
+        {c.body && <p>{c.body}</p>}
+        {c.audio && (
+          <AudioMessage src={media({ audio: c.id })} durationMs={c.audio.durationMs} transcript={c.transcript} />
         )}
-      </header>
-      {c.body && <p>{c.body}</p>}
-      {c.audio && (
-        <AudioMessage src={media({ audio: c.id })} durationMs={c.audio.durationMs} transcript={c.transcript} />
-      )}
-    </>
+      </div>
+    </div>
   );
   return (
-    <article className={`qa-portal-comment ${first.authorKind === "client" ? "mine" : ""}`}>
-      {n && <span className="qa-pin client" style={{ position: "static", transform: "none", float: "right", width: 22, height: 22, minWidth: 22 }}>{n}</span>}
+    <article className={`qa-cp-thread ${thread.resolved ? "resolved" : ""}`}>
+      <div className="qa-cp-thread-head">
+        {n ? <span className="qa-cp-num">{n}</span> : <span className="qa-cp-num general"><MessageSquare size={11} /></span>}
+        <span>
+          {thread.anchor.kind === "rect" ? "Área de la imagen" : thread.anchor.kind === "point" ? "Punto de la imagen" : "Comentario general"}
+        </span>
+        <span className={`qa-cp-status ${thread.resolved ? "done" : ""}`}>
+          {thread.resolved ? <><Check size={11} /> Resuelto</> : "Cambio pedido"}
+        </span>
+      </div>
       {entry(first)}
-      {replies.map((r) => (
-        <div key={r.id} className="qa-portal-reply">
-          {entry(r)}
+      {replies.length > 0 && (
+        <div className="qa-cp-replies">
+          {replies.map((r) => (
+            <div key={r.id}>{entry(r)}</div>
+          ))}
         </div>
-      ))}
+      )}
       {canReply &&
         (replying ? (
           <Composer threadId={thread.id} onDone={() => setReplying(false)} />
         ) : (
-          <button className="qa-link" style={{ marginTop: 6 }} onClick={() => setReplying(true)}>
+          <button className="qa-cp-reply" onClick={() => setReplying(true)}>
             Responder
           </button>
         ))}
@@ -556,19 +687,22 @@ function ThreadView({
   );
 }
 
-/** Text or voice comment. New threads may carry a point on the image; replies go to a thread. */
+/**
+ * Text or voice comment. Every client comment is a change request for the agency. New threads
+ * may carry a point or an area of the image; replies go to a thread.
+ */
 function Composer({
   itemId,
   threadId,
-  point,
-  clearPoint,
+  mark,
+  clearMark,
   textareaRef,
   onDone,
 }: {
   itemId?: Id<"qaVisualDeliveryItems">;
   threadId?: Id<"qaVisualThreads">;
-  point?: { x: number; y: number } | null;
-  clearPoint?: () => void;
+  mark?: Mark | null;
+  clearMark?: () => void;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   onDone?: () => void;
 }) {
@@ -597,7 +731,7 @@ function Composer({
       else if (itemId)
         await create({
           itemId,
-          anchor: point ? { kind: "point", x: point.x, y: point.y } : { kind: "general" },
+          anchor: mark ?? { kind: "general" },
           body,
           audio,
           requestId: crypto.randomUUID(),
@@ -605,7 +739,7 @@ function Composer({
       pending.current = null;
       recorder.discard();
       setText("");
-      clearPoint?.();
+      clearMark?.();
       onDone?.();
     } catch (e) {
       setError(errorText(e, "No se pudo enviar. Revisá la conexión y tocá «Enviar» de nuevo."));
@@ -615,12 +749,21 @@ function Composer({
   }
   return (
     <div className="qa-composer">
-      {point && (
+      {!threadId && (
         <div className="qa-composer-context">
-          <span><MapPin size={11} /> Comentario en el punto marcado</span>
-          <button className="icon-button" aria-label="Quitar punto" onClick={clearPoint} style={{ width: 22, height: 22 }}>
+          <span>
+            {mark ? <MapPin size={11} /> : <MessageSquarePlus size={11} />}
+            {mark?.kind === "rect"
+              ? "Cambio en el área marcada"
+              : mark
+                ? "Cambio en el punto marcado"
+                : "Cada comentario se envía a la agencia como un cambio a realizar"}
+          </span>
+          {mark && (
+          <button className="icon-button" aria-label="Quitar marca" onClick={clearMark} style={{ width: 22, height: 22 }}>
             <X size={12} />
           </button>
+          )}
         </div>
       )}
       {recorder.state === "idle" ? (
@@ -628,7 +771,7 @@ function Composer({
           ref={textareaRef}
           value={text}
           maxLength={4000}
-          placeholder={threadId ? "Escribí una respuesta…" : "Escribí un comentario o grabá un audio…"}
+          placeholder={threadId ? "Escribí una respuesta…" : "Contá qué hay que cambiar o grabá un audio…"}
           aria-label={threadId ? "Respuesta" : "Comentario"}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

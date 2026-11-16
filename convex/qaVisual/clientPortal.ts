@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import { internalQuery, mutation, query, type QueryCtx } from "../_generated/server";
+import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "../_generated/server";
 import { attachAudio, audioArg, claimAudio } from "./audio";
 import {
   assignedToCampaignClient,
@@ -84,18 +84,25 @@ export const campaigns = query({
   args: {},
   returns: v.object({
     mode: v.union(v.null(), mode),
+    viewerName: v.union(v.null(), v.string()),
     campaigns: v.array(
       v.object({
         id: v.id("qaVisualCampaigns"),
         name: v.string(),
         counts,
         lastDeliveryAt: v.union(v.null(), v.number()),
+        lastRound: v.union(v.null(), v.number()),
+        agencyLabel: v.string(),
+        // Up to four delivered items for the campaign card, pending ones first.
+        previews: v.array(v.id("qaVisualDeliveryItems")),
       }),
     ),
   }),
   handler: async (ctx) => {
     const viewer = await portalViewer(ctx);
-    if (!viewer) return { mode: null, campaigns: [] };
+    if (!viewer) return { mode: null, viewerName: null, campaigns: [] };
+    const user = await ctx.db.get(viewer.userId);
+    const viewerName = (user?.name || user?.email || "").split(/[\s@]/)[0] || null;
     const rows = await ctx.db
       .query("qaVisualCampaigns")
       .withIndex("by_status", (q) => q.eq("status", "active"))
@@ -107,14 +114,21 @@ export const campaigns = query({
         continue;
       const items = await activeItems(ctx, campaign._id);
       if (!items.length && viewer.mode === "client") continue;
+      const delivery = await latestDelivery(ctx, campaign._id);
+      const rank = (i: Doc<"qaVisualDeliveryItems">) =>
+        i.clientState === "sent" || i.clientState === "viewed" ? 0 : i.clientState === "changesRequested" ? 1 : 2;
       result.push({
         id: campaign._id,
         name: campaign.name,
         counts: countItems(items),
-        lastDeliveryAt: (await latestDelivery(ctx, campaign._id))?.publishedAt ?? null,
+        lastDeliveryAt: delivery?.publishedAt ?? null,
+        lastRound: delivery?.number ?? null,
+        agencyLabel: campaign.clientReview?.agencyLabel ?? "Agencia",
+        previews: [...items].sort((a, b) => rank(a) - rank(b)).slice(0, 4).map((i) => i._id),
       });
     }
-    return { mode: viewer.mode, campaigns: result };
+    result.sort((a, b) => (b.lastDeliveryAt ?? 0) - (a.lastDeliveryAt ?? 0));
+    return { mode: viewer.mode, viewerName, campaigns: result };
   },
 });
 
@@ -362,6 +376,28 @@ function validBody(body: string | undefined, hasAudio: boolean) {
   return text;
 }
 
+/**
+ * Every client comment is a change request: the first comment (or reply) on an item that is
+ * not already in «changes requested» records that decision, superseding a previous approval.
+ */
+async function requestChangesFromComment(
+  ctx: MutationCtx,
+  item: Doc<"qaVisualDeliveryItems">,
+  user: Id<"users">,
+) {
+  const current = await ctx.db.get(item._id);
+  if (!current || current.status !== "active" || current.clientState === "changesRequested") return;
+  const id = await ctx.db.insert("qaVisualClientDecisions", {
+    campaignId: current.campaignId,
+    deliveryItemId: current._id,
+    pieceId: current.pieceId,
+    decision: "changesRequested",
+    decidedBy: user,
+    ...(current.currentDecisionId ? { supersedesId: current.currentDecisionId } : {}),
+  });
+  await ctx.db.patch(current._id, { clientState: "changesRequested", currentDecisionId: id });
+}
+
 export const createComment = mutation({
   args: {
     itemId: v.id("qaVisualDeliveryItems"),
@@ -414,6 +450,7 @@ export const createComment = mutation({
         : {}),
     });
     if (claim) await attachAudio(ctx, claim.uploadId, commentId);
+    await requestChangesFromComment(ctx, access.item, access.user);
     return threadId;
   },
 });
@@ -458,6 +495,8 @@ export const reply = mutation({
       lastActivityAt: Date.now(),
       status: "open",
     });
+    if (access.item.status === "active")
+      await requestChangesFromComment(ctx, access.item, access.user);
     return null;
   },
 });

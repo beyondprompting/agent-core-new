@@ -22,6 +22,7 @@ export function CarouselShell({
   panel,
   closeLabel = "Cerrar carrusel",
   closeIcon,
+  panelClassName,
 }: {
   title: string;
   subtitle?: string;
@@ -36,6 +37,7 @@ export function CarouselShell({
   panel: ReactNode;
   closeLabel?: string;
   closeIcon?: ReactNode;
+  panelClassName?: string;
 }) {
   useCarouselKeys({ enabled: true, onPrev, onNext, onClose, onComment });
   const swipe = useSwipe(onPrev, onNext);
@@ -78,7 +80,7 @@ export function CarouselShell({
           </span>
         </footer>
       </section>
-      <aside className="qa-carousel-panel">{panel}</aside>
+      <aside className={`qa-carousel-panel ${panelClassName ?? ""}`}>{panel}</aside>
     </div>
   );
 }

@@ -21,6 +21,8 @@ const modules = {
     import("../convex/qaVisual/campaignSnapshots"),
   "../convex/qaVisual/imageCopies.ts": () =>
     import("../convex/qaVisual/imageCopies"),
+  "../convex/qaVisual/clientPortal.ts": () =>
+    import("../convex/qaVisual/clientPortal"),
 };
 const input = {
   name: "piece.png",
@@ -848,4 +850,77 @@ test("a current completed review with full model coverage still permits normal a
   }))!;
   assert.equal(approved.decision?.exception, undefined);
   assert.equal(approved.decision?.aiSeen.stale, false);
+});
+
+test("every client comment or reply is recorded as a change request, even after an approval", async () => {
+  const s = await setup();
+  const { externalId, itemId } = await s.t.run(async (ctx) => {
+    const externalId = await ctx.db.insert("users", { name: "Cliente", email: "client@example.test" });
+    const clientId = await ctx.db.insert("corClients", { corClientId: 1, name: "Cliente", syncedAt: 1 });
+    await ctx.db.insert("approvedExternalUsers", {
+      email: "client@example.test",
+      userId: externalId,
+      workRole: "pieceApproval",
+      createdAt: 1,
+    });
+    await ctx.db.insert("clientUserAssignments", { clientId, userId: externalId, assignedAt: 1 });
+    await ctx.db.patch(s.campaignId, {
+      client: { clientId },
+      clientReview: { enabled: true, agencyLabel: "PTO99", briefFields: [] },
+    });
+    const deliveryId = await ctx.db.insert("qaVisualDeliveries", {
+      campaignId: s.campaignId,
+      number: 1,
+      status: "published",
+      createdBy: s.userId,
+      publishedAt: 1,
+      itemCount: 1,
+      requestId: "round-1",
+    });
+    const itemId = await ctx.db.insert("qaVisualDeliveryItems", {
+      deliveryId,
+      campaignId: s.campaignId,
+      pieceId: s.pieceId,
+      pieceVersionId: s.pieceVersionId,
+      order: 0,
+      clientVersion: 1,
+      status: "active",
+      brief: { title: "Pieza", format: "Post", fields: [] },
+      clientState: "sent",
+      publishedAt: 1,
+    });
+    return { externalId, itemId };
+  });
+  const client = s.t.withIdentity({ subject: externalId });
+  const state = () => s.t.run(async (ctx) => (await ctx.db.get(itemId))!);
+
+  const threadId = await client.mutation(api.qaVisual.clientPortal.createComment, {
+    itemId,
+    anchor: { kind: "rect", x: 0.1, y: 0.1, width: 0.3, height: 0.2 },
+    body: "Cambiar el precio",
+    requestId: "c1",
+  });
+  const afterComment = await state();
+  assert.equal(afterComment.clientState, "changesRequested");
+  assert.ok(afterComment.currentDecisionId);
+
+  // A second comment does not stack another decision.
+  await client.mutation(api.qaVisual.clientPortal.createComment, {
+    itemId, anchor: { kind: "general" }, body: "Y el logo", requestId: "c2",
+  });
+  assert.equal((await state()).currentDecisionId, afterComment.currentDecisionId);
+
+  await client.mutation(api.qaVisual.clientPortal.decide, {
+    itemId, decision: "approved", expectedDecisionId: afterComment.currentDecisionId!,
+  });
+  assert.equal((await state()).clientState, "approved");
+
+  // Replying after approving reopens the piece as a change request.
+  await client.mutation(api.qaVisual.clientPortal.reply, { threadId, body: "Falta esto", requestId: "r1" });
+  const afterReply = await state();
+  assert.equal(afterReply.clientState, "changesRequested");
+  const decisions = await s.t.run((ctx) =>
+    ctx.db.query("qaVisualClientDecisions").withIndex("by_item", (q) => q.eq("deliveryItemId", itemId)).collect(),
+  );
+  assert.deepEqual(decisions.map((d) => d.decision), ["changesRequested", "approved", "changesRequested"]);
 });
