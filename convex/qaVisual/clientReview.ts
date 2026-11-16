@@ -12,6 +12,7 @@ import {
 import { structuredRequirements } from "./model/contracts";
 import { versionCopy } from "./imageCopies";
 import { versionAiValidated } from "./pieces";
+import { changesRequestedOn } from "./clientChanges";
 
 /** Internal side of the client review (§23): configuration, delivery rounds and withdrawals. */
 
@@ -178,6 +179,8 @@ async function clientSendState(
   return {
     approved,
     awaitingClient: active?.clientState === "sent" || active?.clientState === "viewed",
+    // A version the client rejected never goes back: a new version is required.
+    clientRequestedChanges: changesRequestedOn(sent),
     fullyApproved: approved && aiOk && active?.clientState === "approved",
     everSent: sent.some((i) => i.status !== "withdrawn"),
   };
@@ -211,6 +214,7 @@ export const deliveryPreview = query({
         approved: send.approved,
         awaitingClient: send.awaitingClient,
         fullyApproved: send.fullyApproved,
+        clientRequestedChanges: send.clientRequestedChanges,
         unresolvedDuplicate: hasUnresolvedDuplicate(item),
       });
       const row = {
@@ -226,7 +230,8 @@ export const deliveryPreview = query({
       };
       // Pieces already with the client are not listed as blocked, except the fully approved ones.
       if (reason) {
-        if (!send.everSent || send.fullyApproved) blocked.push({ ...row, reason });
+        if (!send.everSent || send.fullyApproved || send.clientRequestedChanges)
+          blocked.push({ ...row, reason });
       } else eligible.push(row);
     }
     return {
@@ -295,6 +300,7 @@ export const publishDelivery = mutation({
           approved: send.approved,
           awaitingClient: send.awaitingClient,
           fullyApproved: send.fullyApproved,
+          clientRequestedChanges: send.clientRequestedChanges,
           unresolvedDuplicate: hasUnresolvedDuplicate(
             await ctx.db.get(version.currentImportPieceId),
           ),

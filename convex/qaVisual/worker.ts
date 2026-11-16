@@ -20,7 +20,7 @@ import {
   sourceLabel,
 } from "./model/contracts";
 import { canEvaluate, resolveVisualControl } from "./model/controls";
-import { visualReviewPrompt } from "./model/prompt";
+import { clientChangesPrompt, visualReviewPrompt } from "./model/prompt";
 import { requestCommentLocations } from "./commentLocalization";
 
 const responseSchema = z.object({
@@ -83,6 +83,7 @@ export async function analyzeReview(
           "Actualizá desde Drive para aplicar los criterios nuevos antes de analizar.",
       };
     const requirements = structuredRequirements(input);
+    const clientChanges = work.clientChanges ?? [];
     const results: Infer<typeof finding>[] = [];
     const visual = [];
     for (const rule of work.rules) {
@@ -164,7 +165,9 @@ export async function analyzeReview(
             ? { openai: { store: false } }
             : qaGemini.providerOptions,
         abortSignal,
-        system: visualReviewPrompt,
+        system: clientChanges.length
+          ? `${visualReviewPrompt}\n\n${clientChangesPrompt}`
+          : visualReviewPrompt,
         messages: [
           {
             role: "user",
@@ -175,6 +178,9 @@ export async function analyzeReview(
                   visual.map(({ requirement, ...control }) => control),
                 ),
               },
+              ...(clientChanges.length
+                ? [{ type: "text" as const, text: JSON.stringify({ clientChanges }) }]
+                : []),
               {
                 type: "image",
                 image,
@@ -191,7 +197,9 @@ export async function analyzeReview(
         if (!requirement) throw new Error("invalid_controls");
         return {
           ...control,
-          ...resolveVisualControl(requirement, control),
+          ...resolveVisualControl(requirement, control, {
+            clientChanges: clientChanges.length > 0,
+          }),
           region: imageBoxToRegion(box_2d),
         };
       });

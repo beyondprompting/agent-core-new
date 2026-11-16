@@ -286,3 +286,23 @@ test("an omission stays a finding when localization fails and another control is
     "findings",
   );
 });
+
+test("a price changed by the client on the previous version is not reported as wrong", () => {
+  const price = requirement("price", "$5,99");
+  const visible = assessment("$6,99", {
+    outcome: "pass",
+    observed: "Se lee «$6,99», el precio que pidió el cliente en la versión anterior.",
+  });
+  // Without client asks the original request prevails.
+  assert.equal(resolveVisualControl(price, visible).outcome, "fail");
+  const withAsks = resolveVisualControl(price, visible, { clientChanges: true });
+  assert.equal(withAsks.outcome, "pass");
+  assert.equal(withAsks.method, "model");
+  // The model still decides: if it says the client's price is wrong, it fails.
+  assert.equal(
+    resolveVisualControl(price, assessment("$7,99", { outcome: "fail", observed: "No coincide con el pedido del cliente." }), {
+      clientChanges: true,
+    }).outcome,
+    "fail",
+  );
+});

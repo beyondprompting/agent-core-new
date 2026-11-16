@@ -5,6 +5,7 @@ import { Avatar } from "@/app/components/qa-visual/shared/visuals";
 import { VoiceRecorder } from "@/app/components/qa-visual/voice/VoiceRecorder";
 import { useVoiceRecorder } from "@/app/hooks/qa-visual/use-voice-recorder";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
+import { ClientAsks } from "@/app/components/qa-visual/piece/VersionTrail";
 
 export function CommentsPanel(sessionProps: { session: ReviewSession }) {
   const { session } = sessionProps;
@@ -47,6 +48,9 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           IA
         </span>
       </button>
+      <div className="qa-client-asks-wrap">
+        <ClientAsks asks={session.detail?.clientAsks ?? null} />
+      </div>
       <div className="comment-filter">
         <select
           aria-label="Filtrar comentarios"

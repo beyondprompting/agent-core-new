@@ -1,10 +1,13 @@
 "use client";
 
+import { useRef } from "react";
+
 import { ArrowUpRight, BadgeCheck, Bot, Building2, Check, CheckCheck, Columns3, ListFilter, Lock, MessageSquare, Reply, RotateCcw, Send, ShieldCheck } from "lucide-react";
 import { FinalApprovalBanner } from "@/app/components/qa-visual/piece/review-status";
+import { ClientAsks, VersionTrail } from "@/app/components/qa-visual/piece/VersionTrail";
 import { carouselOrder, hasFinalApproval } from "@/app/lib/qa-visual/piece-filters";
 import { CarouselShell } from "@/app/components/qa-visual/carousel/CarouselShell";
-import { internalClientState } from "@/app/lib/qa-visual/client-state";
+import { humanStateWithClient, internalClientState, needsNewVersion } from "@/app/lib/qa-visual/client-state";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
 
 /** Internal carousel (scene 7): quick review with the three states and client activity. */
@@ -23,8 +26,10 @@ export function InternalCarousel({
   onReanalyze?: () => void;
   reanalyzing?: boolean;
 }) {
-  const { filteredPieces, piece, activeId, choosePiece, aiReview, humanReview, pieceComments, version } =
-    session;
+  const { filteredPieces, piece, activeId, choosePiece, aiReview, pieceComments, version } = session;
+  const humanReview = humanStateWithClient(session.humanReview, piece.client, version);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+  const decided = session.humanReview.tone === "success" || needsNewVersion(piece.client);
   // The carousel walks the filtered gallery; the open piece stays until the reviewer moves on.
   const order = carouselOrder(
     filteredPieces.map((p) => p.id),
@@ -50,7 +55,7 @@ export function InternalCarousel({
       onPrev={() => go(-1)}
       onNext={() => go(1)}
       onClose={onClose}
-      onComment={onOpenDetailed}
+      onComment={() => commentRef.current?.focus()}
       toolbar={
         <>
         {filtered && (
@@ -107,6 +112,8 @@ export function InternalCarousel({
         <>
           <div className="qa-panel-section">
             <FinalApprovalBanner client={piece.client} humanApproved={humanReview.tone === "success"} />
+            <VersionTrail session={session} />
+            <ClientAsks asks={session.detail?.clientAsks ?? null} />
             <h4>Estados de esta versión</h4>
             <div className={`qa-state tone-${aiReview.tone}`}>
               <Bot size={15} />
@@ -263,18 +270,47 @@ export function InternalCarousel({
               )}
             </div>
           </div>
+          {session.canReview && !session.replyTo && (
+            // New comments go straight from the carousel; no need to open the editor.
+            <div className="qa-carousel-composer">
+              <textarea
+                ref={commentRef}
+                value={session.draft}
+                maxLength={4000}
+                rows={2}
+                disabled={session.saving}
+                placeholder={`Comentá la v${version}…`}
+                aria-label="Nuevo comentario"
+                onChange={(e) => session.setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    void session.publish();
+                  }
+                  if (e.key === "Escape") e.currentTarget.blur();
+                }}
+              />
+              <div className="qa-carousel-composer-bar">
+                <span>Nota interna · ⌘/Ctrl + Enter</span>
+                <button
+                  className="button primary"
+                  onClick={() => void session.publish()}
+                  disabled={session.saving || !session.draft.trim()}
+                >
+                  <Send size={13} /> Publicar
+                </button>
+              </div>
+            </div>
+          )}
           <div className="qa-panel-actions">
-            <button className="button secondary" onClick={onOpenDetailed}>
-              <MessageSquare size={14} />
-              Comentar
-            </button>
             <button
-              className={`button ${humanReview.tone === "success" ? "secondary" : "primary"}`}
+              className={`button ${decided ? "secondary" : "primary"}`}
               onClick={() => session.setModal("approval")}
               disabled={!session.canReview}
             >
               <CheckCheck size={14} />
-              {humanReview.tone === "success" ? "Ver decisión" : "Aprobar esta versión"}
+              {decided ? "Ver decisión" : "Aprobar esta versión"}
             </button>
           </div>
         </>

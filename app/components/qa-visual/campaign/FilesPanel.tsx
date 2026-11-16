@@ -18,7 +18,7 @@ import {
   getHumanReviewState,
 } from "@/app/lib/qa-visual/review-state";
 import { CampaignResources } from "./CampaignResources";
-import { internalClientState } from "@/app/lib/qa-visual/client-state";
+import { humanStateWithClient, internalClientState } from "@/app/lib/qa-visual/client-state";
 import { hasFinalApproval } from "@/app/lib/qa-visual/piece-filters";
 import { PieceFilterMenu } from "@/app/components/qa-visual/gallery/PieceFilterMenu";
 import { CampaignSummary } from "./CampaignSummary";
@@ -145,9 +145,13 @@ export function FilesPanel({
                       (statuses[`${p.id}-${p.currentVersion ?? 1}`] ??
                         p.status),
                 );
-              const human = getHumanReviewState(
-                statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status,
-                decision,
+              const human = humanStateWithClient(
+                getHumanReviewState(
+                  statuses[`${p.id}-${p.currentVersion ?? 1}`] ?? p.status,
+                  decision,
+                ),
+                p.client,
+                p.currentVersion ?? 1,
               );
               return (
                 <button

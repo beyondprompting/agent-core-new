@@ -67,3 +67,28 @@ export function finalApprovalState(
     };
   return { title: "Aprobada por el equipo · esperando al cliente", detail: `La aprobación final es del cliente · ${round}`, tone: "client", final: false };
 }
+
+/** The client asked for changes on the current version: only a new version (v2) can continue. */
+export function needsNewVersion(status: Pick<PieceClientStatus, "state" | "internalAhead"> | null | undefined) {
+  return status?.state === "changesRequested" && !status.internalAhead;
+}
+
+/**
+ * The team's approval of a version the client rejected stays in its history, but the piece is
+ * not approved anymore: it waits for a new version with its own approvals.
+ */
+export function humanStateWithClient<T extends { title: string; shortLabel: string; detail: string; tone: string }>(
+  human: T,
+  status: Pick<PieceClientStatus, "state" | "internalAhead" | "clientVersion"> | null | undefined,
+  version?: number,
+): T {
+  if (!needsNewVersion(status)) return human;
+  const label = version ? `v${version}` : "Esta versión";
+  return {
+    ...human,
+    title: "Falta una versión nueva",
+    shortLabel: "Falta v nueva",
+    detail: `${label} ${human.tone === "success" ? "aprobada" : "revisada"} · el cliente pidió cambios. Subí la versión corregida en Drive.`,
+    tone: "warning",
+  };
+}

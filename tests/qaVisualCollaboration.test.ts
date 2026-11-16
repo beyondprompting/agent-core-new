@@ -980,11 +980,77 @@ test("a piece with AI, team and client approval cannot be sent again until one o
   assert.match(full.blocked[0].reason, /3 aprobaciones/);
   await assert.rejects(send("round-2"), /ya no se puede enviar/);
 
-  // The client asks for a change: the approval chain is broken and it can be sent again.
+  // The client asks for a change: this version can't go back nor be approved again.
   await client.mutation(api.qaVisual.clientPortal.createComment, {
-    itemId: sent._id, anchor: { kind: "general" }, body: "Otro precio", requestId: "c1",
+    itemId: sent._id, anchor: { kind: "general" }, body: "Cambiar el precio a 6,99", requestId: "c1",
+  });
+  const rejected = await preview();
+  assert.equal(rejected.eligible.length, 0);
+  assert.match(rejected.blocked[0].reason, /pidió cambios en esta versión/);
+  await assert.rejects(send("round-3"), /ya no se puede enviar/);
+
+  // A new image in Drive is version 2, with its own AI, team and client approvals.
+  const v2PieceId = await s.t.run(async (ctx) => {
+    const itemId = await ctx.db.insert("qaVisualCampaignPieces", {
+      snapshotId: s.snapshotId,
+      order: 0,
+      file: { name: "piece.png", bytes: 2, updatedAt: 2, driveId: "image", driveVersion: "2", contentHash: "image-2" },
+      input: { ...input, contentHash: "image-2", contextKey: "input-2" },
+    });
+    return publishPiece(ctx, (await ctx.db.get(s.campaignId))!, itemId, new Set(["image"]));
+  });
+  assert.equal(v2PieceId, s.pieceId);
+  const v2 = (await s.user.query(api.qaVisual.editor.piece, { pieceId: s.pieceId }))!;
+  assert.notEqual(v2.versionId, s.pieceVersionId);
+  assert.equal(v2.humanStatus, "Pendiente");
+  // The client's ask travels with version 2 (and to its AI analysis).
+  assert.deepEqual(v2.clientAsks?.asks, ["Cambiar el precio a 6,99"]);
+  const v1 = v2.versions.find((v) => v.number === 1)!;
+  assert.equal(v1.humanStatus, "Aprobada");
+  assert.equal(v1.client?.state, "changesRequested");
+  assert.match((await preview()).blocked[0].reason, /Sin aprobación interna/);
+
+  await s.user.mutation(api.qaVisual.decisions.decide, {
+    pieceVersionId: v2.versionId,
+    decision: "approved",
+    expectedCurrentDecisionId: null,
+    expectedInputHash: "input-2",
+    expectedReviewId: null,
+    exception: { reason: "other", note: "Revisada a mano" },
   });
   assert.equal((await preview()).eligible.length, 1);
-  await send("round-3");
-  assert.equal((await item()).clientVersion, 2);
+  await s.user.mutation(api.qaVisual.clientReview.publishDelivery, {
+    campaignId: s.campaignId, pieceVersionIds: [v2.versionId], requestId: "round-4",
+  });
+  const second = await s.t.run(async (ctx) =>
+    (await ctx.db
+      .query("qaVisualDeliveryItems")
+      .withIndex("by_version", (q) => q.eq("pieceVersionId", v2.versionId))
+      .collect())[0],
+  );
+  assert.equal(second.clientVersion, 2);
+  // Version 1 keeps its own history.
+  assert.equal((await s.t.run((ctx) => ctx.db.get(sent._id)))!.clientState, "changesRequested");
+});
+
+test("several pieces can be approved at once without overwriting decisions", async () => {
+  const s = await setup();
+  const approveMany = (exception?: { reason: "other"; note: string }) =>
+    s.user.mutation(api.qaVisual.decisions.approveMany, {
+      campaignId: s.campaignId,
+      pieceVersionIds: [s.pieceVersionId],
+      ...(exception ? { exception } : {}),
+    });
+  // Not validated by the AI: needs a shared justification.
+  const first = await approveMany();
+  assert.equal(first.approved, 0);
+  assert.match(first.skipped[0].reason, /justificación/);
+  const second = await approveMany({ reason: "other", note: "Revisadas en conjunto" });
+  assert.equal(second.approved, 1);
+  const third = await approveMany({ reason: "other", note: "Otra vez" });
+  assert.equal(third.approved, 0);
+  assert.match(third.skipped[0].reason, /Ya estaba aprobada/);
+  const data = (await s.user.query(api.qaVisual.editor.piece, { pieceId: s.pieceId }))!;
+  assert.equal(data.humanStatus, "Aprobada");
+  assert.equal(data.decision?.exception?.note, "Revisadas en conjunto");
 });

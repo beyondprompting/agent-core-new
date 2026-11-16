@@ -410,6 +410,8 @@ function ReviewWorkspace({
       {view === "gallery" ? (
         <InternalGallery
           session={session}
+          campaignId={campaignId}
+          onSelectionChange={setSelection}
           onOpen={(id) => {
             session.choosePiece(id);
             setCarousel(true);

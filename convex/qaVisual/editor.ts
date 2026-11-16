@@ -5,7 +5,8 @@ import { requireCampaign } from "./access";
 import { structuredRequirements } from "./model/contracts";
 import { humanState, versionReview } from "./pieces";
 import { findImageCopy } from "./imageCopies";
-import { displayReviewStatus } from "./model/verdict";
+import { displayReviewStatus, isCurrentReview } from "./model/verdict";
+import { clientChangeRequests } from "./clientChanges";
 
 export async function authorName(ctx: QueryCtx, id: Id<"users">) {
   const user = await ctx.db.get(id);
@@ -110,17 +111,38 @@ export const piece = query({
         error: r.error,
       })),
       versions: await Promise.all(
-        versions.slice(0, 200).map(async (v) => ({
-          id: v._id,
-          number: v.number,
-          fileName: v.fileName,
-          at: v._creationTime,
-          humanStatus: humanState(
-            v,
-            v.currentDecisionId ? await ctx.db.get(v.currentDecisionId) : null,
-          ),
-        })),
+        versions.slice(0, 200).map(async (v) => {
+          // Each version keeps its own three approvals: AI, team and client.
+          const review = await versionReview(ctx, v);
+          const delivered = (
+            await ctx.db
+              .query("qaVisualDeliveryItems")
+              .withIndex("by_version", (q) => q.eq("pieceVersionId", v._id))
+              .take(10)
+          )
+            .filter((i) => i.status !== "withdrawn")
+            .sort((a, b) => b.clientVersion - a.clientVersion)[0];
+          return {
+            id: v._id,
+            number: v.number,
+            fileName: v.fileName,
+            at: v._creationTime,
+            humanStatus: humanState(
+              v,
+              v.currentDecisionId ? await ctx.db.get(v.currentDecisionId) : null,
+            ),
+            aiVerdict:
+              review.completed && isCurrentReview(review.completed.input, v.currentInputHash)
+                ? (review.completed.verdict ?? null)
+                : null,
+            client: delivered
+              ? { state: delivered.clientState, clientVersion: delivered.clientVersion }
+              : null,
+          };
+        }),
       ),
+      // What the client asked to change on the previous version (shown and sent to the AI).
+      clientAsks: await clientChangeRequests(ctx, piece._id, version._id),
       threads: await Promise.all(
         threads.slice(0, 200).map(async (thread) => {
           const comments = await ctx.db

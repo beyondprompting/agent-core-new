@@ -17,7 +17,7 @@ import type {
   ReviewTone,
 } from "@/app/lib/qa-visual/review-state";
 import { Avatar } from "@/app/components/qa-visual/shared/visuals";
-import { finalApprovalState, internalClientState } from "@/app/lib/qa-visual/client-state";
+import { finalApprovalState, humanStateWithClient, internalClientState, needsNewVersion } from "@/app/lib/qa-visual/client-state";
 import type { PieceClientStatus } from "@/convex/qaVisual/clientReview";
 
 function StateIcon({
@@ -118,6 +118,9 @@ export function ReviewStatusBar({
   client?: PieceClientStatus | null;
 }) {
   // The client card is always visible: internal approval alone does not finish a piece.
+  // Approving again is not possible once the client rejected the version.
+  const decided = human.tone === "success" || needsNewVersion(client);
+  human = humanStateWithClient(human, client, version);
   const clientState = internalClientState(client);
   const final = finalApprovalState(client, human.tone === "success");
   return (
@@ -189,12 +192,12 @@ export function ReviewStatusBar({
           <span className="review-state-detail">{human.detail}</span>
         </span>
         <button
-          className={`button ${human.tone === "success" ? "secondary" : "primary"} piece-review-action`}
+          className={`button ${decided ? "secondary" : "primary"} piece-review-action`}
           onClick={onOpenHuman}
-          title={human.tone === "success" ? "Ver decisión" : "Aprobar esta versión"}
-          aria-label={`${human.tone === "success" ? "Ver decisión" : "Aprobar esta versión"}: ${pieceName}, versión ${version}`}
+          title={decided ? "Ver decisión" : "Aprobar esta versión"}
+          aria-label={`${decided ? "Ver decisión" : "Aprobar esta versión"}: ${pieceName}, versión ${version}`}
         >
-          {human.tone === "success" ? (
+          {decided ? (
             <>
               <span>Ver decisión</span>
               <ChevronRight size={14} />

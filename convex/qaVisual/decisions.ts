@@ -1,6 +1,9 @@
 import { ConvexError, v } from "convex/values";
-import { mutation } from "../_generated/server";
-import { requireVersion } from "./access";
+import { mutation, type MutationCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
+import type { Infer } from "convex/values";
+import { changesRequestedOn } from "./clientChanges";
+import { requireCampaign, requireVersion } from "./access";
 import { exception, commentBody } from "./model/collaboration";
 import { versionAiValidated, versionReview } from "./pieces";
 import {
@@ -54,6 +57,18 @@ export const decide = mutation({
           message: "Esta versión ya tiene una aprobación vigente.",
         });
     }
+    if (args.decision === "approved") {
+      const delivered = await ctx.db
+        .query("qaVisualDeliveryItems")
+        .withIndex("by_version", (q) => q.eq("pieceVersionId", version._id))
+        .take(10);
+      if (changesRequestedOn(delivered))
+        throw new ConvexError({
+          code: "client_changes",
+          message:
+            "El cliente pidió cambios en esta versión. Subí una versión nueva en Drive: tendrá su propio análisis y aprobación.",
+        });
+    }
     const validated = await versionAiValidated(ctx, version);
     if (args.decision === "approved" && !validated && !args.exception)
       throw new ConvexError({
@@ -72,6 +87,28 @@ export const decide = mutation({
       });
     if (args.decision === "revoked" && !version.currentDecisionId)
       throw new ConvexError("No hay una decisión para revocar.");
+    return recordDecision(ctx, user, version, {
+      decision: args.decision,
+      note,
+      exception: args.exception,
+    });
+  },
+});
+
+/** Stores a decision for a version with what the AI showed at that moment. */
+async function recordDecision(
+  ctx: MutationCtx,
+  user: Id<"users">,
+  version: Doc<"qaVisualPieceVersions">,
+  args: {
+    decision: "approved" | "changesRequested" | "revoked";
+    note?: string;
+    exception?: Infer<typeof exception>;
+  },
+) {
+  const note = args.note;
+  const { latest, completed } = await versionReview(ctx, version);
+  const viewed = completed ?? latest;
     const id = await ctx.db.insert("qaVisualDecisions", {
       campaignId: version.campaignId,
       pieceId: version.pieceId,
@@ -135,5 +172,63 @@ export const decide = mutation({
         : {}),
     });
     return id;
+}
+
+/**
+ * Approves several current versions from the gallery. Versions the AI validated are approved
+ * directly; the rest only with a shared justification. Nothing is overwritten: versions
+ * already approved, rejected by the client or no longer current are skipped with a reason.
+ */
+export const approveMany = mutation({
+  args: {
+    campaignId: v.id("qaVisualCampaigns"),
+    pieceVersionIds: v.array(v.id("qaVisualPieceVersions")),
+    exception: v.optional(exception),
+  },
+  handler: async (ctx, args) => {
+    const { user, campaign } = await requireCampaign(ctx, args.campaignId);
+    const ids = [...new Set(args.pieceVersionIds)];
+    if (!ids.length || ids.length > 200)
+      throw new ConvexError("Elegí entre 1 y 200 piezas para aprobar.");
+    if (args.exception) commentBody(args.exception.note);
+    let approved = 0;
+    const skipped: { pieceVersionId: Id<"qaVisualPieceVersions">; reason: string }[] = [];
+    for (const id of ids) {
+      const skip = (reason: string) => skipped.push({ pieceVersionId: id, reason });
+      const version = await ctx.db.get(id);
+      const piece = version && (await ctx.db.get(version.pieceId));
+      if (!version || !piece || version.campaignId !== campaign._id || version.status === "staged") {
+        skip("La versión ya no está disponible");
+        continue;
+      }
+      if (piece.currentVersionId !== version._id) {
+        skip("Hay una versión más nueva de esta pieza");
+        continue;
+      }
+      const current = version.currentDecisionId ? await ctx.db.get(version.currentDecisionId) : null;
+      if (current?.decision === "approved" && current.aiSeen.inputHash === version.currentInputHash) {
+        skip("Ya estaba aprobada");
+        continue;
+      }
+      const delivered = await ctx.db
+        .query("qaVisualDeliveryItems")
+        .withIndex("by_version", (q) => q.eq("pieceVersionId", version._id))
+        .take(10);
+      if (changesRequestedOn(delivered)) {
+        skip("El cliente pidió cambios: necesita una versión nueva");
+        continue;
+      }
+      const validated = await versionAiValidated(ctx, version);
+      if (!validated && !args.exception) {
+        skip("La IA no la validó: necesita una justificación");
+        continue;
+      }
+      await recordDecision(ctx, user, version, {
+        decision: "approved",
+        ...(validated ? {} : { exception: args.exception }),
+      });
+      approved++;
+    }
+    return { approved, skipped };
   },
 });

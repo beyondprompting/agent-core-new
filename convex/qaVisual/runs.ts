@@ -39,6 +39,7 @@ import {
   locationStatus,
 } from "./validators";
 import { hasValidCommentRegion } from "./commentLocations";
+import { clientChangeRequests } from "./clientChanges";
 
 export const start = mutation({
   args: {
@@ -456,6 +457,11 @@ export const getWork = internalQuery({
           rules: ruleSet.rules,
           status: review.status,
           findings: review.findings,
+          // A new version is checked against what the client asked to change on the previous one.
+          clientChanges:
+            review.pieceId && review.pieceVersionId
+              ? ((await clientChangeRequests(ctx, review.pieceId, review.pieceVersionId))?.asks ?? [])
+              : [],
         }
       : null;
   },

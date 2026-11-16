@@ -1,5 +1,6 @@
 import { Check, Layers, Upload } from "lucide-react";
 import type { ReviewSession } from "@/app/hooks/qa-visual/use-review-session";
+import { ClientAsks, VersionApprovals } from "./VersionTrail";
 
 export function PieceVersions({ session }: { session: ReviewSession }) {
   return (
@@ -14,8 +15,11 @@ export function PieceVersions({ session }: { session: ReviewSession }) {
         </div>
       </div>
       <p className="versions-intro">
-        Cada entrega conserva sus comentarios y decisiones.
+        Cada versión tiene su propio análisis de IA, aprobación del equipo y
+        revisión del cliente. Un pedido de cambios se resuelve con una versión
+        nueva: la anterior conserva su historia.
       </p>
+      <ClientAsks asks={session.detail?.clientAsks ?? null} />
       {(session.detail?.versions ?? []).map((v) => (
         <button
           className={`version-card ${session.version === v.number ? "active" : ""}`}
@@ -27,9 +31,8 @@ export function PieceVersions({ session }: { session: ReviewSession }) {
             <span className="version-file" title={v.fileName}>
               {v.fileName}
             </span>
-            <small>
-              {new Date(v.at).toLocaleString()} · {v.humanStatus}
-            </small>
+            <small>{new Date(v.at).toLocaleString()}</small>
+            <VersionApprovals version={v} />
           </div>
           {session.version === v.number && <Check size={14} />}
         </button>
@@ -65,8 +68,9 @@ export function PieceVersions({ session }: { session: ReviewSession }) {
       <div className="info-note">
         <Layers size={16} />
         <span>
-          Una imagen corregida requiere su propia aprobación. Un cambio en el
-          pedido conserva la decisión con una advertencia.
+          Una imagen corregida requiere su propio análisis, la aprobación del
+          equipo y la del cliente. Un cambio en el pedido conserva la decisión
+          con una advertencia.
         </span>
       </div>
     </div>

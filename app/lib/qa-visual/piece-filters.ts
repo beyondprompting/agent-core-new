@@ -10,7 +10,7 @@ export const PIECE_STAGES = [
   { key: "ready", label: "Lista para enviar", short: "Para enviar", hint: "Aprobada por el equipo, sin enviar al cliente" },
   { key: "sent", label: "Enviada, sin ver", short: "Sin ver", hint: "El cliente todavía no la abrió" },
   { key: "viewed", label: "Vista por el cliente", short: "Vista", hint: "El cliente la abrió y todavía no decidió" },
-  { key: "clientChanges", label: "El cliente pidió cambios", short: "Pidió cambios", hint: "Hay comentarios del cliente para resolver" },
+  { key: "clientChanges", label: "El cliente pidió cambios", short: "Pidió cambios", hint: "Falta subir la versión nueva con los cambios" },
   { key: "final", label: "Aprobación final", short: "Aprobadas", hint: "El cliente aprobó la versión actual" },
 ] as const;
 export type PieceStage = (typeof PIECE_STAGES)[number]["key"];

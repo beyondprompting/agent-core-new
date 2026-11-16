@@ -77,6 +77,7 @@ export function compareVisibleValue(
 export function resolveVisualControl(
   requirement: Requirement,
   control: VisualAssessment,
+  options: { clientChanges?: boolean } = {},
 ) {
   const result = (
     outcome: VisualAssessment["outcome"],
@@ -119,6 +120,15 @@ export function resolveVisualControl(
   if (["price", "date"].includes(requirement.ruleId)) {
     if (!control.visibleText?.trim()) throw new Error("invalid_controls");
     const compared = compareVisibleValue(requirement, control.visibleText);
+    // The client may have changed this value on the previous version: the model compared it
+    // against the client's ask, so its pass prevails over the original request.
+    if (
+      compared?.outcome === "fail" &&
+      options.clientChanges &&
+      control.outcome === "pass" &&
+      control.observed.trim()
+    )
+      return result("pass", control.observed);
     if (compared) return { ...compared, method: "deterministic" as const };
   }
   // The model already evaluated semantics in the same request. A parser miss

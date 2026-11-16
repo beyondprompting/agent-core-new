@@ -119,9 +119,13 @@ export function deliveryBlocker(input: {
   awaitingClient: boolean;
   /** AI validated (or the internal approval accepted its findings), the team and the client approved this version. */
   fullyApproved: boolean;
+  /** The client asked for changes on this version: only a new version can be sent. */
+  clientRequestedChanges?: boolean;
   unresolvedDuplicate?: boolean;
 }) {
   if (input.pieceStatus !== "active") return "La pieza ya no está en Drive";
+  if (input.clientRequestedChanges)
+    return "El cliente pidió cambios en esta versión: subí una versión nueva en Drive para enviarla";
   if (input.fullyApproved)
     return "Ya tiene las 3 aprobaciones: IA, equipo y cliente";
   if (input.awaitingClient) return "Esta versión ya está en revisión del cliente";
