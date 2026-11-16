@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { mutation, query, type QueryCtx } from "../_generated/server";
 import { requireCampaign } from "./access";
-import { assignedToCampaignClient, externalPieceRoleOf } from "./clientAccess";
+import { assignedToCampaignClient, assignmentCoversCampaign, externalPieceRoleOf } from "./clientAccess";
 import {
   BRIEF_FIELDS,
   buildClientBrief,
@@ -24,7 +24,7 @@ async function clientPeople(ctx: QueryCtx, campaign: Doc<"qaVisualCampaigns">) {
   const ids = [
     ...new Set(
       assignments
-        .filter((a) => !a.brandId || a.brandId === campaign.client!.brandId)
+        .filter((a) => assignmentCoversCampaign(a, campaign))
         .map((a) => a.userId),
     ),
   ];

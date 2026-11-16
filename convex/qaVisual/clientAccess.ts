@@ -59,10 +59,19 @@ export async function assignedToCampaignClient(
       q.eq("clientId", campaign.client!.clientId).eq("userId", userId),
     )
     .take(50);
-  // Full-client assignments always apply; brand assignments only for that brand.
-  return assignments.some(
-    (a) => !a.brandId || a.brandId === campaign.client!.brandId,
-  );
+  return assignments.some((a) => assignmentCoversCampaign(a, campaign));
+}
+
+/**
+ * A campaign for the whole client is visible to everyone assigned to that client, including
+ * people assigned to one of its brands. A brand campaign needs the full client or that brand.
+ */
+export function assignmentCoversCampaign(
+  assignment: { brandId?: Id<"clientBrands"> },
+  campaign: Pick<Doc<"qaVisualCampaigns">, "client">,
+) {
+  const brandId = campaign.client?.brandId;
+  return !brandId || !assignment.brandId || assignment.brandId === brandId;
 }
 
 export async function portalViewer(ctx: QueryCtx) {

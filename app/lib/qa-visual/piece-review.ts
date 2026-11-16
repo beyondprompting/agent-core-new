@@ -76,6 +76,8 @@ export function buildPieceReview({
         width: data.imageSnapshot?.width ?? currentPiece.width,
         height: data.imageSnapshot?.height ?? currentPiece.height,
         clientRequirements: data.requirements,
+        // The client status comes from the campaign feed; the file snapshot does not carry it.
+        client: currentPiece.client,
       }
     : {
         ...currentPiece,

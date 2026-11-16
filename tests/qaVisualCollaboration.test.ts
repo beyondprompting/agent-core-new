@@ -402,6 +402,14 @@ test("requesting changes atomically saves the explanation as a visible comment o
   assert.equal(projection.visibleComments[0].body, body);
   assert.equal(projection.visibleComments[0].kind, "human");
   assert.equal(projection.visibleComments[0].threadId, thread._id);
+  // The detailed view keeps the client status from the campaign feed (regression: it showed «Sin enviar»).
+  const sent = { ...pieces[0], client: { state: "sent", clientVersion: 1, deliveryNumber: 1, internalAhead: false } as unknown as NonNullable<typeof pieces[0]["client"]> };
+  const withClient = buildPieceReview({
+    pieces: [sent], currentPiece: sent, version: 1, data,
+    feed: buildAnalysisFeed([]), campaignId: s.campaignId,
+    filter: "all", query: "", filters: [],
+  });
+  assert.equal(withClient.piece.client?.state, "sent");
 
   await s.user.mutation(api.qaVisual.decisions.decide, {
     ...args, decision: "revoked", expectedCurrentDecisionId: id, note: undefined,
