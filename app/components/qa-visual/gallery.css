@@ -29,7 +29,7 @@
 .qa-visual .qa-gallery-toolbar select{height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);padding:0 8px;font-size:12px}
 .qa-visual .qa-gallery-count{font-size:12px;color:var(--muted-text)}
 .qa-visual .qa-selection-bar{display:flex;align-items:center;gap:8px;padding:4px 6px 4px 12px;border-radius:10px;background:var(--primary-soft);color:var(--primary-color);font-weight:650;font-size:12.5px}
-.qa-visual .qa-gallery{list-style:none;margin:0;padding:18px 20px 28px;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;align-items:end;overflow:auto;flex:1;min-height:0}
+.qa-visual .qa-gallery{list-style:none;margin:0;padding:18px 20px 28px;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;align-content:start;align-items:start;overflow:auto;flex:1;min-height:0}
 .qa-visual .qa-gallery.compact{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:12px}
 .qa-visual .qa-gallery-card{position:relative;display:flex;flex-direction:column;gap:8px;padding:8px;border-radius:14px;background:var(--surface);box-shadow:0 1px 2px #0000000a,0 0 0 1px var(--line);content-visibility:auto;contain-intrinsic-size:260px 320px}
 .qa-visual .qa-gallery-card.selected{box-shadow:0 0 0 2px var(--primary-color)}
