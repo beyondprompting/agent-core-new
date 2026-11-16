@@ -111,15 +111,22 @@ export function InternalGallery({
             width: p.width,
             height: p.height,
             unavailable: p.imageError,
-            selectable: Boolean(versionId) && humanStatus === "Aprobada",
+            // Same rule as the server: not while the client reviews it, nor with the 3 approvals.
+            selectable:
+              Boolean(versionId) &&
+              humanStatus === "Aprobada" &&
+              clientState !== "sent" &&
+              !(final && aiStatus === "validated"),
             selected: Boolean(versionId && selected.has(versionId)),
             accent,
-            flags: flag,
-            badge: final ? (
+            // Outside the image so it never wraps over narrow (portrait) artwork.
+            flags: final ? (
               <span className="qa-final-stamp" title={client.detail}>
-                <BadgeCheck size={13} /> Aprobación final
+                <BadgeCheck size={12} /> Aprobación final
               </span>
-            ) : undefined,
+            ) : (
+              flag
+            ),
             footer: (
               <span className="qa-tri">
                 <span className={`qa-chip tone-${ai.tone}`} title={`IA · ${ai.title}`}>

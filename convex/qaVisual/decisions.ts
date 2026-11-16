@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation } from "../_generated/server";
 import { requireVersion } from "./access";
 import { exception, commentBody } from "./model/collaboration";
-import { versionReview } from "./pieces";
+import { versionAiValidated, versionReview } from "./pieces";
 import {
   displayReviewStatus,
   isCurrentReview,
@@ -54,15 +54,7 @@ export const decide = mutation({
           message: "Esta versión ya tiene una aprobación vigente.",
         });
     }
-    const validated =
-      latest?.status === "completed" &&
-      completed &&
-      isCurrentReview(completed.input, version.currentInputHash) &&
-      reviewResult(
-        structuredRequirements(completed.input),
-        completed.findings ?? [],
-        completed.input.issues,
-      ).verdict === "validated";
+    const validated = await versionAiValidated(ctx, version);
     if (args.decision === "approved" && !validated && !args.exception)
       throw new ConvexError({
         code: "exception_required",

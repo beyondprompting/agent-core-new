@@ -3,6 +3,8 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { pieceKey } from "./model/normalize";
 import { chooseByName, newPieceKey } from "./model/identity";
 import { findImageCopy } from "./imageCopies";
+import { isCurrentReview, reviewResult } from "./model/verdict";
+import { structuredRequirements } from "./model/contracts";
 
 /** Called inside snapshot publication. Identity and the published pointer change together. */
 export async function publishPiece(
@@ -114,6 +116,24 @@ export async function versionReview(
           .order("desc")
           .first();
   return { latest, completed };
+}
+
+/** True when the latest analysis of the current request finished and validated every control. */
+export async function versionAiValidated(
+  ctx: QueryCtx,
+  version: Doc<"qaVisualPieceVersions">,
+) {
+  const { latest, completed } = await versionReview(ctx, version);
+  return Boolean(
+    latest?.status === "completed" &&
+      completed &&
+      isCurrentReview(completed.input, version.currentInputHash) &&
+      reviewResult(
+        structuredRequirements(completed.input),
+        completed.findings ?? [],
+        completed.input.issues,
+      ).verdict === "validated",
+  );
 }
 
 export function humanState(

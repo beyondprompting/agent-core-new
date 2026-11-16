@@ -1,6 +1,7 @@
 import { ConvexError } from "convex/values";
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@/convex/_generated/api";
+import { countStages } from "./piece-filters";
 
 export type CampaignCardData = FunctionReturnType<
   typeof api.qaVisual.campaigns.list
@@ -33,7 +34,11 @@ export function summarizeCampaignPieces(
   counts.done =
     counts.validated + counts.findings + counts.partial + counts.failed;
   counts.notices = notices.size;
-  return counts;
+  // «approved» is the team's approval; the stages end in the client's final approval.
+  const stages = countStages(
+    pieces.map((p) => ({ human: p.approved ? "Aprobada" : "Pendiente", client: p.client })),
+  );
+  return { ...counts, stages };
 }
 
 export function campaignError(error: unknown) {

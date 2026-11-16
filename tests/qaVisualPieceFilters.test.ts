@@ -77,3 +77,24 @@ test("internal approval alone is not shown as final", () => {
   assert.equal(finalApprovalState(client("approved"), true)?.final, true);
   assert.equal(finalApprovalState(client("approved", true), true)?.final, false);
 });
+
+test("each piece is in exactly one stage on its way to the client's final approval", async () => {
+  const { pieceStage, countStages } = await import("../app/lib/qa-visual/piece-filters");
+  assert.equal(pieceStage({ human: "Pendiente", client: null }), "internal");
+  assert.equal(pieceStage({ human: "Aprobada", client: null }), "ready");
+  assert.equal(pieceStage({ human: "Aprobada", client: client("sent") }), "sent");
+  assert.equal(pieceStage({ human: "Aprobada", client: client("viewed") }), "viewed");
+  assert.equal(pieceStage({ human: "Aprobada", client: client("changesRequested") }), "clientChanges");
+  assert.equal(pieceStage({ human: "Aprobada", client: client("approved") }), "final");
+  // A new internal version goes back to the internal stages until it is sent.
+  assert.equal(pieceStage({ human: "Aprobada", client: client("approved", true) }), "ready");
+  assert.equal(pieceStage({ human: "En revisión", client: client("approved", true) }), "internal");
+  const counts = countStages([
+    { human: "Aprobada", client: client("approved") },
+    { human: "Aprobada", client: client("viewed") },
+    { human: "Pendiente", client: null },
+  ]);
+  assert.deepEqual(counts, { internal: 1, ready: 0, sent: 0, viewed: 1, clientChanges: 0, final: 1 });
+  assert.equal(matchesPieceFilters(facts({ human: "Aprobada", client: client("viewed") }), ["stage:viewed"]), true);
+  assert.equal(matchesPieceFilters(facts({ human: "Aprobada", client: client("viewed") }), ["stage:final"]), false);
+});

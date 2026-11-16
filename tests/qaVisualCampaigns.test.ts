@@ -434,6 +434,8 @@ test("card totals include every current piece, excluding old hashes, old policie
     approved: 4,
     done: 2,
     notices: 1,
+    // Approved by the team but not sent: none has the client's final approval yet.
+    stages: { internal: 1, ready: 4, sent: 0, viewed: 0, clientChanges: 0, final: 0 },
   });
   await s.t.run((ctx) => ctx.db.patch(pieceIds[0], { status: "removed" }));
   const removed = await s.user.query(api.qaVisual.campaigns.pieceSummaries, {

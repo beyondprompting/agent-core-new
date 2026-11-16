@@ -22,6 +22,8 @@ import {
   importStages,
   importStageLabels,
 } from "@/convex/qaVisual/model/importProgress";
+import { PIECE_STAGES } from "@/app/lib/qa-visual/piece-filters";
+import { STAGE_TONES } from "@/app/components/qa-visual/campaign/PieceStatusOverview";
 
 export function CampaignCard({
   campaign,
@@ -170,38 +172,54 @@ export function CampaignCard({
         </div>
       ) : summary ? (
         <>
+          {/* Stages up to the client's final approval; AI validation is a separate line. */}
           <div
-            className="qc-progress"
+            className="qc-progress qc-stages"
             role="img"
-            aria-label={`${summary.validated} validadas, ${summary.findings} con hallazgos, ${summary.partial} incompletas y ${summary.failed} con error, de ${summary.pieces} piezas`}
+            aria-label={PIECE_STAGES.map((s) => `${summary.stages[s.key]} ${s.label.toLowerCase()}`).join(", ")}
           >
-            {(["validated", "findings", "partial", "failed"] as const).map(
-              (key) => (
+            {PIECE_STAGES.map((s) =>
+              summary.stages[s.key] ? (
                 <span
-                  key={key}
-                  className={key}
-                  style={{
-                    width: `${summary.pieces ? (summary[key] / summary.pieces) * 100 : 0}%`,
-                  }}
+                  key={s.key}
+                  className={`stage-${STAGE_TONES[s.key]}`}
+                  style={{ flexGrow: summary.stages[s.key] }}
+                  title={`${summary.stages[s.key]} · ${s.label}`}
                 />
-              ),
+              ) : null,
             )}
           </div>
           <dl className="qc-stats">
-            {(
-              [
-                ["pieces", "piezas", ""],
-                ["validated", "validadas", "success"],
-                ["findings", "con hallazgos", "warning"],
-                ["approved", "aprobadas", "success"],
-              ] as const
-            ).map(([key, name, color]) => (
-              <div key={key} className={color}>
-                <dt>{name}</dt>
-                <dd>{summary[key]}</dd>
-              </div>
-            ))}
+            <div>
+              <dt>piezas</dt>
+              <dd>{summary.pieces}</dd>
+            </div>
+            <div className="client">
+              <dt>enviadas al cliente</dt>
+              <dd>
+                {summary.stages.sent + summary.stages.viewed + summary.stages.clientChanges + summary.stages.final}
+              </dd>
+            </div>
+            <div className={summary.stages.clientChanges ? "danger" : ""}>
+              <dt>pidió cambios</dt>
+              <dd>{summary.stages.clientChanges}</dd>
+            </div>
+            <div className="final">
+              <dt>aprobación final</dt>
+              <dd>
+                {summary.stages.final}
+                <small>/{summary.pieces}</small>
+              </dd>
+            </div>
           </dl>
+          <p className="qc-ai-line">
+            <span>IA</span>
+            <b className="success">{summary.validated}</b> validadas
+            <i>·</i>
+            <b className="warning">{summary.findings}</b> con hallazgos
+            <i>·</i>
+            <b>{summary.stages.ready}</b> listas para enviar
+          </p>
         </>
       ) : (
         <p className="qc-help" role="status">

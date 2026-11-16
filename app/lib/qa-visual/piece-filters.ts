@@ -2,10 +2,25 @@ import type { PieceClientStatus } from "@/convex/qaVisual/clientReview";
 import type { AiReviewStatus, PieceStatus } from "./review-model";
 
 /**
+ * Where a piece is on its way to the final approval. Exactly one stage per piece, in order.
+ * A new internal version that was not sent yet goes back to the internal stages.
+ */
+export const PIECE_STAGES = [
+  { key: "internal", label: "En revisión interna", short: "Revisión interna", hint: "Falta la aprobación del equipo" },
+  { key: "ready", label: "Lista para enviar", short: "Para enviar", hint: "Aprobada por el equipo, sin enviar al cliente" },
+  { key: "sent", label: "Enviada, sin ver", short: "Sin ver", hint: "El cliente todavía no la abrió" },
+  { key: "viewed", label: "Vista por el cliente", short: "Vista", hint: "El cliente la abrió y todavía no decidió" },
+  { key: "clientChanges", label: "El cliente pidió cambios", short: "Pidió cambios", hint: "Hay comentarios del cliente para resolver" },
+  { key: "final", label: "Aprobación final", short: "Aprobadas", hint: "El cliente aprobó la versión actual" },
+] as const;
+export type PieceStage = (typeof PIECE_STAGES)[number]["key"];
+
+/**
  * Checkbox filters of the internal gallery and file list.
  * Options of the same group are OR'ed; groups and quick toggles are AND'ed.
  */
 export type PieceFilterKey =
+  | `stage:${PieceStage}`
   | "attention"
   | "hideFinal"
   | "ai:findings"
@@ -44,6 +59,10 @@ export const FILTER_GROUPS: {
   options: { key: PieceFilterKey; label: string }[];
 }[] = [
   {
+    label: "Etapa",
+    options: PIECE_STAGES.map((s) => ({ key: `stage:${s.key}` as const, label: s.label })),
+  },
+  {
     label: "Revisión IA",
     options: [
       { key: "ai:findings", label: "Con hallazgos" },
@@ -75,18 +94,38 @@ export const FILTER_GROUPS: {
   },
 ];
 
+/** The client fields needed to place a piece in its stage. */
+type ClientLike = Pick<PieceClientStatus, "state" | "internalAhead"> | null | undefined;
+
 export type PieceFilterFacts = {
   ai: AiReviewStatus | undefined;
   human: PieceStatus;
-  client: PieceClientStatus | null | undefined;
+  client: ClientLike;
 };
 
+
+export function pieceStage({ human, client }: { human: PieceStatus; client: ClientLike }): PieceStage {
+  if (client && !client.internalAhead) {
+    if (client.state === "approved") return "final";
+    if (client.state === "changesRequested") return "clientChanges";
+    if (client.state === "viewed") return "viewed";
+    return "sent";
+  }
+  return human === "Aprobada" ? "ready" : "internal";
+}
+
+export function countStages(pieces: { human: PieceStatus; client: ClientLike }[]) {
+  const counts = Object.fromEntries(PIECE_STAGES.map((s) => [s.key, 0])) as Record<PieceStage, number>;
+  for (const piece of pieces) counts[pieceStage(piece)]++;
+  return counts;
+}
+
 /** A piece is only finished when the client approved the version that is current internally. */
-export const hasFinalApproval = (client: PieceClientStatus | null | undefined) =>
+export const hasFinalApproval = (client: ClientLike) =>
   client?.state === "approved" && !client.internalAhead;
 
 /** Client state as seen by the current internal version. */
-export function clientFilterState(client: PieceClientStatus | null | undefined) {
+export function clientFilterState(client: ClientLike) {
   if (!client) return "none" as const;
   if (client.internalAhead) return "outdated" as const;
   if (client.state === "viewed") return "sent" as const;
@@ -114,6 +153,7 @@ export function matchesPieceFilters(facts: PieceFilterFacts, filters: PieceFilte
     return !selected.length || selected.some((f) => f.slice(prefix.length) === value);
   };
   return (
+    group("stage:", pieceStage(facts)) &&
     group("ai:", facts.ai) &&
     group("human:", facts.human) &&
     group("client:", clientFilterState(facts.client))

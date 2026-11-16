@@ -6,6 +6,7 @@ import { internalMutation, internalQuery, query } from "../_generated/server";
 import { queueSync, syncIsRunning } from "./campaignSnapshots";
 import { requireCampaign, requireQaAdmin } from "./access";
 import { isCurrentReview } from "./model/verdict";
+import { pieceClientStatus } from "./clientReview";
 
 const sourceSelection = v.object({
   excelFileId: v.optional(v.string()),
@@ -151,8 +152,13 @@ export const pieceSummaries = query({
             review &&
             version &&
             isCurrentReview(review.input, version.currentInputHash);
+          // Only the fields needed for the stage: the client approval is the final one.
+          const client = await pieceClientStatus(ctx, piece);
           return {
             id: piece._id,
+            client: client
+              ? { state: client.state, internalAhead: client.internalAhead }
+              : null,
             approved:
               decision?.decision === "approved" &&
               decision.aiSeen.inputHash === version?.currentInputHash,

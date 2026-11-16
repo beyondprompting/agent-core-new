@@ -6,6 +6,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { InternalGallery } from "@/app/components/qa-visual/campaign/InternalGallery";
 import { InternalCarousel } from "@/app/components/qa-visual/campaign/InternalCarousel";
+import { PieceStatusOverview } from "@/app/components/qa-visual/campaign/PieceStatusOverview";
 import { SendToClientDialog } from "@/app/components/qa-visual/deliveries/SendToClientDialog";
 import type { CampaignView } from "@/app/components/qa-visual/campaign/CampaignHeader";
 import "./gallery.css";
@@ -242,7 +243,31 @@ function ReviewWorkspace({
         totalCount={pieces.length}
         hasPreviousAnalysis={hasPreviousAnalysis}
       />
-      {dashboard?.total || phase || agent.error || agent.notice ? (
+      {pieces.length > 0 && (
+        <PieceStatusOverview
+          pieces={session.pieces}
+          statuses={session.statuses}
+          filters={session.filters}
+          onFiltersChange={session.setFilters}
+          ai={
+            dashboard?.total
+              ? {
+                  validated: dashboard.validated ?? 0,
+                  findings: dashboard.findings ?? 0,
+                  partial: dashboard.partial ?? 0,
+                  failed,
+                }
+              : undefined
+          }
+        />
+      )}
+      {/* The analysis bar only shows while analyzing or when something needs attention. */}
+      {(dashboard?.total && !complete) ||
+      failed > 0 ||
+      !!cancelled ||
+      (phase && phase !== "Preparando imagen") ||
+      agent.error ||
+      agent.notice ? (
         <div className="qa-analysis-bar" role="status" aria-live="polite">
           <div
             className={`qa-analysis-icon ${complete ? (failed || dashboard?.findings || dashboard?.partial ? "has-errors" : dashboard?.stale ? "" : "is-complete") : ""}`}
@@ -431,6 +456,9 @@ function ReviewWorkspace({
       {carousel && (
         <InternalCarousel
           session={session}
+          pieceHref={`/workspace/qa-visual/${campaignId}?${new URLSearchParams(
+            session.piece.pieceId ? { pieza: session.piece.pieceId } : {},
+          )}`}
           onClose={() => setCarousel(false)}
           onOpenDetailed={() => {
             setCarousel(false);

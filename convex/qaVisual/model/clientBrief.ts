@@ -115,11 +115,16 @@ export const BRIEF_FIELDS = [
 export function deliveryBlocker(input: {
   pieceStatus: string;
   approved: boolean;
-  alreadySent: boolean;
+  /** The current version was sent and the client has not decided yet. */
+  awaitingClient: boolean;
+  /** AI validated (or the internal approval accepted its findings), the team and the client approved this version. */
+  fullyApproved: boolean;
   unresolvedDuplicate?: boolean;
 }) {
   if (input.pieceStatus !== "active") return "La pieza ya no está en Drive";
-  if (input.alreadySent) return "Esta versión ya se envió al cliente";
+  if (input.fullyApproved)
+    return "Ya tiene las 3 aprobaciones: IA, equipo y cliente";
+  if (input.awaitingClient) return "Esta versión ya está en revisión del cliente";
   if (input.unresolvedDuplicate)
     return "Archivo duplicado sin resolver: marcá la entrega definitiva en Detalles";
   if (!input.approved) return "Sin aprobación interna";

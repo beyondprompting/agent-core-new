@@ -23,6 +23,8 @@ const modules = {
     import("../convex/qaVisual/imageCopies"),
   "../convex/qaVisual/clientPortal.ts": () =>
     import("../convex/qaVisual/clientPortal"),
+  "../convex/qaVisual/clientReview.ts": () =>
+    import("../convex/qaVisual/clientReview"),
 };
 const input = {
   name: "piece.png",
@@ -923,4 +925,66 @@ test("every client comment or reply is recorded as a change request, even after 
     ctx.db.query("qaVisualClientDecisions").withIndex("by_item", (q) => q.eq("deliveryItemId", itemId)).collect(),
   );
   assert.deepEqual(decisions.map((d) => d.decision), ["changesRequested", "approved", "changesRequested"]);
+});
+
+test("a piece with AI, team and client approval cannot be sent again until one of them changes", async () => {
+  const s = await setup();
+  const reviewId = await finishPassingReview(s);
+  await s.user.mutation(api.qaVisual.decisions.decide, {
+    pieceVersionId: s.pieceVersionId,
+    decision: "approved",
+    expectedCurrentDecisionId: null,
+    expectedInputHash: "input-1",
+    expectedReviewId: reviewId,
+  });
+  const externalId = await s.t.run(async (ctx) => {
+    const externalId = await ctx.db.insert("users", { name: "Cliente", email: "client@example.test" });
+    const clientId = await ctx.db.insert("corClients", { corClientId: 1, name: "Cliente", syncedAt: 1 });
+    await ctx.db.insert("approvedExternalUsers", {
+      email: "client@example.test", userId: externalId, workRole: "pieceApproval", createdAt: 1,
+    });
+    await ctx.db.insert("clientUserAssignments", { clientId, userId: externalId, assignedAt: 1 });
+    await ctx.db.patch(s.campaignId, {
+      client: { clientId },
+      clientReview: { enabled: true, agencyLabel: "PTO99", briefFields: [] },
+    });
+    return externalId;
+  });
+  const client = s.t.withIdentity({ subject: externalId });
+  const preview = () => s.user.query(api.qaVisual.clientReview.deliveryPreview, { campaignId: s.campaignId });
+  const send = (requestId: string) =>
+    s.user.mutation(api.qaVisual.clientReview.publishDelivery, {
+      campaignId: s.campaignId, pieceVersionIds: [s.pieceVersionId], requestId,
+    });
+  const item = () =>
+    s.t.run(async (ctx) =>
+      (await ctx.db
+        .query("qaVisualDeliveryItems")
+        .withIndex("by_version", (q) => q.eq("pieceVersionId", s.pieceVersionId))
+        .collect()).find((i) => i.status === "active")!,
+    );
+
+  assert.equal((await preview()).eligible.length, 1);
+  await send("round-1");
+  // While the client reviews it, it is neither eligible nor listed as blocked.
+  assert.equal((await preview()).eligible.length, 0);
+  assert.equal((await preview()).blocked.length, 0);
+  await assert.rejects(send("round-1b"), /ya no se puede enviar/);
+
+  const sent = await item();
+  await client.mutation(api.qaVisual.clientPortal.decide, {
+    itemId: sent._id, decision: "approved", expectedDecisionId: null,
+  });
+  const full = await preview();
+  assert.equal(full.eligible.length, 0);
+  assert.match(full.blocked[0].reason, /3 aprobaciones/);
+  await assert.rejects(send("round-2"), /ya no se puede enviar/);
+
+  // The client asks for a change: the approval chain is broken and it can be sent again.
+  await client.mutation(api.qaVisual.clientPortal.createComment, {
+    itemId: sent._id, anchor: { kind: "general" }, body: "Otro precio", requestId: "c1",
+  });
+  assert.equal((await preview()).eligible.length, 1);
+  await send("round-3");
+  assert.equal((await item()).clientVersion, 2);
 });

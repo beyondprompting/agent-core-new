@@ -596,8 +596,10 @@ function PiecePanel({
                   : "Si no hay nada para cambiar, aprobala. Tu aprobación es la final."}
               </p>
               <button className="button primary qa-approve" onClick={() => void approve()} disabled={busy}>
-                {busy ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
-                Aprobar pieza
+                <span className="qa-approve-icon" aria-hidden>
+                  {busy ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} strokeWidth={3} />}
+                </span>
+                {busy ? "Aprobando…" : "Aprobar pieza"}
               </button>
             </>
           ) : (

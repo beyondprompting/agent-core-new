@@ -11,6 +11,7 @@ import {
 } from "./model/clientBrief";
 import { structuredRequirements } from "./model/contracts";
 import { versionCopy } from "./imageCopies";
+import { versionAiValidated } from "./pieces";
 
 /** Internal side of the client review (§23): configuration, delivery rounds and withdrawals. */
 
@@ -156,6 +157,32 @@ async function currentImportPiece(ctx: QueryCtx, version: Doc<"qaVisualPieceVers
   return ctx.db.get(version.currentImportPieceId);
 }
 
+/**
+ * Whether the current version can go to the client again. It is blocked while the client is
+ * reviewing it, and when it has the three approvals (AI, team and client). If any of them
+ * changes, it can be sent again.
+ */
+async function clientSendState(
+  ctx: QueryCtx,
+  version: Doc<"qaVisualPieceVersions">,
+  decision: Doc<"qaVisualDecisions"> | null,
+) {
+  const sent = await ctx.db
+    .query("qaVisualDeliveryItems")
+    .withIndex("by_version", (q) => q.eq("pieceVersionId", version._id))
+    .take(10);
+  const active = sent.find((i) => i.status === "active");
+  const approved = decision?.decision === "approved";
+  // An approval with exception accepts the AI findings, so it counts as the AI approval.
+  const aiOk = approved && (Boolean(decision?.exception) || (await versionAiValidated(ctx, version)));
+  return {
+    approved,
+    awaitingClient: active?.clientState === "sent" || active?.clientState === "viewed",
+    fullyApproved: approved && aiOk && active?.clientState === "approved",
+    everSent: sent.some((i) => i.status !== "withdrawn"),
+  };
+}
+
 export const deliveryPreview = query({
   args: { campaignId: v.id("qaVisualCampaigns") },
   handler: async (ctx, { campaignId }) => {
@@ -176,16 +203,14 @@ export const deliveryPreview = query({
       if (!version) continue;
       const item = await currentImportPiece(ctx, version);
       const decision = version.currentDecisionId ? await ctx.db.get(version.currentDecisionId) : null;
-      const sent = await ctx.db
-        .query("qaVisualDeliveryItems")
-        .withIndex("by_version", (q) => q.eq("pieceVersionId", version._id))
-        .take(10);
+      const send = await clientSendState(ctx, version, decision);
       const client = await pieceClientStatus(ctx, piece);
       const title = pieceTitle(version.fileName, item?.input.production);
       const reason = deliveryBlocker({
         pieceStatus: piece.status,
-        approved: decision?.decision === "approved",
-        alreadySent: sent.some((i) => i.status !== "withdrawn"),
+        approved: send.approved,
+        awaitingClient: send.awaitingClient,
+        fullyApproved: send.fullyApproved,
         unresolvedDuplicate: hasUnresolvedDuplicate(item),
       });
       const row = {
@@ -199,8 +224,9 @@ export const deliveryPreview = query({
         withException: Boolean(decision?.exception),
         duplicate: Boolean(item?.input.issues?.some((i) => i.code === "file_duplicate_name")),
       };
+      // Pieces already with the client are not listed as blocked, except the fully approved ones.
       if (reason) {
-        if (!sent.some((i) => i.status !== "withdrawn")) blocked.push({ ...row, reason });
+        if (!send.everSent || send.fullyApproved) blocked.push({ ...row, reason });
       } else eligible.push(row);
     }
     return {
@@ -257,21 +283,18 @@ export const publishDelivery = mutation({
       const version = await ctx.db.get(id);
       const piece = version && (await ctx.db.get(version.pieceId));
       const decision = version?.currentDecisionId ? await ctx.db.get(version.currentDecisionId) : null;
-      const sent = version
-        ? await ctx.db
-            .query("qaVisualDeliveryItems")
-            .withIndex("by_version", (q) => q.eq("pieceVersionId", version._id))
-            .take(10)
-        : [];
+      const send = version ? await clientSendState(ctx, version, decision) : null;
       if (
         !version ||
         !piece ||
+        !send ||
         piece.campaignId !== campaign._id ||
         piece.currentVersionId !== version._id ||
         deliveryBlocker({
           pieceStatus: piece.status,
-          approved: decision?.decision === "approved",
-          alreadySent: sent.some((i) => i.status !== "withdrawn"),
+          approved: send.approved,
+          awaitingClient: send.awaitingClient,
+          fullyApproved: send.fullyApproved,
           unresolvedDuplicate: hasUnresolvedDuplicate(
             await ctx.db.get(version.currentImportPieceId),
           ),

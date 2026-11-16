@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeCheck, Bot, Building2, CheckCheck, Columns3, ListFilter, MessageSquare, RotateCcw, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, BadgeCheck, Bot, Building2, Check, CheckCheck, Columns3, ListFilter, Lock, MessageSquare, Reply, RotateCcw, Send, ShieldCheck } from "lucide-react";
 import { FinalApprovalBanner } from "@/app/components/qa-visual/piece/review-status";
 import { carouselOrder, hasFinalApproval } from "@/app/lib/qa-visual/piece-filters";
 import { CarouselShell } from "@/app/components/qa-visual/carousel/CarouselShell";
@@ -14,8 +14,10 @@ export function InternalCarousel({
   onOpenDetailed,
   onReanalyze,
   reanalyzing,
+  pieceHref,
 }: {
   session: ReviewSession;
+  pieceHref: string;
   onClose: () => void;
   onOpenDetailed: () => void;
   onReanalyze?: () => void;
@@ -37,7 +39,6 @@ export function InternalCarousel({
   const client = internalClientState(piece.client);
   const final = hasFinalApproval(piece.client);
   const filtered = session.filters.length > 0 || session.query.trim().length > 0;
-  const clientThreads = (session.detail?.threads ?? []).filter((t) => t.audience === "client");
   const markers = pieceComments.filter((c) => c.pin);
   const ratio = piece.width && piece.height ? piece.width / piece.height : 1;
   return (
@@ -57,10 +58,19 @@ export function InternalCarousel({
             <ListFilter size={13} /> Filtrado
           </span>
         )}
-        <button className="qa-carousel-btn" onClick={onOpenDetailed}>
+        <a
+          className="qa-carousel-btn"
+          href={pieceHref}
+          onClick={(e) => {
+            // Plain click opens the piece here; Cmd/Ctrl-click keeps the link for a new tab.
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onOpenDetailed();
+          }}
+        >
           <Columns3 size={14} />
-          Abrir en revisión detallada
-        </button>
+          <span>Ir a la pieza</span>
+        </a>
         </>
       }
       stage={
@@ -140,23 +150,116 @@ export function InternalCarousel({
                 <MessageSquare size={12} /> Conversaciones · {pieceComments.length}
               </h4>
               {!pieceComments.length && <p className="qa-muted">Sin comentarios en esta versión.</p>}
-              {pieceComments.slice(0, 8).map((c) => {
+              {pieceComments.slice(0, 12).map((c) => {
                 const thread = session.detail?.threads.find((t) => t._id === c.threadId);
                 const fromClient = thread?.audience === "client";
+                const canReply = session.canReview && Boolean(c.threadId || c.finding);
+                const replying = session.replyTo === c.id;
+                const last = c.replies?.at(-1);
                 return (
                   <article key={c.id} className={`qa-mini-comment ${fromClient ? "client" : c.kind}`}>
                     <b>
                       {c.author}
                       {fromClient && <span className="qa-tag-client">Cliente</span>}
+                      {c.resolved && <span className="qa-mini-resolved"><Check size={10} /> Resuelto</span>}
                     </b>
                     <p>{c.body || (thread?.comments[0]?.audio ? "Comentario de voz" : "")}</p>
+                    {last && (
+                      <div className={`qa-mini-reply ${last.visibility === "internal" && fromClient ? "note" : ""}`}>
+                        <b>
+                          {last.author}
+                          {fromClient && last.visibility === "internal" && <span className="qa-mini-note"><Lock size={9} /> Nota interna</span>}
+                        </b>
+                        <p>{last.body || "Audio"}</p>
+                        {c.replies!.length > 1 && <small>{c.replies!.length} respuestas</small>}
+                      </div>
+                    )}
+                    {replying ? (
+                      <div className="qa-mini-composer">
+                        {fromClient && (
+                          <div className="qa-reply-modes" role="radiogroup" aria-label="Destino de la respuesta">
+                            <button
+                              role="radio"
+                              aria-checked={session.replyVisibility === "client"}
+                              className={session.replyVisibility === "client" ? "on client" : ""}
+                              onClick={() => session.setReplyVisibility("client")}
+                            >
+                              <Building2 size={11} /> Al cliente
+                            </button>
+                            <button
+                              role="radio"
+                              aria-checked={session.replyVisibility === "internal"}
+                              className={session.replyVisibility === "internal" ? "on" : ""}
+                              onClick={() => session.setReplyVisibility("internal")}
+                            >
+                              <Lock size={11} /> Nota interna
+                            </button>
+                          </div>
+                        )}
+                        <textarea
+                          autoFocus
+                          value={session.draft}
+                          maxLength={4000}
+                          rows={3}
+                          disabled={session.saving}
+                          placeholder={fromClient && session.replyVisibility === "client" ? "Respuesta para el cliente…" : "Escribí una respuesta…"}
+                          aria-label="Respuesta"
+                          onChange={(e) => session.setDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            // Keep carousel shortcuts out of the composer.
+                            e.stopPropagation();
+                            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                              e.preventDefault();
+                              void session.publish();
+                            }
+                            if (e.key === "Escape") session.setReplyTo(null);
+                          }}
+                        />
+                        <div className="qa-mini-composer-actions">
+                          <button className="button secondary" onClick={() => session.setReplyTo(null)} disabled={session.saving}>
+                            Cancelar
+                          </button>
+                          <button
+                            className="button primary"
+                            onClick={() => void session.publish()}
+                            disabled={session.saving || !session.draft.trim()}
+                          >
+                            <Send size={13} />
+                            {fromClient && session.replyVisibility === "client" ? "Enviar al cliente" : "Responder"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="qa-mini-actions">
+                        {canReply && (
+                          <button
+                            onClick={() => {
+                              session.setDraft("");
+                              session.setReplyTo(c.id);
+                              // From the carousel, answering a client thread goes to the client by default.
+                              if (fromClient) session.setReplyVisibility("client");
+                            }}
+                          >
+                            <Reply size={12} /> Responder
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            onOpenDetailed();
+                            session.selectComment(c.id, { highlight: true });
+                          }}
+                        >
+                          <ArrowUpRight size={12} /> Ver en la pieza
+                        </button>
+                      </div>
+                    )}
                   </article>
                 );
               })}
-              {clientThreads.length > 0 && (
-                <p className="qa-muted">
-                  {clientThreads.length} {clientThreads.length === 1 ? "conversación" : "conversaciones"} con el cliente. Respondé desde la revisión detallada.
-                </p>
+              {pieceComments.length > 12 && (
+                <button className="qa-link" onClick={onOpenDetailed}>
+                  Ver las {pieceComments.length} conversaciones en la pieza
+                </button>
               )}
             </div>
           </div>
