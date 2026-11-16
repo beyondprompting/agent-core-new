@@ -12,6 +12,7 @@ import {
   validatePreapprovedClientAccess,
 } from "../lib/externalUserPreapproval";
 import { isTrelloEnabledForCorClientId } from "../lib/trelloPolicy";
+import { normalizeExternalWorkRole } from "../lib/externalPieceRoles";
 import { listPlatformAdminIds, normalizeWorkRole, removeInternalRoleProfileForExternal, requireUserRoleAdmin } from "../lib/userRoles";
 
 export const setExternalUserRoles = mutation({
@@ -26,7 +27,7 @@ export const setExternalUserRoles = mutation({
     if (!current) throw new Error("No encontramos este usuario externo.");
     const values = {
       isCoordinator: args.isCoordinator,
-      workRole: args.workRole === undefined ? current.workRole : normalizeWorkRole(args.workRole),
+      workRole: args.workRole === undefined ? current.workRole : normalizeExternalWorkRole(normalizeWorkRole(args.workRole)),
     };
     if (current.userId) await removeInternalRoleProfileForExternal(ctx, current.userId, current._id, actorId);
     const before = JSON.stringify({ isCoordinator: current.isCoordinator ?? false, workRole: current.workRole });

@@ -5,6 +5,11 @@ import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "./ui/Button";
+import {
+  EXTERNAL_PIECE_ROLES,
+  EXTERNAL_PIECE_ROLE_LABELS,
+  externalPieceRole,
+} from "@/convex/lib/externalPieceRoles";
 
 type PlatformRole = "user" | "admin" | "super_admin";
 type InternalProps = {
@@ -16,6 +21,7 @@ type ExternalProps = {
   kind: "external";
   approvedExternalUserId: Id<"approvedExternalUsers">;
   isCoordinator: boolean;
+  workRole?: string;
 };
 
 export function UserRolesEditor(props: InternalProps | ExternalProps) {
@@ -110,10 +116,13 @@ function InternalRoleSelect({
 function ExternalCoordinatorEditor({
   approvedExternalUserId,
   isCoordinator: initialCoordinator,
+  workRole: storedWorkRole,
 }: ExternalProps) {
+  const initialPieceRole = externalPieceRole(storedWorkRole) ?? "";
   const id = useId();
   const saveRole = useMutation(api.data.externalUserAdmin.setExternalUserRoles);
   const [isCoordinator, setIsCoordinator] = useState(initialCoordinator);
+  const [pieceRole, setPieceRole] = useState<string>(initialPieceRole);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{
     error: boolean;
@@ -122,14 +131,16 @@ function ExternalCoordinatorEditor({
 
   useEffect(() => {
     setIsCoordinator(initialCoordinator);
+    setPieceRole(initialPieceRole);
     setFeedback(null);
-  }, [approvedExternalUserId, initialCoordinator]);
+  }, [approvedExternalUserId, initialCoordinator, initialPieceRole]);
+  const changed = isCoordinator !== initialCoordinator || pieceRole !== initialPieceRole;
 
   const save = async () => {
     setSaving(true);
     setFeedback(null);
     try {
-      await saveRole({ approvedExternalUserId, isCoordinator });
+      await saveRole({ approvedExternalUserId, isCoordinator, workRole: pieceRole });
       setFeedback({ error: false, text: "Roles guardados." });
     } catch (error) {
       setFeedback({
@@ -173,11 +184,42 @@ function ExternalCoordinatorEditor({
             únicamente en las tareas a las que tiene acceso.
           </p>
         </div>
+        <div>
+          <label htmlFor={id + "-piece-role"} className="text-sm font-medium">
+            Acceso a piezas (QA Visual)
+          </label>
+          <select
+            id={id + "-piece-role"}
+            value={pieceRole}
+            disabled={saving}
+            onChange={(event) => setPieceRole(event.target.value)}
+            aria-describedby={id + "-piece-role-help"}
+            className="mt-1 block h-9 w-full max-w-xs rounded-md border border-border bg-background px-2 text-sm"
+          >
+            <option value="">Sin acceso · usa el chat y crea pedidos</option>
+            {EXTERNAL_PIECE_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {EXTERNAL_PIECE_ROLE_LABELS[role]}
+              </option>
+            ))}
+          </select>
+          <p
+            id={id + "-piece-role-help"}
+            className="mt-1 text-xs text-muted-foreground"
+          >
+            {pieceRole
+              ? "Ve todas las campañas enviadas a sus clientes asignados y no ve el chat. " +
+                (pieceRole === "pieceApproval"
+                  ? "Puede comentar y aprobar piezas."
+                  : "Puede comentar y pedir cambios, pero no aprobar.")
+              : "Sigue usando el chat y creando pedidos como hasta ahora."}
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
             size="sm"
-            disabled={isCoordinator === initialCoordinator || saving}
+            disabled={!changed || saving}
             onClick={save}
           >
             {saving ? "Guardando..." : "Guardar roles"}

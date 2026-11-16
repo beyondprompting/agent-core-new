@@ -12,6 +12,7 @@ import {
   UserPlus,
   Building2,
   ScanLine,
+  Images,
 } from "lucide-react";
 
 /**
@@ -29,6 +30,8 @@ export function TopNavigation() {
     api.data.externalUserAdmin.viewerCanAccessExternalUserAdmin,
   );
   const isExternalUser = accessProfile?.kind === "external";
+  // External piece reviewers see the client's pieces instead of the chat.
+  const isPieceReviewer = isExternalUser && Boolean(accessProfile?.pieceRole);
 
   const tabs = [
     {
@@ -36,6 +39,12 @@ export function TopNavigation() {
       href: "/workspace",
       icon: MessageSquare,
       isActive: pathname === "/workspace",
+    },
+    {
+      label: "Piezas",
+      href: "/workspace/reviews",
+      icon: Images,
+      isActive: pathname.startsWith("/workspace/reviews"),
     },
     {
       label: "Panel de Control",
@@ -81,6 +90,8 @@ export function TopNavigation() {
       isActive: pathname === "/workspace/analytics",
     },
   ].filter((tab) => {
+    if (tab.href === "/workspace") return !isPieceReviewer;
+    if (tab.href === "/workspace/reviews") return isPieceReviewer;
     if (tab.href === "/workspace/qa-visual") {
       return (
         process.env.NODE_ENV === "development" &&
@@ -117,7 +128,7 @@ export function TopNavigation() {
               key={tab.href}
               href={tab.href}
               className={`
-                ${tab.href === "/workspace" || tab.href === "/workspace/requests" ? "flex" : "hidden md:flex"}
+                ${tab.href === "/workspace" || tab.href === "/workspace/requests" || tab.href === "/workspace/reviews" ? "flex" : "hidden md:flex"}
                 relative items-center gap-2 px-4 py-3 text-sm font-medium transition-colors
                 ${
                   tab.isActive

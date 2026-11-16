@@ -12,6 +12,7 @@ import { LoadingScreen } from "@/app/components/LoadingScreen";
 /** Portal frame: same tokens and components as the internal editor, without internal navigation. */
 export function ClientShell({ children }: { children: ReactNode }) {
   const access = useQuery(api.qaVisual.clientPortal.campaigns);
+  const profile = useQuery(api.data.userAccess.viewerAccessProfile);
   if (access === undefined) return <LoadingScreen />;
   return (
     <div className="qa-visual">
@@ -23,6 +24,11 @@ export function ClientShell({ children }: { children: ReactNode }) {
           <span className="qa-portal-divider" />
           <b>Revisión de piezas</b>
           <span className="qa-grow" />
+          {profile?.kind === "external" && profile.canAccessExternalRequests && (
+            <Link href="/workspace/requests" className="qa-link">
+              Mis tareas
+            </Link>
+          )}
           {access.mode === "preview" && (
             <span className="qa-chip tone-progress" title="Ves lo mismo que el cliente, sin poder comentar ni decidir">
               Vista previa interna
@@ -34,7 +40,7 @@ export function ClientShell({ children }: { children: ReactNode }) {
         {access.mode === null ? (
           <div className="qa-portal-empty">
             <b>No tenés revisiones disponibles</b>
-            <p>Si esperabas ver piezas, pedile a la agencia que te asigne a la campaña.</p>
+            <p>Si esperabas ver piezas, pedile a la agencia que te dé acceso a la revisión de piezas.</p>
           </div>
         ) : (
           children

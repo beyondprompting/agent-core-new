@@ -3,11 +3,13 @@ import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { isExternalRoleTarget } from "../lib/userRoles";
+import { externalPieceRole } from "../lib/externalPieceRoles";
 import { qaVisualDisabled } from "./access";
 
 /**
- * Client portal access (§23.6). External users see a campaign only when it has client
- * review enabled and they are assigned to its client (and brand, when the campaign has one).
+ * Client portal access (§23.6). External users with a piece role (workRole pieceReview or
+ * pieceApproval) see every campaign with client review enabled of the client they are
+ * assigned to (and brand, when the campaign has one). Only pieceApproval can approve.
  * Internal QA admins can open the portal in read-only preview mode.
  */
 const notFound = () =>
@@ -30,12 +32,19 @@ async function isQaAdmin(ctx: QueryCtx, userId: Id<"users">) {
 }
 
 export async function isExternalUser(ctx: QueryCtx, userId: Id<"users">) {
-  return Boolean(
-    await ctx.db
-      .query("approvedExternalUsers")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first(),
-  );
+  return Boolean(await externalUser(ctx, userId));
+}
+
+function externalUser(ctx: QueryCtx, userId: Id<"users">) {
+  return ctx.db
+    .query("approvedExternalUsers")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .first();
+}
+
+/** Piece role of an external user: only these users see the portal (not every external). */
+export async function externalPieceRoleOf(ctx: QueryCtx, userId: Id<"users">) {
+  return externalPieceRole((await externalUser(ctx, userId))?.workRole);
 }
 
 export async function assignedToCampaignClient(
@@ -61,9 +70,10 @@ export async function portalViewer(ctx: QueryCtx) {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
   if (await isQaAdmin(ctx, userId))
-    return { userId, mode: "preview" as PortalMode };
-  if (await isExternalUser(ctx, userId))
-    return { userId, mode: "client" as PortalMode };
+    return { userId, mode: "preview" as PortalMode, role: null };
+  // Externals without a piece role keep only chat and briefs.
+  const role = await externalPieceRoleOf(ctx, userId);
+  if (role) return { userId, mode: "client" as PortalMode, role };
   return null;
 }
 
@@ -86,15 +96,13 @@ export async function requireClientCampaign(
     !(await assignedToCampaignClient(ctx, viewer.userId, campaign))
   )
     throw notFound();
-  const approvers = campaign.clientReview.approverIds ?? [];
   return {
     user: viewer.userId,
     mode: viewer.mode,
     campaign,
     canComment: viewer.mode === "client",
-    canApprove:
-      viewer.mode === "client" &&
-      (!approvers.length || approvers.includes(viewer.userId)),
+    // Approval is a per-person role; there is no per-campaign approver list for now.
+    canApprove: viewer.mode === "client" && viewer.role === "pieceApproval",
   };
 }
 

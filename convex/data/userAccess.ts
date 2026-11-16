@@ -3,6 +3,8 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internalQuery, query } from "../_generated/server";
 import { canAdministerPlatform, isExternalRoleTarget } from "../lib/userRoles";
+import { externalPieceRole } from "../lib/externalPieceRoles";
+import { qaVisualDisabled } from "../qaVisual/access";
 
 // Actions resolve the same database-backed authorization as queries/mutations.
 export const hasPlatformAdminAccess = internalQuery({
@@ -30,6 +32,8 @@ export const viewerAccessProfile = query({
       canAccessQaVisual,
       isAuthenticated: true,
       canAccessExternalRequests: Boolean(approvedExternalUser) && await hasExternalRequestsAccess(ctx, userId),
+      // External piece reviewers see the client portal instead of the chat.
+      pieceRole: approvedExternalUser && !qaVisualDisabled() ? externalPieceRole(approvedExternalUser.workRole) : null,
       userId,
       kind: approvedExternalUser ? ("external" as const) : ("internal" as const),
       approvedExternalUserId: approvedExternalUser?._id,

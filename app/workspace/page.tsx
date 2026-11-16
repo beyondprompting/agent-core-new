@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useCallback, useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, usePaginatedQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { WorkspaceLayout } from "../components/WorkspaceLayout";
@@ -12,6 +12,14 @@ import ChatInterface from "../ChatInterface";
 // import { clientConfig } from "@/config/tenant.config";
 
 export default function WorkspacePage() {
+  const access = useQuery(api.data.userAccess.viewerAccessProfile);
+  const router = useRouter();
+  // External piece reviewers do not use the chat: they land on the client's pieces.
+  const pieceReviewer = access?.kind === "external" && Boolean(access.pieceRole);
+  useEffect(() => {
+    if (pieceReviewer) router.replace("/workspace/reviews");
+  }, [pieceReviewer, router]);
+  if (access === undefined || pieceReviewer) return <LoadingScreen />;
   return <Suspense fallback={<LoadingScreen />}><WorkspaceChat /></Suspense>;
 }
 

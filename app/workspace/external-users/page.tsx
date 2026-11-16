@@ -829,7 +829,7 @@ export default function ExternalUsersAdminPage() {
                   )}
                 </section>
 
-                <UserRolesEditor key={selectedUser._id} kind="external" approvedExternalUserId={selectedUser._id} isCoordinator={selectedUser.isCoordinator} />
+                <UserRolesEditor key={selectedUser._id} kind="external" approvedExternalUserId={selectedUser._id} isCoordinator={selectedUser.isCoordinator} workRole={selectedUser.workRole} />
 
                 {selectedUser.userId ? (
                   <section className="rounded-lg border border-border bg-card">

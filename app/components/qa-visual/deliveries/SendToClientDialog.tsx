@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
-import { Building2, Check, Eye, LoaderCircle, Send, Settings2, X } from "lucide-react";
+import { Building2, Check, Eye, FileText, LoaderCircle, Send, Settings2, Tag, UserCheck, Users, X } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 
@@ -104,7 +104,6 @@ function ClientConfig({
   const [clientId, setClientId] = useState<string>(settings.client?.id ?? "");
   const [brandId, setBrandId] = useState<string>(settings.client?.brandId ?? "");
   const [agencyLabel, setAgencyLabel] = useState(settings.agencyLabel);
-  const [approvers, setApprovers] = useState<string[]>(settings.approverIds);
   const [fields, setFields] = useState<string[]>(settings.briefFields);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -124,7 +123,6 @@ function ClientConfig({
         ...(brandId ? { brandId: brandId as Id<"clientBrands"> } : {}),
         enabled: true,
         agencyLabel,
-        approverIds: sameClient ? (approvers as Id<"users">[]) : [],
         briefFields: fields,
       });
       onDone();
@@ -134,95 +132,148 @@ function ClientConfig({
       setSaving(false);
     }
   }
+  const people = sameClient ? settings.people : [];
+  const approvers = people.filter((p) => p.role === "pieceApproval").length;
   return (
     <>
-      <div className="qa-dialog-body">
-        <label className="qa-field">
-          <span>Cliente</span>
-          <select
-            value={clientId}
-            onChange={(e) => {
-              setClientId(e.target.value);
-              setBrandId("");
-            }}
-          >
-            <option value="">Elegir un cliente…</option>
-            {settings.clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="qa-field">
-          <span>Marca <small>(opcional)</small></span>
-          <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={!clientId}>
-            <option value="">Todo el cliente</option>
-            {(brands ?? []).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="qa-field">
-          <span>Cómo ve el cliente a la agencia</span>
-          <input value={agencyLabel} maxLength={60} onChange={(e) => setAgencyLabel(e.target.value)} />
-        </label>
-        <fieldset className="qa-field">
-          <legend>Quién aprueba</legend>
-          {!sameClient || !settings.people.length ? (
-            <p className="qa-muted">
-              {clientId && sameClient
-                ? "Todavía no hay usuarios externos asignados a este cliente. Asignalos desde Usuarios externos."
-                : "Guardá el cliente para elegir quién aprueba. Mientras no elijas, aprueba cualquier persona asignada."}
-            </p>
+      <div className="qa-dialog-body qa-config">
+        <section className="qa-config-section">
+          <header>
+            <span className="qa-config-icon"><Building2 size={15} /></span>
+            <div>
+              <h3>Cliente y marca</h3>
+              <p>Solo acceden las personas del cliente asignadas a esta marca.</p>
+            </div>
+          </header>
+          <div className="qa-config-grid">
+            <label className="qa-field">
+              <span>Cliente</span>
+              <select
+                value={clientId}
+                onChange={(e) => {
+                  setClientId(e.target.value);
+                  setBrandId("");
+                }}
+              >
+                <option value="">Elegir un cliente…</option>
+                {settings.clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="qa-field">
+              <span>Marca <small>· opcional</small></span>
+              <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={!clientId}>
+                <option value="">Todo el cliente</option>
+                {(brands ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section className="qa-config-section">
+          <header>
+            <span className="qa-config-icon"><UserCheck size={15} /></span>
+            <div>
+              <h3>Quién ve y aprueba</h3>
+              <p>
+                Personas del cliente con rol de piezas. El rol se asigna en Externos → Roles del usuario.
+                {people.length > 0 && !approvers && " Nadie puede dar la aprobación final todavía."}
+              </p>
+            </div>
+          </header>
+          {!people.length ? (
+            <div className="qa-config-empty">
+              <Users size={16} />
+              <span>
+                {!clientId
+                  ? "Elegí un cliente para ver quiénes tienen acceso."
+                  : !sameClient
+                    ? "Guardá el cliente para ver quiénes tienen acceso."
+                    : "Ninguna persona de este cliente tiene rol de piezas. Asignalo desde Externos → Roles del usuario."}
+              </span>
+            </div>
           ) : (
-            <div className="qa-checks">
-              {settings.people.map((p) => (
-                <label key={p.id}>
+            <ul className="qa-people">
+              {people.map((p) => (
+                <li key={p.id}>
+                  <div className="qa-person">
+                    <span className="qa-person-avatar" aria-hidden>
+                      {(p.name || p.email).slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="qa-person-copy">
+                      <b>{p.name}</b>
+                      <small>{p.email}</small>
+                    </span>
+                    <span className={`qa-role-badge ${p.role === "pieceApproval" ? "approve" : ""}`}>
+                      {p.role === "pieceApproval" ? "Aprueba" : "Revisa"}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="qa-config-section">
+          <header>
+            <span className="qa-config-icon"><FileText size={15} /></span>
+            <div>
+              <h3>Ficha del pedido</h3>
+              <p>Datos del pedido que el cliente ve junto a cada pieza.</p>
+            </div>
+          </header>
+          <div className="qa-pill-checks" role="group" aria-label="Campos visibles para el cliente">
+            {settings.availableFields.map((f) => {
+              const on = fields.includes(f.key);
+              return (
+                <label key={f.key} className={on ? "on" : ""}>
                   <input
                     type="checkbox"
-                    checked={approvers.includes(p.id)}
+                    checked={on}
                     onChange={(e) =>
-                      setApprovers((prev) =>
-                        e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id),
+                      setFields((prev) =>
+                        e.target.checked ? [...prev, f.key] : prev.filter((k) => k !== f.key),
                       )
                     }
                   />
-                  {p.name} <small>{p.email}</small>
+                  <span className="qa-pill-box" aria-hidden>{on && <Check size={11} strokeWidth={3} />}</span>
+                  {f.label}
                 </label>
-              ))}
-              <p className="qa-muted">Si no marcás a nadie, aprueba cualquier persona asignada al cliente.</p>
-            </div>
-          )}
-        </fieldset>
-        <fieldset className="qa-field">
-          <legend>Qué ve el cliente en la ficha del pedido</legend>
-          <div className="qa-checks inline">
-            {settings.availableFields.map((f) => (
-              <label key={f.key}>
-                <input
-                  type="checkbox"
-                  checked={fields.includes(f.key)}
-                  onChange={(e) =>
-                    setFields((prev) =>
-                      e.target.checked ? [...prev, f.key] : prev.filter((k) => k !== f.key),
-                    )
-                  }
-                />
-                {f.label}
-              </label>
-            ))}
+              );
+            })}
           </div>
-        </fieldset>
+        </section>
+
+        <section className="qa-config-section">
+          <header>
+            <span className="qa-config-icon"><Tag size={15} /></span>
+            <div>
+              <h3>Nombre de la agencia</h3>
+              <p>Así firman las respuestas del equipo en el portal del cliente.</p>
+            </div>
+          </header>
+          <label className="qa-field">
+            <span className="sr-only">Nombre de la agencia</span>
+            <input value={agencyLabel} maxLength={60} placeholder="PTO99" onChange={(e) => setAgencyLabel(e.target.value)} />
+          </label>
+          <p className="qa-config-preview">
+            El cliente ve las respuestas como <b>{agencyLabel.trim() || "Agencia"} · Nombre</b>
+          </p>
+        </section>
         {error && <p className="qa-error" role="alert">{error}</p>}
       </div>
       <footer className="qa-dialog-foot">
         <button className="button secondary" onClick={onCancel}>Cancelar</button>
         <button className="button primary" onClick={() => void save()} disabled={saving || !clientId}>
           {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
-          Guardar
+          Guardar configuración
         </button>
       </footer>
     </>

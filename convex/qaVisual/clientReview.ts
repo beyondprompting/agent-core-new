@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { mutation, query, type QueryCtx } from "../_generated/server";
 import { requireCampaign } from "./access";
-import { assignedToCampaignClient } from "./clientAccess";
+import { assignedToCampaignClient, externalPieceRoleOf } from "./clientAccess";
 import {
   BRIEF_FIELDS,
   buildClientBrief,
@@ -14,6 +14,7 @@ import { versionCopy } from "./imageCopies";
 
 /** Internal side of the client review (§23): configuration, delivery rounds and withdrawals. */
 
+/** External people that see the portal: assigned to the client and with a piece role. */
 async function clientPeople(ctx: QueryCtx, campaign: Doc<"qaVisualCampaigns">) {
   if (!campaign.client) return [];
   const assignments = await ctx.db
@@ -29,8 +30,11 @@ async function clientPeople(ctx: QueryCtx, campaign: Doc<"qaVisualCampaigns">) {
   ];
   const people = await Promise.all(
     ids.map(async (id) => {
-      const user = await ctx.db.get(id);
-      return user ? { id, name: user.name || user.email || "Usuario", email: user.email ?? "" } : null;
+      const role = await externalPieceRoleOf(ctx, id);
+      const user = role ? await ctx.db.get(id) : null;
+      return user && role
+        ? { id, name: user.name || user.email || "Usuario", email: user.email ?? "", role }
+        : null;
     }),
   );
   return people.filter((p) => p !== null);

@@ -391,3 +391,22 @@ test("signup initialization never creates a role for a missing user account", as
   await ensureDefaultRoleForNewInternalUser(f.ctx, { userId: "missing" as any, existingUserId: null, providerId: "google" });
   assert.deepEqual([...f.rows], before);
 });
+
+test("external work role only accepts the piece roles and exposes them in the access profile", async () => {
+  const f = fixture();
+  await f.call(setExternalUserRoles, { approvedExternalUserId: "approved", isCoordinator: false, workRole: "pieceApproval" });
+  assert.equal(f.rows.get("approved").workRole, "pieceApproval");
+  f.as("external");
+  const profile = await f.call(viewerAccessProfile);
+  assert.equal(profile.pieceRole, "pieceApproval");
+  f.as(f.adminId);
+  await assert.rejects(
+    f.call(setExternalUserRoles, { approvedExternalUserId: "approved", isCoordinator: false, workRole: "Diseño" }),
+    /Rol externo no válido/,
+  );
+  assert.equal(f.rows.get("approved").workRole, "pieceApproval");
+  await f.call(setExternalUserRoles, { approvedExternalUserId: "approved", isCoordinator: false, workRole: "" });
+  assert.equal(f.rows.get("approved").workRole, undefined);
+  f.as("external");
+  assert.equal((await f.call(viewerAccessProfile)).pieceRole, null);
+});
