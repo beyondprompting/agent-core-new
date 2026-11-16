@@ -149,7 +149,7 @@ export function ReviewStatusBar({
             <StateIcon tone={ai.tone} animate />
           </span>
         </span>
-        <span className="review-state-copy">
+        <span className="review-state-copy" title={`${ai.title} · ${ai.detail}`}>
           <span className="review-state-eyebrow">REVISIÓN IA</span>
           <strong className="review-state-title">{ai.title}</strong>
           <span className="review-state-detail">{ai.detail}</span>
@@ -158,6 +158,7 @@ export function ReviewStatusBar({
           type="button"
           className="button secondary piece-review-action"
           onClick={onOpenAi}
+          title={ai.status === "findings" ? "Ver hallazgos" : "Ver revisión"}
           aria-label={`Revisión IA: ${ai.title}. Ver resultado`}
         >
           <span>
@@ -176,13 +177,13 @@ export function ReviewStatusBar({
           {human.author ? (
             <ReviewerAvatar author={human.author} />
           ) : (
-            <UserRound size={21} />
+            <UserRound size={16} />
           )}
           <span className={`identity-indicator state-${human.tone}`}>
             <StateIcon tone={human.tone} />
           </span>
         </span>
-        <span className="review-state-copy">
+        <span className="review-state-copy" title={`${human.title} · ${human.detail}`}>
           <span className="review-state-eyebrow">APROBACIÓN HUMANA</span>
           <strong className="review-state-title">{human.title}</strong>
           <span className="review-state-detail">{human.detail}</span>
@@ -190,6 +191,7 @@ export function ReviewStatusBar({
         <button
           className={`button ${human.tone === "success" ? "secondary" : "primary"} piece-review-action`}
           onClick={onOpenHuman}
+          title={human.tone === "success" ? "Ver decisión" : "Aprobar esta versión"}
           aria-label={`${human.tone === "success" ? "Ver decisión" : "Aprobar esta versión"}: ${pieceName}, versión ${version}`}
         >
           {human.tone === "success" ? (
@@ -211,9 +213,12 @@ export function ReviewStatusBar({
         aria-label={`Aprobación final del cliente: ${final?.title ?? clientState.label}`}
       >
         <span className="review-identity">
-          {final?.final ? <BadgeCheck size={22} /> : <Building2 size={20} />}
+          {final?.final ? <BadgeCheck size={18} /> : <Building2 size={17} />}
         </span>
-        <span className="review-state-copy">
+        <span
+          className="review-state-copy"
+          title={final && !final.final ? final.detail : clientState.detail}
+        >
           <span className="review-state-eyebrow">CLIENTE · APROBACIÓN FINAL</span>
           <strong className="review-state-title">{final?.final ? "Aprobación final" : clientState.label}</strong>
           <span className="review-state-detail">
