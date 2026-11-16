@@ -96,7 +96,7 @@
 @keyframes qa-pulse{50%{transform:translate(-50%,-50%) scale(1.12)}}
 
 /* Diálogos nativos (Enviar al cliente) */
-.qa-dialog{width:min(640px,calc(100% - 2rem));max-height:calc(100dvh - 2rem);padding:0;border:0;border-radius:16px;background:var(--surface,#fff);color:var(--text,#192237);box-shadow:0 24px 60px #0b0f1a40;overflow:hidden;display:flex;flex-direction:column}
+.qa-dialog{position:fixed;inset:0;margin:auto;width:min(640px,calc(100% - 2rem));max-height:calc(100dvh - 2rem);padding:0;border:0;border-radius:16px;background:var(--surface,#fff);color:var(--text,#192237);box-shadow:0 24px 60px #0b0f1a40;overflow:hidden;display:flex;flex-direction:column}
 .qa-dialog:not([open]){display:none}
 .qa-dialog::backdrop{background:#0b0f1a73;backdrop-filter:blur(2px)}
 .qa-dialog-head{display:flex;justify-content:space-between;gap:12px;padding:20px 22px 8px}
