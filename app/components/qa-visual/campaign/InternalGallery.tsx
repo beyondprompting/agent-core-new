@@ -111,7 +111,7 @@ export function InternalGallery({
       </div>
       <GalleryGrid
         onOpen={onOpen}
-        // Selection is kept per version so it survives filters and re-imports.
+        // Selection is kept per version; pieces hidden by filters leave it (see QaViewer).
         onToggle={(id) => {
           const versionId = filteredPieces.find((p) => p.id === id)?.pieceVersionId;
           if (versionId) onToggle(versionId);

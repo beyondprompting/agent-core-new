@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -179,6 +179,19 @@ function ReviewWorkspace({
   const [carousel, setCarousel] = useState(false);
   const [sending, setSending] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
+  // Only what is on screen stays selected: a piece hidden by filters or search must not be
+  // approved or sent without being seen.
+  const visibleVersions = session.filteredPieces
+    .flatMap((p) => (p.pieceVersionId ? [p.pieceVersionId] : []))
+    .join(",");
+  useEffect(() => {
+    const visible = new Set(visibleVersions.split(","));
+    setSelection((prev) =>
+      [...prev].every((id) => visible.has(id))
+        ? prev
+        : new Set([...prev].filter((id) => visible.has(id))),
+    );
+  }, [visibleVersions]);
   const changeView = (next: CampaignView) => {
     setView(next);
     const url = new URL(window.location.href);
