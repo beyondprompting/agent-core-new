@@ -161,10 +161,20 @@ export function FilesPanel({
                   className={`file-card ${activeId === p.id ? "selected" : ""}`}
                   onClick={() => choosePiece(p.id)}
                 >
-                  <div className="file-thumbnail">
+                  <div
+                    className={`file-thumbnail ${(p.currentVersion ?? 1) > 1 ? "has-versions" : ""}`}
+                  >
                     <Artwork piece={p} thumbnail />
                     {p.width > 0 && p.height * 9 === p.width * 16 && (
                       <span className="thumbnail-format">9:16</span>
+                    )}
+                    {(p.currentVersion ?? 1) > 1 && (
+                      <span
+                        className="thumbnail-version"
+                        title={`Versión ${p.currentVersion}: esta pieza tiene ${p.currentVersion} versiones`}
+                      >
+                        v{p.currentVersion}
+                      </span>
                     )}
                   </div>
                   <div className="file-card-content">
