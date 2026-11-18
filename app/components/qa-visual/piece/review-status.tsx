@@ -128,19 +128,7 @@ export function ReviewStatusBar({
       className="review-status-strip with-client"
       aria-label="Estado de revisión IA y aprobación humana"
     >
-      <div className="ai-state-wrap">
-      {onReanalyze && (
-        <button
-          type="button"
-          className="qa-reanalyze"
-          disabled={reanalyzing}
-          onClick={onReanalyze}
-          title={reanalyzing ? "Esta pieza ya se está analizando" : "Volver a analizar esta versión"}
-          aria-label={`Volver a analizar ${pieceName}, versión ${version}`}
-        >
-          <RotateCcw size={13} />
-        </button>
-      )}
+      <div className="review-status-cards">
       <div
         className={`review-state-card review-action-card ai-state-card state-${ai.tone}`}
         role="group"
@@ -157,19 +145,35 @@ export function ReviewStatusBar({
           <strong className="review-state-title">{ai.title}</strong>
           <span className="review-state-detail">{ai.detail}</span>
         </span>
-        <button
-          type="button"
-          className="button secondary piece-review-action"
-          onClick={onOpenAi}
-          title={ai.status === "findings" ? "Ver hallazgos" : "Ver revisión"}
-          aria-label={`Revisión IA: ${ai.title}. Ver resultado`}
-        >
-          <span>
-            {ai.status === "findings" ? "Ver hallazgos" : "Ver revisión"}
-          </span>
-          <ArrowUpRight size={14} />
-        </button>
-      </div>
+        <span className="review-state-actions">
+          <button
+            type="button"
+            className="button secondary piece-review-action"
+            onClick={onOpenAi}
+            title={ai.status === "findings" ? "Ver hallazgos" : "Ver revisión"}
+            aria-label={`Revisión IA: ${ai.title}. Ver resultado`}
+          >
+            <span className="label-full">
+              {ai.status === "findings" ? "Ver hallazgos" : "Ver revisión"}
+            </span>
+            <span className="label-short">
+              {ai.status === "findings" ? "Hallazgos" : "Ver"}
+            </span>
+            <ArrowUpRight size={14} />
+          </button>
+          {onReanalyze && (
+            <button
+              type="button"
+              className="qa-reanalyze"
+              disabled={reanalyzing}
+              onClick={onReanalyze}
+              title={reanalyzing ? "Esta pieza ya se está analizando" : "Volver a analizar esta versión"}
+              aria-label={`Volver a analizar ${pieceName}, versión ${version}`}
+            >
+              <RotateCcw size={13} />
+            </button>
+          )}
+        </span>
       </div>
       <div
         className={`review-state-card review-action-card human-state-card state-${human.tone}`}
@@ -199,13 +203,15 @@ export function ReviewStatusBar({
         >
           {decided ? (
             <>
-              <span>Ver decisión</span>
+              <span className="label-full">Ver decisión</span>
+              <span className="label-short">Decisión</span>
               <ChevronRight size={14} />
             </>
           ) : (
             <>
               <CheckCheck size={14} />
-              <span>Aprobar esta versión</span>
+              <span className="label-full">Aprobar esta versión</span>
+              <span className="label-short">Aprobar</span>
             </>
           )}
         </button>
@@ -222,12 +228,13 @@ export function ReviewStatusBar({
           className="review-state-copy"
           title={final && !final.final ? final.detail : clientState.detail}
         >
-          <span className="review-state-eyebrow">CLIENTE · APROBACIÓN FINAL</span>
+          <span className="review-state-eyebrow" title="Cliente · aprobación final">CLIENTE · APROBACIÓN FINAL</span>
           <strong className="review-state-title">{final?.final ? "Aprobación final" : clientState.label}</strong>
           <span className="review-state-detail">
             {final && !final.final ? final.detail : clientState.detail}
           </span>
         </span>
+      </div>
       </div>
     </section>
   );
