@@ -1276,37 +1276,29 @@ export function createCORProvider(): ProjectManagementProvider {
         `[COR Provider] 📋 Obteniendo TODOS los usuarios de COR (page=false)...`,
       );
 
-      try {
-        const response = await corApiFetch(`/users?page=false`);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(
-            `[COR Provider] ❌ Error listando usuarios: ${response.status} - ${errorText}`,
-          );
-          return [];
-        }
-
-        const result = await response.json();
-        // Cuando page=false, COR puede retornar { data: [...] } o un array directo
-        const users = Array.isArray(result) ? result : result.data || [];
-
-        console.log(
-          `[COR Provider] ✅ Obtenidos ${users.length} usuarios de COR`,
-        );
-
-        return users.map((u: Record<string, unknown>) => ({
-          id: u.id as number,
-          firstName: (u.first_name as string) || "",
-          lastName: (u.last_name as string) || "",
-          email: (u.email as string) || "",
-          roleId: (u.role_id as number) ?? undefined,
-          positionName: (u.position_name as string) ?? undefined,
-        }));
-      } catch (error) {
-        console.error(`[COR Provider] ❌ Error en listAllUsers:`, error);
-        return [];
+      const response = await corApiFetch("/users?page=false");
+      if (!response.ok) {
+        throw new Error(`No se pudo consultar el listado de usuarios de COR (HTTP ${response.status}).`);
       }
+
+      const result = await response.json();
+      const users = Array.isArray(result) ? result : result?.data;
+      if (!Array.isArray(users)) {
+        throw new Error("COR devolvió un listado de usuarios con formato inválido.");
+      }
+      const total = result.total ?? result.meta?.total;
+      if (result.next_page_url || result.links?.next || (total != null && Number(total) !== users.length)) {
+        throw new Error("COR devolvió un listado de usuarios incompleto.");
+      }
+
+      return users.map((u: Record<string, unknown>) => ({
+        id: u.id as number,
+        firstName: (u.first_name as string) || "",
+        lastName: (u.last_name as string) || "",
+        email: (u.email as string) || "",
+        roleId: (u.role_id as number) ?? undefined,
+        positionName: (u.position_name as string) ?? undefined,
+      }));
     },
 
     // ==================== LIST ACTIVE USER IDS ====================

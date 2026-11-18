@@ -4,6 +4,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { action } from "../_generated/server";
+import type { ExternalUser } from "../integrations/types";
 import { getProjectManagementProvider } from "../integrations/registry";
 
 type CorActionResult =
@@ -65,16 +66,8 @@ async function resolveInternalUserInCORNowHandler(
       };
     }
 
-    const userName = userInfo.name?.trim();
+    const searchTerm = getFirstName(userInfo.name);
     const userEmail = userInfo.email?.trim().toLowerCase();
-    const searchTerm = getFirstName(userName);
-
-    if (!searchTerm) {
-      return {
-        ok: false,
-        error: "El usuario no tiene nombre para buscar en COR.",
-      };
-    }
 
     if (!userEmail) {
       return {
@@ -84,26 +77,27 @@ async function resolveInternalUserInCORNowHandler(
     }
 
     const provider = getProjectManagementProvider();
-    const corUsers = await provider.searchUsersByName(searchTerm);
-
-    if (corUsers.length === 0) {
-      return {
-        ok: false,
-        error: `COR no encontró usuarios para "${searchTerm}". Verifica que el nombre del usuario en la app coincida con el nombre registrado en COR.`,
-      };
+    if (provider.name !== "cor") {
+      return { ok: false, error: "La integración con COR no está disponible." };
     }
 
-    const match = corUsers.find(
-      (u) => u.email.trim().toLowerCase() === userEmail,
-    );
-
-    if (!match) {
-      return {
-        ok: false,
-        error: `COR devolvió ${corUsers.length} resultado(s) para "${searchTerm}", pero ninguno coincide con el email ${userEmail}.`,
-      };
+    const hasMatchingEmail = (user: ExternalUser) =>
+      user.email.trim().toLowerCase() === userEmail;
+    const candidates = searchTerm ? await provider.searchUsersByName(searchTerm) : [];
+    let matches = candidates.filter(hasMatchingEmail);
+    if (matches.length === 0) {
+      const allUsers = await provider.listAllUsers();
+      matches = allUsers.filter(hasMatchingEmail);
     }
 
+    if (matches.length === 0) {
+      return { ok: false, error: `No se encontró ninguna cuenta en COR con el correo ${userEmail}.` };
+    }
+    if (matches.length > 1) {
+      return { ok: false, error: `Hay más de una cuenta en COR con el correo ${userEmail}. Revisá las coincidencias antes de vincular al usuario.` };
+    }
+
+    const [match] = matches;
     await ctx.runMutation(internal.data.corUsers.upsertCorUser, {
       userId: args.targetUserId,
       corUserId: match.id,
