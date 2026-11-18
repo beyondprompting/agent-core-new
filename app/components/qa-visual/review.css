@@ -452,3 +452,5 @@ html.dark .qa-visual .workspace,.dark .qa-visual .workspace{--client:#72d2da;--c
   .qa-visual .review-status-cards{grid-template-columns:1fr}
 }
 @media(max-width:620px){.qa-visual .review-state-card{align-items:center}.qa-visual .review-state-title{min-height:0;display:block}.qa-visual .review-identity{margin-top:0}.qa-visual .review-action-card .piece-review-action{padding:0 9px}}
+/* Plain-language explanation under a pending-verification reason. */
+.qa-visual .qa-reason-detail{margin-top:5px;font-size:11.5px;line-height:1.55;color:var(--muted-text);overflow-wrap:anywhere}

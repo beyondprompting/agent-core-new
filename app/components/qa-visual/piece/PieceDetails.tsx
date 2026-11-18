@@ -260,7 +260,14 @@ export function PieceDetails({
           <h4>CONTROLES PENDIENTES DE VERIFICACIÓN</h4>
           <ul>
             {aiReview.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
+              <li key={reason}>
+                {reason}
+                {aiReview.reasonDetails?.[reason]?.map((detail) => (
+                  <p key={detail} className="qa-reason-detail">
+                    {detail}
+                  </p>
+                ))}
+              </li>
             ))}
           </ul>
         </section>

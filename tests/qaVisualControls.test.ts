@@ -295,13 +295,13 @@ test("a price changed by the client on the previous version is not reported as w
   });
   // Without client asks the original request prevails.
   assert.equal(resolveVisualControl(price, visible).outcome, "fail");
-  const withAsks = resolveVisualControl(price, visible, { clientChanges: true });
+  const withAsks = resolveVisualControl(price, visible, { changeRequests: true });
   assert.equal(withAsks.outcome, "pass");
   assert.equal(withAsks.method, "model");
   // The model still decides: if it says the client's price is wrong, it fails.
   assert.equal(
     resolveVisualControl(price, assessment("$7,99", { outcome: "fail", observed: "No coincide con el pedido del cliente." }), {
-      clientChanges: true,
+      changeRequests: true,
     }).outcome,
     "fail",
   );

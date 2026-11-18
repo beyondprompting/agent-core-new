@@ -39,7 +39,7 @@ import {
   locationStatus,
 } from "./validators";
 import { hasValidCommentRegion } from "./commentLocations";
-import { clientChangeRequests } from "./clientChanges";
+import { analysisChangeRequests } from "./clientChanges";
 
 const startArgs = {
   campaignId: v.id("qaVisualCampaigns"),
@@ -496,10 +496,10 @@ export const getWork = internalQuery({
           rules: ruleSet.rules,
           status: review.status,
           findings: review.findings,
-          // A new version is checked against what the client asked to change on the previous one.
-          clientChanges:
+          // A new version is checked against what the client or the team asked to change before.
+          changeRequests:
             review.pieceId && review.pieceVersionId
-              ? ((await clientChangeRequests(ctx, review.pieceId, review.pieceVersionId))?.asks ?? [])
+              ? await analysisChangeRequests(ctx, review.pieceId, review.pieceVersionId)
               : [],
         }
       : null;

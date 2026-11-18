@@ -115,19 +115,19 @@ export function CommentsPanel(sessionProps: { session: ReviewSession }) {
           <div className="qa-reply-modes" role="radiogroup" aria-label="Destino de la respuesta">
             <button
               role="radio"
-              aria-checked={session.replyVisibility === "internal"}
-              className={session.replyVisibility === "internal" ? "on" : ""}
-              onClick={() => session.setReplyVisibility("internal")}
-            >
-              <Lock size={11} /> Nota interna
-            </button>
-            <button
-              role="radio"
               aria-checked={session.replyVisibility === "client"}
               className={session.replyVisibility === "client" ? "on client" : ""}
               onClick={() => session.setReplyVisibility("client")}
             >
               <Building2 size={11} /> Responder al cliente
+            </button>
+            <button
+              role="radio"
+              aria-checked={session.replyVisibility === "internal"}
+              className={session.replyVisibility === "internal" ? "on" : ""}
+              onClick={() => session.setReplyVisibility("internal")}
+            >
+              <Lock size={11} /> Nota interna
             </button>
           </div>
         )}

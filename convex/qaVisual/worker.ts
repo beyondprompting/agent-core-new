@@ -20,7 +20,7 @@ import {
   sourceLabel,
 } from "./model/contracts";
 import { canEvaluate, resolveVisualControl } from "./model/controls";
-import { clientChangesPrompt, visualReviewPrompt } from "./model/prompt";
+import { changeRequestsPrompt, visualReviewPrompt } from "./model/prompt";
 import { requestCommentLocations } from "./commentLocalization";
 
 const responseSchema = z.object({
@@ -83,7 +83,7 @@ export async function analyzeReview(
           "Actualizá desde Drive para aplicar los criterios nuevos antes de analizar.",
       };
     const requirements = structuredRequirements(input);
-    const clientChanges = work.clientChanges ?? [];
+    const changeRequests = work.changeRequests ?? [];
     const results: Infer<typeof finding>[] = [];
     const visual = [];
     for (const rule of work.rules) {
@@ -165,8 +165,8 @@ export async function analyzeReview(
             ? { openai: { store: false } }
             : qaGemini.providerOptions,
         abortSignal,
-        system: clientChanges.length
-          ? `${visualReviewPrompt}\n\n${clientChangesPrompt}`
+        system: changeRequests.length
+          ? `${visualReviewPrompt}\n\n${changeRequestsPrompt}`
           : visualReviewPrompt,
         messages: [
           {
@@ -178,8 +178,8 @@ export async function analyzeReview(
                   visual.map(({ requirement, ...control }) => control),
                 ),
               },
-              ...(clientChanges.length
-                ? [{ type: "text" as const, text: JSON.stringify({ clientChanges }) }]
+              ...(changeRequests.length
+                ? [{ type: "text" as const, text: JSON.stringify({ changeRequests }) }]
                 : []),
               {
                 type: "image",
@@ -198,7 +198,7 @@ export async function analyzeReview(
         return {
           ...control,
           ...resolveVisualControl(requirement, control, {
-            clientChanges: clientChanges.length > 0,
+            changeRequests: changeRequests.length > 0,
           }),
           region: imageBoxToRegion(box_2d),
         };

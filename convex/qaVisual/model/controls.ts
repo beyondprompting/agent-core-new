@@ -77,7 +77,7 @@ export function compareVisibleValue(
 export function resolveVisualControl(
   requirement: Requirement,
   control: VisualAssessment,
-  options: { clientChanges?: boolean } = {},
+  options: { changeRequests?: boolean } = {},
 ) {
   const result = (
     outcome: VisualAssessment["outcome"],
@@ -120,11 +120,11 @@ export function resolveVisualControl(
   if (["price", "date"].includes(requirement.ruleId)) {
     if (!control.visibleText?.trim()) throw new Error("invalid_controls");
     const compared = compareVisibleValue(requirement, control.visibleText);
-    // The client may have changed this value on the previous version: the model compared it
-    // against the client's ask, so its pass prevails over the original request.
+    // The client or the team may have changed this value on an earlier version: the model
+    // compared it against that ask, so its pass prevails over the original request.
     if (
       compared?.outcome === "fail" &&
-      options.clientChanges &&
+      options.changeRequests &&
       control.outcome === "pass" &&
       control.observed.trim()
     )

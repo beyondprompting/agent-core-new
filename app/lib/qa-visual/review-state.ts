@@ -24,6 +24,8 @@ export type AiReviewState = {
   findings: number;
   openFindings: number;
   reasons?: string[];
+  /** Plain-language explanation of a reason, when there is one. */
+  reasonDetails?: Record<string, string[]>;
 };
 export type HumanReviewState = {
   title: string;

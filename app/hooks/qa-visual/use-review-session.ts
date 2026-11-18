@@ -69,11 +69,11 @@ export function useReviewSession(
     [filters, setFilters] = useState<PieceFilterKey[]>([]);
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyToState] = useState<Comment["id"] | null>(null);
-  // In client threads a reply is a private note unless the reviewer chooses to answer the client.
-  const [replyVisibility, setReplyVisibility] = useState<"internal" | "client">("internal");
+  // In client threads a reply answers the client unless the reviewer marks it as a private note.
+  const [replyVisibility, setReplyVisibility] = useState<"internal" | "client">("client");
   const setReplyTo = (id: Comment["id"] | null) => {
     setReplyToState(id);
-    setReplyVisibility("internal");
+    setReplyVisibility("client");
   };
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
     null,

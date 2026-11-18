@@ -8,6 +8,7 @@ import {
   type ReviewDecision,
 } from "./review-state";
 import { buildAnalysisFeed } from "./analysis-feed";
+import { explainUnlinked, UNLINKED_REASON } from "./linking-explanation";
 import { toReviewPieces } from "./piece-inventory";
 import { pieceKey } from "@/convex/qaVisual/model/normalize";
 import { matchesPieceFilters, type PieceFilters } from "./piece-filters";
@@ -256,8 +257,13 @@ export function buildPieceReview({
   } else if (data?.review?.result) {
     const { coverage, reason } = data.review.result;
     aiReview.detail = `${coverage.executed}/${coverage.requested} controles verificados${coverage.unverifiable ? ` · ${coverage.unverifiable} sin verificar` : ""}${reason ? ` · ${reason}` : ""}${data.latestStatus !== "completed" ? " · Resultado anterior" : ""}`;
-    if (data.latestStatus === "completed")
+    if (data.latestStatus === "completed") {
       aiReview.reasons = data.review.result.reasons ?? (reason ? [reason] : []);
+      if (aiReview.reasons.includes(UNLINKED_REASON))
+        aiReview.reasonDetails = {
+          [UNLINKED_REASON]: explainUnlinked(data.issues ?? [], piece.filename),
+        };
+    }
   }
   const humanReview = getHumanReviewState(currentStatus, latestDecision);
   if (data?.decision?.outdated && currentStatus === "Aprobada")
