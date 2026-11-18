@@ -15,7 +15,7 @@ import {
   ANALYSIS_POLICY_VERSION,
   structuredRequirements,
 } from "./model/contracts";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import {
@@ -41,148 +41,174 @@ import {
 import { hasValidCommentRegion } from "./commentLocations";
 import { clientChangeRequests } from "./clientChanges";
 
+const startArgs = {
+  campaignId: v.id("qaVisualCampaigns"),
+  requestId: v.string(),
+  snapshotId: importId,
+  names: v.optional(v.array(v.string())),
+  pieceIds: v.optional(v.array(v.id("qaVisualPieces"))),
+  kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
+  // batch only: "pending" (default) skips pieces with a current completed analysis.
+  scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
+};
+const startArgsValidator = v.object(startArgs);
+type StartArgs = Infer<typeof startArgsValidator>;
+type StartResult =
+  | { runId: Id<"qaVisualRuns">; queued?: number }
+  | { error: string };
+
 export const start = mutation({
-  args: {
-    campaignId: v.id("qaVisualCampaigns"),
-    requestId: v.string(),
-    snapshotId: importId,
-    names: v.optional(v.array(v.string())),
-    pieceIds: v.optional(v.array(v.id("qaVisualPieces"))),
-    kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
-    // batch only: "pending" (default) skips pieces with a current completed analysis.
-    scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
-  },
-  handler: async (
+  args: startArgs,
+  handler: async (ctx, args): Promise<StartResult> =>
+    startRun(ctx, args, await requireQaAdmin(ctx)),
+});
+
+/**
+ * After "Actualizar desde Drive" publishes new pieces or versions, analyzes the ones
+ * without a current result, as "Analizar piezas" would. Only for campaigns that were
+ * already analyzed: the first analysis of a new campaign stays a manual decision.
+ */
+export async function analyzeAfterRefresh(
+  ctx: MutationCtx,
+  campaign: Doc<"qaVisualCampaigns">,
+  importId: Id<"qaVisualImports">,
+  requestedBy: Id<"users">,
+) {
+  const analyzedBefore = await ctx.db
+    .query("qaVisualRuns")
+    .withIndex("by_campaign", (q) => q.eq("campaign", campaign.reviewKey))
+    .first();
+  if (!analyzedBefore) return;
+  const result = await startRun(
     ctx,
-    args,
-  ): Promise<
-    { runId: Id<"qaVisualRuns">; queued?: number } | { error: string }
-  > => {
-    const requestedBy = await requireQaAdmin(ctx);
-    if (
-      !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) ||
-      Math.max(args.names?.length ?? 0, args.pieceIds?.length ?? 0) >
-        MAX_RUN_PIECES
-    )
-      return { error: "Solicitud de análisis inválida." };
+    {
+      campaignId: campaign._id,
+      requestId: crypto.randomUUID(),
+      snapshotId: importId,
+      kind: "batch",
+      scope: "pending",
+    },
+    requestedBy,
+  );
+  if ("error" in result)
+    console.log("QA Visual: análisis automático omitido", result.error);
+}
 
-    const registered = await ctx.db.get(args.campaignId);
-    if (registered?.status !== "active")
-      return { error: "La campaña ya no está disponible." };
-    const campaign = registered.reviewKey;
-    const existing = await ctx.db
-      .query("qaVisualRuns")
-      .withIndex("by_request", (q) =>
-        q.eq("requestedBy", requestedBy).eq("requestId", args.requestId),
-      )
-      .unique();
-    if (existing) {
-      if (existing.campaign !== campaign)
-        return { error: "La solicitud pertenece a otra campaña." };
-      return { runId: existing._id };
-    }
-    if (publishedId(registered) !== args.snapshotId)
-      return {
-        error:
-          "Los datos de la campaña cambiaron. Volvé a iniciar el análisis.",
-      };
-    const data = await readImport(ctx, args.snapshotId);
-    if (!data || data.campaignId !== args.campaignId)
-      return { error: "La campaña todavía no tiene datos importados." };
+async function startRun(
+  ctx: MutationCtx,
+  args: StartArgs,
+  requestedBy: Id<"users">,
+): Promise<StartResult> {
+  if (
+    !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(args.requestId) ||
+    Math.max(args.names?.length ?? 0, args.pieceIds?.length ?? 0) >
+      MAX_RUN_PIECES
+  )
+    return { error: "Solicitud de análisis inválida." };
 
-    const pieces = await readPieces(ctx, data._id);
-    if (
-      pieces.some(
-        (piece) =>
-          !piece.pieceVersionId ||
-          piece.input.policyVersion !== ANALYSIS_POLICY_VERSION,
-      )
+  const registered = await ctx.db.get(args.campaignId);
+  if (registered?.status !== "active")
+    return { error: "La campaña ya no está disponible." };
+  const campaign = registered.reviewKey;
+  const existing = await ctx.db
+    .query("qaVisualRuns")
+    .withIndex("by_request", (q) =>
+      q.eq("requestedBy", requestedBy).eq("requestId", args.requestId),
     )
-      return {
-        error:
-          "Actualizá desde Drive antes de analizar: hay nuevos criterios de revisión.",
-      };
-    const names = new Set(args.names);
-    const pieceIds = args.pieceIds ? new Set(args.pieceIds) : null;
-    const scope = args.kind === "batch" ? (args.scope ?? "pending") : "all";
-    const requested = pieces.filter(
+    .unique();
+  if (existing) {
+    if (existing.campaign !== campaign)
+      return { error: "La solicitud pertenece a otra campaña." };
+    return { runId: existing._id };
+  }
+  if (publishedId(registered) !== args.snapshotId)
+    return {
+      error:
+        "Los datos de la campaña cambiaron. Volvé a iniciar el análisis.",
+    };
+  const data = await readImport(ctx, args.snapshotId);
+  if (!data || data.campaignId !== args.campaignId)
+    return { error: "La campaña todavía no tiene datos importados." };
+
+  const pieces = await readPieces(ctx, data._id);
+  if (
+    pieces.some(
       (piece) =>
-        args.kind === "batch" ||
-        (pieceIds
-          ? Boolean(piece.pieceId && pieceIds.has(piece.pieceId))
-          : names.has(piece.input.name)),
-    );
-    if (
-      !requested.length ||
-      requested.length > MAX_RUN_PIECES ||
-      (args.kind !== "batch" &&
-        requested.length !== (pieceIds?.size ?? names.size)) ||
-      (args.kind === "piece" && requested.length !== 1)
+        !piece.pieceVersionId ||
+        piece.input.policyVersion !== ANALYSIS_POLICY_VERSION,
     )
-      return {
-        error: `La selección no coincide con las piezas importadas o supera el límite de ${MAX_RUN_PIECES} piezas.`,
-      };
-    const selected =
-      scope === "all"
-        ? requested
-        : (
-            await Promise.all(
-              requested.map(async (piece) =>
-                (await hasCurrentResult(ctx, piece)) ? null : piece,
-              ),
-            )
-          ).filter((piece) => piece !== null);
-    if (!selected.length)
+  )
+    return {
+      error:
+        "Actualizá desde Drive antes de analizar: hay nuevos criterios de revisión.",
+    };
+  const names = new Set(args.names);
+  const pieceIds = args.pieceIds ? new Set(args.pieceIds) : null;
+  const scope = args.kind === "batch" ? (args.scope ?? "pending") : "all";
+  const requested = pieces.filter(
+    (piece) =>
+      args.kind === "batch" ||
+      (pieceIds
+        ? Boolean(piece.pieceId && pieceIds.has(piece.pieceId))
+        : names.has(piece.input.name)),
+  );
+  if (
+    !requested.length ||
+    requested.length > MAX_RUN_PIECES ||
+    (args.kind !== "batch" &&
+      requested.length !== (pieceIds?.size ?? names.size)) ||
+    (args.kind === "piece" && requested.length !== 1)
+  )
+    return {
+      error: `La selección no coincide con las piezas importadas o supera el límite de ${MAX_RUN_PIECES} piezas.`,
+    };
+  const selected =
+    scope === "all"
+      ? requested
+      : (
+          await Promise.all(
+            requested.map(async (piece) =>
+              (await hasCurrentResult(ctx, piece)) ? null : piece,
+            ),
+          )
+        ).filter((piece) => piece !== null);
+  if (!selected.length)
+    return {
+      error:
+        "Todas las piezas tienen un análisis vigente. Usá «Reanalizar todas» si querés repetirlo.",
+    };
+
+  for (const state of ["preparing", "running"] as const) {
+    const active = await ctx.db
+      .query("qaVisualRuns")
+      .withIndex("by_campaign_state", (q) =>
+        q.eq("campaign", campaign).eq("state", state),
+      )
+      .first();
+    if (!active) continue;
+    if (args.kind !== "piece" || !(active.rollingQueue || active.runner === "pool"))
       return {
         error:
-          "Todas las piezas tienen un análisis vigente. Usá «Reanalizar todas» si querés repetirlo.",
+          "Ya hay un análisis en curso. Podés detenerlo o esperar a que termine.",
       };
-
-    for (const state of ["preparing", "running"] as const) {
-      const active = await ctx.db
-        .query("qaVisualRuns")
-        .withIndex("by_campaign_state", (q) =>
-          q.eq("campaign", campaign).eq("state", state),
-        )
-        .first();
-      if (!active) continue;
-      if (args.kind !== "piece" || !(active.rollingQueue || active.runner === "pool"))
-        return {
-          error:
-            "Ya hay un análisis en curso. Podés detenerlo o esperar a que termine.",
-        };
-      // A single piece joins the running queue in front of the remaining pieces.
-      const piece = selected[0];
-      const busy = await ctx.db
-        .query("qaVisualReviews")
-        .withIndex("by_run", (q) => q.eq("runId", active._id))
-        .collect();
-      if (
-        busy.some(
-          (row) =>
-            row.pieceVersionId === piece.pieceVersionId &&
-            !["completed", "failed", "cancelled"].includes(row.status),
-        )
+    // A single piece joins the running queue in front of the remaining pieces.
+    const piece = selected[0];
+    const busy = await ctx.db
+      .query("qaVisualReviews")
+      .withIndex("by_run", (q) => q.eq("runId", active._id))
+      .collect();
+    if (
+      busy.some(
+        (row) =>
+          row.pieceVersionId === piece.pieceVersionId &&
+          !["completed", "failed", "cancelled"].includes(row.status),
       )
-        return { error: "Esta pieza ya se está analizando." };
-      const first = busy.reduce((min, row) => Math.min(min, row.order), 0);
-      if (active.runner === "pool") {
-        // §10.4: the piece goes to the front of the queue of the running analysis.
-        await ctx.db.insert("qaVisualReviews", {
-          runId: active._id,
-          campaign,
-          campaignId: args.campaignId,
-          pieceId: piece.pieceId,
-          pieceVersionId: piece.pieceVersionId,
-          input: piece.input,
-          order: first - 1,
-          status: "queued",
-          attempts: [],
-        });
-        await fillSlots(ctx, active._id);
-        return { runId: active._id, queued: 1 };
-      }
-      const reviewId = await ctx.db.insert("qaVisualReviews", {
+    )
+      return { error: "Esta pieza ya se está analizando." };
+    const first = busy.reduce((min, row) => Math.min(min, row.order), 0);
+    if (active.runner === "pool") {
+      // §10.4: the piece goes to the front of the queue of the running analysis.
+      await ctx.db.insert("qaVisualReviews", {
         runId: active._id,
         campaign,
         campaignId: args.campaignId,
@@ -190,64 +216,77 @@ export const start = mutation({
         pieceVersionId: piece.pieceVersionId,
         input: piece.input,
         order: first - 1,
-        status: "preparing",
-        attempts: [],
-      });
-      await ctx.scheduler.runAfter(0, internal.qaVisual.stageDriveRun.prepare, {
-        runId: active._id,
-        folderId: data.deploymentFolderId,
-        items: [
-          {
-            reviewId,
-            id: piece.file.driveId,
-            version: piece.file.driveVersion,
-          },
-        ],
-      });
-      return { runId: active._id, queued: 1 };
-    }
-    const previous = await ctx.db
-      .query("qaVisualRuleSets")
-      .withIndex("by_campaign_version", (q) =>
-        q.eq("campaign", campaign).eq("version", data.ruleVersion),
-      )
-      .unique();
-    const ruleSetId =
-      previous?._id ??
-      (await ctx.db.insert("qaVisualRuleSets", {
-        campaign,
-        version: data.ruleVersion,
-        rules: data.rules,
-        sourceDocumentId: data.excelDocumentId,
-      }));
-    const runId = await ctx.db.insert("qaVisualRuns", {
-      campaign,
-      requestedBy,
-      snapshotId: data._id,
-      ruleSetId,
-      kind: args.kind,
-      state: "running",
-      runner: "pool",
-      requestId: args.requestId,
-      ...(args.kind === "batch" ? { scope } : {}),
-    });
-    // Stage 4 runner: every piece waits as "queued"; fillSlots starts up to 4 per run.
-    for (const [order, { input, pieceId, pieceVersionId }] of selected.entries())
-      await ctx.db.insert("qaVisualReviews", {
-        runId,
-        campaign,
-        campaignId: args.campaignId,
-        pieceId,
-        pieceVersionId,
-        input,
-        order,
         status: "queued",
         attempts: [],
       });
-    await fillSlots(ctx, runId);
-    return { runId, queued: selected.length };
-  },
-});
+      await fillSlots(ctx, active._id);
+      return { runId: active._id, queued: 1 };
+    }
+    const reviewId = await ctx.db.insert("qaVisualReviews", {
+      runId: active._id,
+      campaign,
+      campaignId: args.campaignId,
+      pieceId: piece.pieceId,
+      pieceVersionId: piece.pieceVersionId,
+      input: piece.input,
+      order: first - 1,
+      status: "preparing",
+      attempts: [],
+    });
+    await ctx.scheduler.runAfter(0, internal.qaVisual.stageDriveRun.prepare, {
+      runId: active._id,
+      folderId: data.deploymentFolderId,
+      items: [
+        {
+          reviewId,
+          id: piece.file.driveId,
+          version: piece.file.driveVersion,
+        },
+      ],
+    });
+    return { runId: active._id, queued: 1 };
+  }
+  const previous = await ctx.db
+    .query("qaVisualRuleSets")
+    .withIndex("by_campaign_version", (q) =>
+      q.eq("campaign", campaign).eq("version", data.ruleVersion),
+    )
+    .unique();
+  const ruleSetId =
+    previous?._id ??
+    (await ctx.db.insert("qaVisualRuleSets", {
+      campaign,
+      version: data.ruleVersion,
+      rules: data.rules,
+      sourceDocumentId: data.excelDocumentId,
+    }));
+  const runId = await ctx.db.insert("qaVisualRuns", {
+    campaign,
+    requestedBy,
+    snapshotId: data._id,
+    ruleSetId,
+    kind: args.kind,
+    state: "running",
+    runner: "pool",
+    requestId: args.requestId,
+    ...(args.kind === "batch" ? { scope } : {}),
+  });
+  // Stage 4 runner: every piece waits as "queued"; fillSlots starts up to 4 per run.
+  for (const [order, { input, pieceId, pieceVersionId }] of selected.entries())
+    await ctx.db.insert("qaVisualReviews", {
+      runId,
+      campaign,
+      campaignId: args.campaignId,
+      pieceId,
+      pieceVersionId,
+      input,
+      order,
+      status: "queued",
+      attempts: [],
+    });
+  await fillSlots(ctx, runId);
+  return { runId, queued: selected.length };
+}
 
 const MAX_RUN_PIECES = 1000;
 

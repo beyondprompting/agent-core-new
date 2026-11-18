@@ -41,6 +41,7 @@ export async function queueSync(
   ctx: MutationCtx,
   campaignId: Id<"qaVisualCampaigns">,
   reprocess = false,
+  requestedBy?: Id<"users">,
 ) {
   const campaign = await ctx.db.get(campaignId);
   if (!campaign || (await syncIsRunning(ctx, campaign.sync)))
@@ -53,14 +54,15 @@ export async function queueSync(
       : campaign.currentImportId || campaign.currentSnapshotId
         ? "manual"
         : "register",
+    requestedBy,
   );
 }
 
 export const refresh = mutation({
   args: { campaignId: v.id("qaVisualCampaigns") },
   handler: async (ctx, { campaignId }): Promise<void> => {
-    await requireQaAdmin(ctx);
-    await queueSync(ctx, campaignId);
+    const user = await requireQaAdmin(ctx);
+    await queueSync(ctx, campaignId, false, user);
   },
 });
 

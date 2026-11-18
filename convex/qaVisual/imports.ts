@@ -25,6 +25,7 @@ import {
 import { PARSER_VERSION } from "./model/contracts";
 import { publishedId, readImport } from "./importRead";
 import { queueImageWarmup } from "./imageWarmup";
+import { analyzeAfterRefresh } from "./runs";
 
 const live = (row: Doc<"qaVisualImports">) =>
   ["queued", "running", "building"].includes(row.status);
@@ -559,6 +560,17 @@ async function publishManifest(
   // Keep the existing image runner; moving images to their own pool is stage 3.
   await queueImageWarmup(ctx, row._id);
 }
+/** Only a refresh someone asked for ("Actualizar desde Drive") starts the analysis on its own. */
+async function analyzeRefreshed(
+  ctx: MutationCtx,
+  requested: Doc<"qaVisualImports">,
+  published: Id<"qaVisualImports">,
+) {
+  if (requested.trigger !== "manual" || !requested.requestedBy) return;
+  const campaign = await ctx.db.get(requested.campaignId);
+  if (campaign)
+    await analyzeAfterRefresh(ctx, campaign, published, requested.requestedBy);
+}
 export const publish = internalMutation({
   args: requestArgs,
   handler: async (ctx, args): Promise<boolean> => {
@@ -567,6 +579,7 @@ export const publish = internalMutation({
     if (current.row.status !== "building")
       throw new Error("Importación sin preparar.");
     await publishManifest(ctx, current.campaign, current.row);
+    await analyzeRefreshed(ctx, current.row, current.row._id);
     return true;
   },
 });
@@ -594,7 +607,10 @@ export const reuse = internalMutation({
         syncError: undefined,
         syncNeedsSources: undefined,
       });
-    else await publishManifest(ctx, current.campaign, match);
+    else {
+      await publishManifest(ctx, current.campaign, match);
+      await analyzeRefreshed(ctx, current.row, match._id);
+    }
     if (current.row.planStorageId)
       await ctx.storage.delete(current.row.planStorageId);
     await ctx.db.delete(current.row._id);
