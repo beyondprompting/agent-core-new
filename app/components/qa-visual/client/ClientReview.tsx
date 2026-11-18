@@ -312,6 +312,8 @@ function ClientCarousel({
       }
       position={index}
       total={order.length}
+      // A placed mark needs the comment box: the sheet opens even if it was minimized.
+      forcePanelOpen={Boolean(mark)}
       onPrev={() => go(-1)}
       onNext={() => go(1)}
       onClose={() => {
@@ -493,7 +495,7 @@ function PiecePanel({
   }
   return (
     <>
-      <div className={`qa-cp-head tone-${state.tone}`}>
+      <div className={`qa-cp-head qa-sheet-peek tone-${state.tone}`}>
         <div className="qa-cp-state">
           <span className="qa-cp-state-icon">
             {approved ? <Check size={16} /> : data.item.state === "changesRequested" ? <MessageSquare size={15} /> : <Eye size={15} />}
@@ -577,12 +579,12 @@ function PiecePanel({
         <Composer itemId={data.item.id} mark={mark} clearMark={clearMark} textareaRef={composerRef} />
       )}
       {error && (
-        <div className="qa-panel-section">
+        <div className="qa-panel-section qa-sheet-peek">
           <p className="qa-error" role="alert">{error}</p>
         </div>
       )}
       {!data.readOnly && data.mode === "client" && (
-        <div className="qa-panel-actions qa-decision-bar">
+        <div className="qa-panel-actions qa-decision-bar qa-sheet-peek">
           {approved ? (
             <div className="qa-decided tone-success">
               <Check size={14} />

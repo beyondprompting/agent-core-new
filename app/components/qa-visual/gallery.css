@@ -74,6 +74,7 @@
 .qa-visual .qa-dots i{width:6px;height:6px;border-radius:3px;background:#ffffff40}
 .qa-visual .qa-dots i.on{width:18px;background:#fff}
 .qa-visual .qa-carousel-panel{display:flex;flex-direction:column;min-height:0;background:var(--surface);color:var(--text);border-left:1px solid var(--line)}
+.qa-visual .qa-sheet-grip{display:none}
 .qa-visual .qa-panel-section{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
 .qa-visual .qa-panel-section h4{display:flex;align-items:center;gap:6px;margin:0 0 2px;font-size:10.5px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.05em}
 .qa-visual .qa-panel-scroll{flex:1;min-height:0;overflow:auto}
@@ -197,7 +198,17 @@
 @media (max-width:1023px){
   .qa-visual .qa-carousel{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
   .qa-visual .qa-carousel-panel{max-height:58dvh;border-left:0;border-radius:20px 20px 0 0;box-shadow:0 -10px 30px #0006}
-  .qa-visual .qa-carousel-panel::before{content:"";width:38px;height:5px;border-radius:3px;background:var(--line);margin:8px auto 0;flex-shrink:0}
+  .qa-visual .qa-carousel-panel{transition:max-height .22s ease}
+  /* The handle is a real control: tap it or drag it to minimize the sheet and see the piece larger. */
+  .qa-visual .qa-sheet-grip{display:flex;justify-content:center;align-items:center;flex-shrink:0;width:100%;height:22px;padding:0;touch-action:none;cursor:grab}
+  .qa-visual .qa-sheet-grip>span{width:38px;height:5px;border-radius:3px;background:var(--line);transition:background .15s}
+  .qa-visual .qa-sheet-grip:hover>span,.qa-visual .qa-sheet-grip:focus-visible>span{background:var(--subtle)}
+  .qa-visual .qa-sheet-grip:focus-visible{outline:none}
+  .qa-visual .qa-carousel-panel.collapsed>:not(.qa-sheet-grip):not(.qa-sheet-peek){display:none}
+  .qa-visual .qa-carousel-panel.collapsed .qa-decision-hint{display:none}
+  .qa-visual .qa-carousel-panel.collapsed .qa-sheet-peek{border-bottom:0}
+  .qa-visual .qa-carousel-panel.collapsed .qa-cp-head{padding-top:2px;padding-bottom:6px}
+  .qa-visual .qa-carousel-panel.collapsed .qa-panel-actions{padding-top:4px;border-top:0;box-shadow:none}
   .qa-visual .qa-carousel-main{padding:8px 12px}
   .qa-visual .qa-carousel-nav{display:none}
   .qa-visual .qa-carousel-keys{display:none}
