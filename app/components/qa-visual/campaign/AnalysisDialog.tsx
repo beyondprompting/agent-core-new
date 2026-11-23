@@ -9,23 +9,45 @@ import type { Id } from "@/convex/_generated/dataModel";
 
 const MAX_INSTRUCTIONS = 2000;
 
+export type AnalysisScope = "pending" | "findings" | "all";
+const scopes: Record<AnalysisScope, { title: string; detail: string }> = {
+  pending: {
+    title: "Pendientes y desactualizadas",
+    detail: "Sin análisis, con un análisis anterior a un cambio o con error.",
+  },
+  findings: {
+    title: "Con hallazgos",
+    detail:
+      "Vuelve a revisar solo las piezas cuyo último análisis marcó algo. Útil si algo está bien así: aclaralo en las instrucciones.",
+  },
+  all: {
+    title: "Todas",
+    detail:
+      "Repite el análisis de todas las piezas aunque esté vigente. Se conservan los resultados anteriores.",
+  },
+};
+
 /**
- * Confirmation of an AI analysis. The instructions are saved on the campaign, so every later
- * analysis (a single piece, retries and the automatic one after a Drive refresh) obeys them too.
+ * Confirmation of an AI analysis: which pieces to run and the instructions for the model.
+ * The instructions are saved on the campaign, so every later analysis (a single piece,
+ * retries and the automatic one after a Drive refresh) obeys them too.
  */
 export function AnalysisDialog({
   campaignId,
-  scope,
-  count,
+  initialScope,
+  counts,
   onClose,
   onStart,
 }: {
   campaignId: string;
-  scope: "pending" | "all";
-  count?: number;
+  initialScope: AnalysisScope;
+  counts: Record<AnalysisScope, number | undefined>;
   onClose: () => void;
-  onStart: () => Promise<void> | void;
+  onStart: (scope: AnalysisScope) => Promise<void> | void;
 }) {
+  const [scope, setScope] = useState<AnalysisScope>(initialScope);
+  const count = counts[scope];
+  const rerun = scope !== "pending";
   const id = campaignId as Id<"qaVisualCampaigns">;
   const saved = useQuery(api.qaVisual.campaigns.analysisInstructions, {
     campaignId: id,
@@ -45,7 +67,7 @@ export function AnalysisDialog({
     try {
       if (value.trim() !== (saved?.instructions ?? ""))
         await save({ campaignId: id, instructions: value });
-      await onStart();
+      await onStart(scope);
       onClose();
     } catch (cause) {
       const data = cause instanceof ConvexError ? cause.data : null;
@@ -72,9 +94,7 @@ export function AnalysisDialog({
       <header className="qa-dialog-head">
         <div>
           <h2 id="qa-analysis-title">
-            {scope === "all"
-              ? "Reanalizar todas las piezas"
-              : "Analizar piezas con IA"}
+            {rerun ? "Volver a analizar piezas" : "Analizar piezas con IA"}
           </h2>
           <p>
             La IA compara cada pieza con el pedido del cliente y revisa que todo
@@ -91,6 +111,29 @@ export function AnalysisDialog({
         </button>
       </header>
       <div className="qa-dialog-body">
+        <fieldset className="qa-field qa-scope-options">
+          <legend>Qué piezas analizar</legend>
+          {(Object.keys(scopes) as AnalysisScope[]).map((option) => (
+            <label
+              key={option}
+              className={`qa-scope-option ${scope === option ? "on" : ""}`}
+            >
+              <input
+                type="radio"
+                name="qa-analysis-scope"
+                value={option}
+                checked={scope === option}
+                disabled={busy || counts[option] === 0}
+                onChange={() => setScope(option)}
+              />
+              <span>
+                <b>{scopes[option].title}</b>
+                <small>{scopes[option].detail}</small>
+              </span>
+              <em>{counts[option] ?? "—"}</em>
+            </label>
+          ))}
+        </fieldset>
         <label className="qa-field">
           <span>
             Instrucciones para la IA <small>(opcional)</small>
@@ -101,7 +144,9 @@ export function AnalysisDialog({
             maxLength={MAX_INSTRUCTIONS}
             disabled={loading || busy}
             placeholder={
-              "Por ejemplo:\n• No marques como error que «LOCURA» no lleve tilde: es el nombre del producto.\n• Aceptá el precio sin el signo $.\n• Revisá también que el logo esté arriba a la derecha."
+              rerun
+                ? "Contale a la IA qué está bien así, por ejemplo:\n• El precio sin el signo $ es correcto.\n• «LOCURA» va sin tilde: es el nombre del producto.\n• La fecha se agrega después; no la marques como faltante."
+                : "Por ejemplo:\n• No marques como error que «LOCURA» no lleve tilde: es el nombre del producto.\n• Aceptá el precio sin el signo $.\n• Revisá también que el logo esté arriba a la derecha."
             }
             onChange={(event) => setText(event.target.value)}
           />
@@ -137,7 +182,7 @@ export function AnalysisDialog({
           ) : (
             <ScanLine size={14} />
           )}
-          {scope === "all" ? "Reanalizar" : "Analizar"}
+          {rerun ? "Reanalizar" : "Analizar"}
           {count ? ` ${count}` : ""}
         </button>
       </footer>

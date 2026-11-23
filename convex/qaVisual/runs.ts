@@ -48,8 +48,11 @@ const startArgs = {
   names: v.optional(v.array(v.string())),
   pieceIds: v.optional(v.array(v.id("qaVisualPieces"))),
   kind: v.union(v.literal("batch"), v.literal("piece"), v.literal("retry")),
-  // batch only: "pending" (default) skips pieces with a current completed analysis.
-  scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
+  // batch only: "pending" (default) skips pieces with a current completed analysis;
+  // "findings" repeats only pieces whose current analysis has findings; "all" repeats every piece.
+  scope: v.optional(
+    v.union(v.literal("pending"), v.literal("findings"), v.literal("all")),
+  ),
 };
 const startArgsValidator = v.object(startArgs);
 type StartArgs = Infer<typeof startArgsValidator>;
@@ -168,14 +171,22 @@ async function startRun(
       : (
           await Promise.all(
             requested.map(async (piece) =>
-              (await hasCurrentResult(ctx, piece)) ? null : piece,
+              scope === "findings"
+                ? (await currentResult(ctx, piece))?.verdict === "findings"
+                  ? piece
+                  : null
+                : (await hasCurrentResult(ctx, piece))
+                  ? null
+                  : piece,
             ),
           )
         ).filter((piece) => piece !== null);
   if (!selected.length)
     return {
       error:
-        "Todas las piezas tienen un análisis vigente. Usá «Reanalizar todas» si querés repetirlo.",
+        scope === "findings"
+          ? "Ninguna pieza tiene hallazgos en su análisis vigente."
+          : "Todas las piezas tienen un análisis vigente. Usá «Reanalizar todas» si querés repetirlo.",
     };
 
   for (const state of ["preparing", "running"] as const) {
@@ -292,6 +303,24 @@ async function startRun(
 }
 
 const MAX_RUN_PIECES = 1000;
+
+/** Latest completed analysis of the piece that still matches its current input. */
+async function currentResult(ctx: QueryCtx, piece: ImportedPiece) {
+  if (!piece.pieceVersionId) return null;
+  const completed = await ctx.db
+    .query("qaVisualReviews")
+    .withIndex("by_version_input", (q) =>
+      q
+        .eq("pieceVersionId", piece.pieceVersionId)
+        .eq("input.contextKey", piece.input.contextKey)
+        .eq("status", "completed"),
+    )
+    .order("desc")
+    .first();
+  return completed && isCurrentReview(completed.input, piece.input.contextKey)
+    ? completed
+    : null;
+}
 
 async function hasCurrentResult(ctx: QueryCtx, piece: ImportedPiece) {
   if (!piece.pieceVersionId) return false;

@@ -9,6 +9,7 @@ import {
   RefreshCw,
   RotateCcw,
   ScanLine,
+  ScanSearch,
   Send,
   Users,
 } from "lucide-react";
@@ -27,6 +28,7 @@ export function CampaignHeader({
   analyzing,
   pendingCount,
   failedCount = 0,
+  findingsCount = 0,
   totalCount,
   hasPreviousAnalysis = false,
   view,
@@ -37,13 +39,17 @@ export function CampaignHeader({
   campaignName?: string;
   reviewer: string;
   onShare?: () => void;
-  /** scope "pending" analyzes pieces without a current result; "all" repeats every piece; "retry" only failed ones. */
-  onAnalyze?: (scope: "pending" | "all" | "retry") => void;
+  /**
+   * scope "pending" analyzes pieces without a current result; "findings" repeats the pieces with
+   * findings; "all" repeats every piece; "retry" only failed ones.
+   */
+  onAnalyze?: (scope: "pending" | "findings" | "all" | "retry") => void;
   onRefresh?: () => void;
   refreshing?: boolean;
   analyzing: boolean;
   pendingCount?: number;
   failedCount?: number;
+  findingsCount?: number;
   totalCount?: number;
   hasPreviousAnalysis?: boolean;
   view?: CampaignView;
@@ -67,7 +73,7 @@ export function CampaignHeader({
       window.removeEventListener("keydown", close);
     };
   }, [menuOpen]);
-  const choose = (scope: "pending" | "all" | "retry") => {
+  const choose = (scope: "pending" | "findings" | "all" | "retry") => {
     setMenuOpen(false);
     onAnalyze?.(scope);
   };
@@ -147,13 +153,23 @@ export function CampaignHeader({
             <button
               type="button"
               className="button primary qa-split-main"
-              disabled={analyzing || pendingCount === 0}
+              disabled={
+                analyzing || (pendingCount === 0 && !hasPreviousAnalysis)
+              }
               title={
                 pendingCount === 0
-                  ? "Todas las piezas tienen un análisis vigente"
+                  ? "Todas las piezas tienen un análisis vigente: podés volver a analizar las que tienen hallazgos o todas"
                   : "Analizar piezas sin análisis vigente, desactualizadas o con error"
               }
-              onClick={() => choose("pending")}
+              onClick={() =>
+                choose(
+                  pendingCount !== 0
+                    ? "pending"
+                    : findingsCount
+                      ? "findings"
+                      : "all",
+                )
+              }
             >
               <ScanLine size={15} />
               Analizar piezas
@@ -197,6 +213,21 @@ export function CampaignHeader({
                   <em>{failedCount}</em>
                 </button>
                 <hr />
+                <button
+                  role="menuitem"
+                  disabled={analyzing || !findingsCount}
+                  onClick={() => choose("findings")}
+                >
+                  <ScanSearch size={14} />
+                  <span>
+                    <b>Reanalizar con hallazgos</b>
+                    <small>
+                      Vuelve a revisar las piezas con hallazgos, con una
+                      indicación para la IA si algo está bien así.
+                    </small>
+                  </span>
+                  <em>{findingsCount}</em>
+                </button>
                 <button
                   role="menuitem"
                   disabled={analyzing || !hasPreviousAnalysis || !totalCount}

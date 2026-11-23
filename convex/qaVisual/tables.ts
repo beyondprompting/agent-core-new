@@ -496,7 +496,9 @@ export const qaVisualTables = {
     requestId: v.string(),
     activeBatch: v.optional(v.array(v.id("qaVisualReviews"))),
     rollingQueue: v.optional(v.literal(true)),
-    scope: v.optional(v.union(v.literal("pending"), v.literal("all"))),
+    scope: v.optional(
+      v.union(v.literal("pending"), v.literal("findings"), v.literal("all")),
+    ),
     cancelledAt: v.optional(v.number()),
     cancelledBy: v.optional(v.id("users")),
     // "pool": stage 4 runner (qaVisualAnalysisPool). Missing: legacy workflow runner.

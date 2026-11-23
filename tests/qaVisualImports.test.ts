@@ -1142,3 +1142,79 @@ test("parser-upgrade rollout queues only outdated active campaigns and never dup
     "parserUpgrade",
   );
 });
+
+test("pieces with findings can be analyzed again with the team's instructions", async (t) => {
+  const s = await setup(t);
+  const { readdir } = await import("node:fs/promises");
+  const root = new URL(
+    "../node_modules/@convex-dev/workpool/dist/component/",
+    import.meta.url,
+  );
+  s.db.registerComponent(
+    "qaVisualAnalysisPool",
+    (await import(new URL("schema.js", root).href)).default,
+    Object.fromEntries(
+      (await readdir(root, { recursive: true }))
+        .filter((name) => name.endsWith(".js"))
+        .map((name) => [
+          `./component/${name}`,
+          () => import(new URL(name, root).href),
+        ]),
+    ),
+  );
+  await publish(s, [item("one"), item("two"), item("three")]);
+  const visible = (await viewer(s))!;
+  const start = (scope: "pending" | "findings" | "all") =>
+    s.user.mutation(api.qaVisual.runs.start, {
+      campaignId: s.campaignId,
+      snapshotId: visible.snapshotId!,
+      kind: "batch",
+      scope,
+      requestId: crypto.randomUUID(),
+    });
+  const none = await start("findings");
+  assert.deepEqual(none, {
+    error: "Ninguna pieza tiene hallazgos en su análisis vigente.",
+  });
+
+  const first = await start("all");
+  assert.ok("runId" in first);
+  // The first analysis ends: "one" has findings, "two" is validated and "three" failed.
+  const verdicts = ["findings", "validated", undefined] as const;
+  const withFindings = await s.db.run(async (ctx) => {
+    const rows = await ctx.db
+      .query("qaVisualReviews")
+      .withIndex("by_run", (q) => q.eq("runId", first.runId))
+      .collect();
+    for (const row of rows) {
+      const verdict = verdicts[row.order];
+      await ctx.db.patch(
+        row._id,
+        verdict ? { status: "completed", verdict } : { status: "failed" },
+      );
+    }
+    await ctx.db.patch(first.runId, { state: "finished" });
+    return rows.find((row) => row.order === 0)!.pieceVersionId;
+  });
+
+  await s.user.mutation(api.qaVisual.campaigns.setAnalysisInstructions, {
+    campaignId: s.campaignId,
+    instructions: "  El precio sin el signo $ está bien así.  ",
+  });
+  const again = await start("findings");
+  assert.ok("runId" in again);
+  assert.equal(again.queued, 1);
+  const run = await s.db.run((ctx) => ctx.db.get(again.runId));
+  assert.equal(run!.scope, "findings");
+  assert.equal(run!.instructions, "El precio sin el signo $ está bien así.");
+  const rerun = await s.db.run((ctx) =>
+    ctx.db
+      .query("qaVisualReviews")
+      .withIndex("by_run", (q) => q.eq("runId", again.runId))
+      .collect(),
+  );
+  assert.deepEqual(
+    rerun.map((row) => row.pieceVersionId),
+    [withFindings],
+  );
+});

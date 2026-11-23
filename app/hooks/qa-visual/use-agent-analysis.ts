@@ -27,14 +27,15 @@ export function useAgentAnalysis(context?: AnalysisContext) {
   const sending = useRef(false);
 
   /**
-   * batch: "pending" (default) analyzes pieces without a current result; "all" repeats every piece.
+   * batch: "pending" (default) analyzes pieces without a current result; "findings" repeats the
+   * pieces whose current result has findings; "all" repeats every piece.
    * piece: allowed while a run is active — the backend puts it in front of the queue (§10.4).
    */
   async function launch(
     kind: "batch" | "piece" | "retry",
     names?: string[],
     pieceIds?: Id<"qaVisualPieces">[],
-    scope?: "pending" | "all",
+    scope?: "pending" | "findings" | "all",
   ) {
     if (!context || sending.current) return;
     if (dashboard?.active && kind !== "piece") return;

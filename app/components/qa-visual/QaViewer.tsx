@@ -8,7 +8,10 @@ import { InternalGallery } from "@/app/components/qa-visual/campaign/InternalGal
 import { InternalCarousel } from "@/app/components/qa-visual/campaign/InternalCarousel";
 import { PieceStatusOverview } from "@/app/components/qa-visual/campaign/PieceStatusOverview";
 import { SendToClientDialog } from "@/app/components/qa-visual/deliveries/SendToClientDialog";
-import { AnalysisDialog } from "@/app/components/qa-visual/campaign/AnalysisDialog";
+import {
+  AnalysisDialog,
+  type AnalysisScope,
+} from "@/app/components/qa-visual/campaign/AnalysisDialog";
 import type { CampaignView } from "@/app/components/qa-visual/campaign/CampaignHeader";
 import "./gallery.css";
 import { CheckCircle2, ScanLine, X, AlertCircle, Square } from "lucide-react";
@@ -225,7 +228,20 @@ function ReviewWorkspace({
         );
       }).length
     : undefined;
-  const analyze = (scope: "pending" | "all" | "retry") =>
+  // Pieces whose current analysis has findings: they can be run again with instructions.
+  const findingsCount = dashboard
+    ? pieces.filter((p) => {
+        const row = dashboard.reviews.find((r) => r?.name === p.filename);
+        // Same rule as the backend: the latest current completed result has findings.
+        return (
+          !!row &&
+          row.status !== "stale" &&
+          "verdict" in row &&
+          row.verdict === "findings"
+        );
+      }).length
+    : undefined;
+  const analyze = (scope: AnalysisScope | "retry") =>
     scope === "retry"
       ? void agent.launch(
           "retry",
@@ -234,7 +250,7 @@ function ReviewWorkspace({
         )
       : void agent.launch("batch", undefined, undefined, scope);
   // Analyzing pending pieces or all of them goes through the dialog with the AI instructions.
-  const [confirming, setConfirming] = useState<"pending" | "all" | null>(null);
+  const [confirming, setConfirming] = useState<AnalysisScope | null>(null);
   const reanalyzePiece = piece.pieceId
     ? () => void agent.launch("piece", [piece.filename], [piece.pieceId!])
     : undefined;
@@ -245,11 +261,15 @@ function ReviewWorkspace({
       {confirming && (
         <AnalysisDialog
           campaignId={campaignId}
-          scope={confirming}
-          count={confirming === "all" ? pieces.length : pendingCount}
+          initialScope={confirming}
+          counts={{
+            pending: pendingCount,
+            findings: findingsCount,
+            all: pieces.length,
+          }}
           onClose={() => setConfirming(null)}
-          onStart={() =>
-            agent.launch("batch", undefined, undefined, confirming)
+          onStart={(scope) =>
+            agent.launch("batch", undefined, undefined, scope)
           }
         />
       )}
@@ -272,6 +292,7 @@ function ReviewWorkspace({
         sendCount={deliveryPreview?.eligible.length}
         pendingCount={pendingCount}
         failedCount={dashboard?.failedPieceIds.length ?? 0}
+        findingsCount={findingsCount}
         totalCount={pieces.length}
         hasPreviousAnalysis={hasPreviousAnalysis}
       />
