@@ -317,21 +317,6 @@ function formatDeadlineForTrelloDue(value: string | undefined) {
   return `${year}-${month}-${day}T17:00:00.000Z`;
 }
 
-function htmlToTrelloMarkdown(value: string | undefined) {
-  if (!value) return "";
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/strong>/gi, "**")
-    .replace(/<strong>/gi, "**")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, "\"")
-    .replace(/&#39;/gi, "'")
-    .trim();
-}
-
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -349,12 +334,7 @@ function formatInlineMarkdownWithoutLinks(value: string) {
     .replace(/_([^_\n]+)_/g, "<em>$1</em>");
 }
 
-function buildTrelloDescription(args: { task: any }) {
-  return htmlToTrelloMarkdown(args.task.description);
-}
-
-function extractRequestTypeFromDescription(value: string | undefined) {
-  const description = htmlToTrelloMarkdown(value);
+function extractRequestTypeFromDescription(description: string) {
   const match = description.match(/\*\*Tipo de requerimiento:\*\*\s*([^\n]+)/i);
   return match?.[1]?.replace(/<[^>]+>/g, "").trim() || undefined;
 }
@@ -2208,9 +2188,6 @@ export const startPublishTaskToTrello = mutation({
       );
     }
 
-    const requestType =
-      extractRequestTypeFromDescription(task.description) || "Sin especificar";
-
     await ctx.db.patch(task._id, {
       trelloSyncStatus: "syncing",
       trelloSyncError: undefined,
@@ -2218,7 +2195,6 @@ export const startPublishTaskToTrello = mutation({
 
     await ctx.scheduler.runAfter(0, internalTrello.createCardForExternalTask, {
       taskId: task._id,
-      requestType,
       deliverablesCount,
       allowInternal: true,
       assignCreatedByMember: false,
@@ -2276,7 +2252,7 @@ export const archiveUnpublishedTask: any = internalAction({
 export const createCardForExternalTask: any = internalAction({
   args: {
     taskId: v.id("tasks"),
-    requestType: v.string(),
+    requestType: v.optional(v.string()),
     deliverablesCount: v.number(),
     allowInternal: v.optional(v.boolean()),
     assignCreatedByMember: v.optional(v.boolean()),
@@ -2345,12 +2321,13 @@ export const createCardForExternalTask: any = internalAction({
         idLabels.push(labelId);
       }
 
+      const description = await ctx.runAction(internal.integrations.trelloDescription.toMarkdown, {
+        description: data.task.description,
+      });
       const card = await trelloProvider.createCard({
         idList: data.listId,
         name: data.task.title,
-        desc: buildTrelloDescription({
-          task: data.task,
-        }),
+        desc: description,
         due: formatDeadlineForTrelloDue(data.task.deadline),
         idLabels: idLabels.length > 0 ? idLabels : undefined,
       });
@@ -2360,7 +2337,7 @@ export const createCardForExternalTask: any = internalAction({
       );
 
       const customValues = [
-        { key: "requestType", value: args.requestType },
+        { key: "requestType", value: args.requestType ?? extractRequestTypeFromDescription(description) ?? "Sin especificar" },
         { key: "deliverablesCount", value: args.deliverablesCount },
       ];
 
@@ -2995,10 +2972,13 @@ export const syncTaskFieldsFromCORToTrello: any = internalAction({
       console.log(
         `[TrelloSync][COR] Actualizando campos de card ${context.trelloCardId} desde COR para task ${args.taskId}`,
       );
+      const description = await ctx.runAction(internal.integrations.trelloDescription.toMarkdown, {
+        description: context.description,
+      });
       await trelloProvider.updateCardFields({
         cardId: context.trelloCardId,
         name: context.title,
-        desc: htmlToTrelloMarkdown(context.description),
+        desc: description,
         due: formatDeadlineForTrelloDue(context.deadline),
       });
 

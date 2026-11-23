@@ -69,6 +69,7 @@ import type * as http from "../http.js";
 import type * as integrations_corProvider from "../integrations/corProvider.js";
 import type * as integrations_noopProvider from "../integrations/noopProvider.js";
 import type * as integrations_registry from "../integrations/registry.js";
+import type * as integrations_trelloDescription from "../integrations/trelloDescription.js";
 import type * as integrations_trelloProvider from "../integrations/trelloProvider.js";
 import type * as integrations_types from "../integrations/types.js";
 import type * as lib_analyticsAccess from "../lib/analyticsAccess.js";
@@ -199,6 +200,7 @@ declare const fullApi: ApiFromModules<{
   "integrations/corProvider": typeof integrations_corProvider;
   "integrations/noopProvider": typeof integrations_noopProvider;
   "integrations/registry": typeof integrations_registry;
+  "integrations/trelloDescription": typeof integrations_trelloDescription;
   "integrations/trelloProvider": typeof integrations_trelloProvider;
   "integrations/types": typeof integrations_types;
   "lib/analyticsAccess": typeof lib_analyticsAccess;
