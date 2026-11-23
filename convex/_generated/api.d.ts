@@ -40,6 +40,7 @@ import type * as data_corClients from "../data/corClients.js";
 import type * as data_corInboundSync from "../data/corInboundSync.js";
 import type * as data_corUsers from "../data/corUsers.js";
 import type * as data_corUsersActions from "../data/corUsersActions.js";
+import type * as data_corWebhook from "../data/corWebhook.js";
 import type * as data_evaluation from "../data/evaluation.js";
 import type * as data_externalComments from "../data/externalComments.js";
 import type * as data_externalTaskStatus from "../data/externalTaskStatus.js";
@@ -169,6 +170,7 @@ declare const fullApi: ApiFromModules<{
   "data/corInboundSync": typeof data_corInboundSync;
   "data/corUsers": typeof data_corUsers;
   "data/corUsersActions": typeof data_corUsersActions;
+  "data/corWebhook": typeof data_corWebhook;
   "data/evaluation": typeof data_evaluation;
   "data/externalComments": typeof data_externalComments;
   "data/externalTaskStatus": typeof data_externalTaskStatus;

@@ -88,11 +88,11 @@ function getCredentials() {
   return { key, token };
 }
 
-async function trelloFetch<T>(
+async function trelloRequest(
   path: string,
   options: RequestInit = {},
   query: Record<string, string | number | boolean | undefined> = {},
-): Promise<T> {
+): Promise<Response> {
   const { key, token } = getCredentials();
   const url = new URL(`${TRELLO_API_BASE_URL}${path}`);
   url.searchParams.set("key", key);
@@ -114,6 +114,15 @@ async function trelloFetch<T>(
     throw new Error(`Trello API error: ${response.status} ${body}`);
   }
 
+  return response;
+}
+
+async function trelloFetch<T>(
+  path: string,
+  options: RequestInit = {},
+  query: Record<string, string | number | boolean | undefined> = {},
+): Promise<T> {
+  const response = await trelloRequest(path, options, query);
   return (await response.json()) as T;
 }
 
@@ -324,6 +333,20 @@ export const trelloProvider = {
         value: args.memberId,
       },
     );
+  },
+
+  async getCardLabels(cardId: string) {
+    return await trelloFetch<{ idBoard: string; labels: TrelloLabel[] }>(
+      `/cards/${encodeURIComponent(cardId)}`, {}, { fields: "idBoard,labels" },
+    );
+  },
+
+  async addCardLabel(cardId: string, labelId: string) {
+    await trelloRequest(`/cards/${encodeURIComponent(cardId)}/idLabels`, { method: "POST" }, { value: labelId });
+  },
+
+  async removeCardLabel(cardId: string, labelId: string) {
+    await trelloRequest(`/cards/${encodeURIComponent(cardId)}/idLabels/${encodeURIComponent(labelId)}`, { method: "DELETE" });
   },
 
   async getBoardLabels(boardId: string): Promise<TrelloLabel[]> {

@@ -1290,6 +1290,7 @@ export const getTaskCORSyncSnapshotInternal = internalQuery({
     return {
       _id: task._id,
       status: task.status,
+      convexStatus: task.convexStatus,
       corTaskId: task.corTaskId,
       corSyncStatus: task.corSyncStatus,
     };

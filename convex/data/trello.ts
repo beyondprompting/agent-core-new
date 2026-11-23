@@ -1628,6 +1628,7 @@ export const markTrelloCardSynced = internalMutation({
     trelloListId: v.string(),
     trelloCardId: v.string(),
     trelloCardUrl: v.string(),
+    createdWithBrand: v.optional(v.object({ subBrandId: v.optional(v.id("subBrands")) })),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1654,6 +1655,15 @@ export const markTrelloCardSynced = internalMutation({
       trelloSyncError: undefined,
       trelloSyncedAt: now,
     });
+
+    if (args.createdWithBrand) {
+      const task = await ctx.db.get(args.taskId);
+      if (task && task.subBrandId !== args.createdWithBrand.subBrandId) {
+        await ctx.runMutation(internalTrello.enqueueTrelloOutboundSyncFromCOR, {
+          taskId: task._id, kind: "brand", previousSubBrandId: args.createdWithBrand.subBrandId,
+        });
+      }
+    }
 
     await ctx.db.patch(args.projectId, {
       trelloCardId: args.trelloCardId,
@@ -2376,6 +2386,7 @@ export const createCardForExternalTask: any = internalAction({
         trelloListId: data.listId,
         trelloCardId: card.id,
         trelloCardUrl: card.url || card.shortUrl || "",
+        createdWithBrand: { subBrandId: data.task.subBrandId },
       });
 
       if (args.assignCreatedByMember !== false && data.trelloMemberId) {
@@ -2429,10 +2440,80 @@ function getTrelloOutboundRetryDelayMs(message: string, attempt: number) {
     : delay;
 }
 
+const taskBrandArgs = {
+  taskId: v.id("tasks"),
+  previousSubBrandIds: v.array(v.id("subBrands")),
+};
+
+export const getTaskBrandForTrello = internalQuery({
+  args: taskBrandArgs,
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.convexStatus === "deleted" || !isTrelloEnabledForCorClientId(task.corClientId)) return null;
+    const mapping = await ctx.db.query("trelloCards").withIndex("by_task", q => q.eq("taskId", args.taskId)).first();
+    const cardId = mapping?.trelloCardId || task.trelloCardId;
+    if (!cardId) return null;
+    const desired = task.subBrandId ? await ctx.db.get(task.subBrandId) : null;
+    if ((task.productId !== undefined || task.subBrandId) &&
+        (!desired || desired.clientBrandId !== task.clientBrandId || desired.corClientId !== task.corClientId)) {
+      throw new Error("La marca COR todavía no está vinculada al catálogo del cliente.");
+    }
+    const category = task.clientBrandId ? await ctx.db.get(task.clientBrandId) : null;
+    const previous = await Promise.all(args.previousSubBrandIds.map(id => ctx.db.get(id)));
+    return {
+      cardId, desired, categoryBoardId: category?.trelloBoardId,
+      previous: previous.filter(brand => brand !== null && brand.corClientId === task.corClientId)
+        .map(brand => ({ labelId: brand!.trelloLabelId, name: brand!.trelloLabelName || brand!.name })),
+    };
+  },
+});
+
+export const syncTaskBrandToTrello = internalAction({
+  args: taskBrandArgs,
+  handler: async (ctx, args) => {
+    const data = await ctx.runQuery(internal.data.trello.getTaskBrandForTrello, args);
+    if (!data) return { skipped: true };
+    const card = await trelloProvider.getCardLabels(data.cardId);
+    let desiredLabelId: string | undefined;
+    if (data.desired) {
+      if (card.idBoard === data.categoryBoardId) {
+        desiredLabelId = await ensureTrelloLabelForSubBrand(ctx, {
+          subBrandId: data.desired._id, clientBrandId: data.desired.clientBrandId, boardId: card.idBoard,
+        });
+      } else {
+        // Labels belong to a board. Keep a moved card on its actual board.
+        const labels = await trelloProvider.getBoardLabels(card.idBoard);
+        const name = normalizeTrelloLabelName(data.desired.name);
+        const label = labels.find(label => normalizeTrelloLabelName(label.name) === name)
+          ?? await trelloProvider.createBoardLabel({
+            boardId: card.idBoard, name: data.desired.name, color: data.desired.trelloLabelColor || "green",
+          });
+        desiredLabelId = label.id;
+      }
+      if (desiredLabelId && !card.labels.some(label => label.id === desiredLabelId)) {
+        await trelloProvider.addCardLabel(data.cardId, desiredLabelId);
+      }
+    }
+    for (const prior of data.previous) {
+      let old = card.labels.find(label => label.id === prior.labelId);
+      if (!old && (!prior.labelId || card.idBoard !== data.categoryBoardId)) {
+        const matches = card.labels.filter(label => normalizeTrelloLabelName(label.name) === normalizeTrelloLabelName(prior.name));
+        if (matches.length === 1) old = matches[0];
+      }
+      if (old && old.id !== desiredLabelId) {
+        await trelloProvider.removeCardLabel(data.cardId, old.id);
+        card.labels = card.labels.filter(label => label.id !== old.id);
+      }
+    }
+    return { success: true };
+  },
+});
+
 export const enqueueTrelloOutboundSyncFromCOR = internalMutation({
   args: {
     taskId: v.id("tasks"),
-    kind: v.union(v.literal("status"), v.literal("fields")),
+    kind: v.union(v.literal("status"), v.literal("fields"), v.literal("brand")),
+    previousSubBrandId: v.optional(v.id("subBrands")),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -2482,6 +2563,14 @@ export const enqueueTrelloOutboundSyncFromCOR = internalMutation({
       )
       .first();
 
+    const brandPatch = args.kind === "brand" ? {
+      brandRevision: (existing?.brandRevision ?? 0) + 1,
+      previousSubBrandIds: [...new Set([
+        ...(existing?.previousSubBrandIds ?? []),
+        ...(args.previousSubBrandId ? [args.previousSubBrandId] : []),
+      ])],
+    } : {};
+
     if (
       existing &&
       (existing.status === "pending" ||
@@ -2489,6 +2578,7 @@ export const enqueueTrelloOutboundSyncFromCOR = internalMutation({
         existing.status === "processing")
     ) {
       await ctx.db.patch(existing._id, {
+        ...brandPatch,
         updatedAt: now,
         lastError: undefined,
       });
@@ -2501,6 +2591,7 @@ export const enqueueTrelloOutboundSyncFromCOR = internalMutation({
     }
 
     const queuePatch = {
+      ...brandPatch,
       status: "pending",
       nextRunAt: now,
       processingUntil: undefined,
@@ -2636,6 +2727,8 @@ export const claimNextTrelloOutboundSync = internalMutation({
       queueId: item._id,
       taskId: item.taskId,
       kind: item.kind,
+      brandRevision: item.brandRevision,
+      previousSubBrandIds: item.previousSubBrandIds,
       attempt: item.attempt,
     };
   },
@@ -2644,11 +2737,17 @@ export const claimNextTrelloOutboundSync = internalMutation({
 export const markTrelloOutboundSyncSuccess = internalMutation({
   args: {
     queueId: v.id("trelloOutboundSyncQueue"),
+    brandRevision: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const item = await ctx.db.get(args.queueId);
+    if (!item) return;
+    const changedDuringSync = item.kind === "brand" && item.brandRevision !== args.brandRevision;
     await ctx.db.patch(args.queueId, {
-      status: "synced",
+      status: changedDuringSync ? "pending" : "synced",
+      previousSubBrandIds: changedDuringSync ? item.previousSubBrandIds : undefined,
+      nextRunAt: changedDuringSync ? now : item.nextRunAt,
       processingUntil: undefined,
       lastError: undefined,
       updatedAt: now,
@@ -2768,18 +2867,20 @@ export const processTrelloOutboundSyncQueue: any = internalAction({
 
     let result: any;
     try {
-      result =
-        claim.kind === "status"
-          ? await ctx.runAction(internalTrello.syncTaskStatusFromCORToTrello, {
-              taskId: claim.taskId,
-            })
-          : await ctx.runAction(internalTrello.syncTaskFieldsFromCORToTrello, {
-              taskId: claim.taskId,
-            });
+      if (claim.kind === "brand") {
+        result = await ctx.runAction(internalTrello.syncTaskBrandToTrello, {
+          taskId: claim.taskId, previousSubBrandIds: claim.previousSubBrandIds ?? [],
+        });
+      } else {
+        const action = claim.kind === "status"
+          ? internalTrello.syncTaskStatusFromCORToTrello
+          : internalTrello.syncTaskFieldsFromCORToTrello;
+        result = await ctx.runAction(action, { taskId: claim.taskId });
+      }
 
       if (result?.success || result?.skipped) {
         await ctx.runMutation(internalTrello.markTrelloOutboundSyncSuccess, {
-          queueId: claim.queueId,
+          queueId: claim.queueId, brandRevision: claim.brandRevision,
         });
       } else {
         await ctx.runMutation(internalTrello.markTrelloOutboundSyncFailure, {

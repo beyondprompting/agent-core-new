@@ -67,6 +67,11 @@ test("manual and scheduled pulls preserve task/project fields without reading CO
     // Also exercise a previously queued attachment worker: no import, existing Trello forwarding preserved.
     await (sync.pullTaskAttachmentsFromCORWorker as any)._handler(scheduled.ctx, attachments[0].args);
     assert.deepEqual(scheduled.actions, [{ name: "data/trello:syncClientAttachmentsFromCORToTrello", args: { taskId: "task1" } }]);
+    const webhook = context();
+    await (sync.pullTaskFromCORWorker as any)._handler(webhook.ctx, { taskId: "task1", webhookCorId: 11 });
+    await (sync.pullProjectFromCORWorker as any)._handler(webhook.ctx, { projectId: "project1", webhookCorId: 22 });
+    assert.deepEqual(webhook.mutations.filter(m => m.name.includes(":applyInbound")).map(m => m.args.webhookCorId), [11, 22]);
+    assert.ok(webhook.scheduled.every(job => !job.name.includes("Attachment")));
     assert.ok(requested.every(url => /\/oauth\/token|\/tasks\/11$|\/projects\/22$/.test(url)));
 
     const unchanged = context({ changed: false });
@@ -80,6 +85,14 @@ test("manual and scheduled pulls preserve task/project fields without reading CO
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   }
+});
+
+test("webhook keeps busy records retryable and ignores a relinked task", async () => {
+  const f = context();
+  f.ctx.runQuery = async () => ({ ...task, corSyncStatus: "syncing" });
+  await assert.rejects((sync.pullTaskFromCORWorker as any)._handler(f.ctx, { taskId: "task1", webhookCorId: 11 }), /outbound sync/);
+  await (sync.pullTaskFromCORWorker as any)._handler(f.ctx, { taskId: "task1", webhookCorId: 99 });
+  assert.deepEqual(f.mutations, []);
 });
 
 test("both cron entry points retain current/expired dispatch and the same workers", async () => {

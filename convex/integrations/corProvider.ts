@@ -56,7 +56,7 @@ export class CORNotFoundError extends Error {
   readonly entity: "task" | "project";
   readonly externalId: number;
 
-  constructor(entity: "task" | "project", externalId: number) {
+  constructor(entity: "task" | "project", externalId: number, readonly httpStatus?: number) {
     super(`${entity} not found in COR (${externalId})`);
     this.name = "CORNotFoundError";
     this.entity = entity;
@@ -835,7 +835,7 @@ export function createCORProvider(): ProjectManagementProvider {
 
         if (!response.ok) {
           if (response.status === 404) {
-            throw new CORNotFoundError("project", projectId);
+            throw new CORNotFoundError("project", projectId, response.status);
           }
           console.error(
             `[COR Provider] ❌ Error obteniendo proyecto: ${response.status}`,
@@ -845,7 +845,7 @@ export function createCORProvider(): ProjectManagementProvider {
 
         const rawProject = await response.text();
         if (!rawProject.trim()) {
-          throw new CORNotFoundError("project", projectId);
+          throw new CORNotFoundError("project", projectId, response.status);
         }
 
         const project = JSON.parse(rawProject);
