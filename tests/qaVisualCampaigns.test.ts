@@ -133,9 +133,10 @@ test("ambiguous sources and missing folders stay visible until the user resolves
     result.checks.find((check) => check.key === "RECURSOS")?.status,
     "choose",
   );
+  // A missing folder is not a dead end: the user can pick another folder of the campaign.
   assert.equal(
     result.checks.find((check) => check.key === "DESPLIEGUE")?.status,
-    "missing",
+    "choose",
   );
   d.listings.root.push(folder("deployment", "Despliegue"));
   const fixed = await inspectDriveFolder(url, { excelFileId: "excel-2" });

@@ -11,6 +11,9 @@ import { pieceClientStatus } from "./clientReview";
 const sourceSelection = v.object({
   excelFileId: v.optional(v.string()),
   csvFileId: v.optional(v.string()),
+  resourcesFolderId: v.optional(v.string()),
+  editablesFolderId: v.optional(v.string()),
+  deploymentFolderId: v.optional(v.string()),
 });
 const campaignStatus = v.union(v.literal("active"), v.literal("archived"));
 

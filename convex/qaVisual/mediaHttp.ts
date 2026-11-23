@@ -16,7 +16,12 @@ const headers = {
 
 async function openDriveImage(
   ctx: ActionCtx,
-  fileArgs: { driveFolderId: string; id: string; version: string },
+  fileArgs: {
+    driveFolderId: string;
+    deploymentFolderId?: string;
+    id: string;
+    version: string;
+  },
 ): Promise<Response> {
   const file = await ctx.runAction(
     internal.qaVisual.drive.authorizeMedia,
@@ -153,6 +158,7 @@ export const driveMedia = httpAction(async (ctx, request) => {
   try {
     return await openDriveImage(ctx, {
       driveFolderId: campaign.driveFolderId,
+      deploymentFolderId: campaign.sourceSelection?.deploymentFolderId,
       id,
       version,
     });

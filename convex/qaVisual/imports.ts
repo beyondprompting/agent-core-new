@@ -635,7 +635,9 @@ async function failImport(
     await ctx.db.patch(campaign._id, {
       activeImportId: undefined,
       syncError: error?.message,
-      syncNeedsSources: error?.code === "needs_source",
+      // A missing CSV is resolved from «Elegir fuentes» (pick another folder or create it).
+      syncNeedsSources:
+        error?.code === "needs_source" || error?.code === "csv_missing",
     });
   await ctx.scheduler.runAfter(0, internal.qaVisual.imports.cleanup, {
     importId: row._id,

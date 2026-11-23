@@ -15,6 +15,7 @@ export type DriveInspection = {
   campaign?: string;
   sampleFile: {
     driveFolderId: string;
+    deploymentFolderId: string;
     id: string;
     version: string;
     bytes: number;
@@ -59,6 +60,7 @@ export const inspectCampaign = internalAction({
       campaign: inventory.campaignName,
       sampleFile: {
         driveFolderId,
+        deploymentFolderId: deployment.folderId,
         id: sample.driveId,
         version: sample.driveVersion,
         bytes: sample.bytes,

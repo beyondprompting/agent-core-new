@@ -126,7 +126,9 @@ Carpeta de campaña
     └── Imágenes finales PNG o JPEG
 ```
 
-El código actual busca esas tres subcarpetas por su nombre exacto y exige una única coincidencia accesible para cada una. Lista los archivos directamente contenidos en ellas. No hay un recorrido recursivo general de subcarpetas.
+El código busca esas tres subcarpetas por su nombre, sin distinguir mayúsculas, tildes ni espacios extra. La carpeta de piezas puede llamarse `DESPLIEGUE` o `VISUALES`. Lista los archivos directamente contenidos en ellas; no hay un recorrido recursivo general de subcarpetas.
+
+Si una carpeta no existe, está repetida o no tiene lo esperado, el diálogo de registro y «Elegir fuentes» permiten elegir otra carpeta para cada fuente (matriz, CSV y piezas). Las opciones son la carpeta compartida, sus subcarpetas y las subcarpetas de estas. La elección se guarda en `sourceSelection` (`resourcesFolderId`, `editablesFolderId`, `deploymentFolderId`) y se valida en cada importación: nunca se lee una carpeta fuera de la carpeta compartida. Sin elección, se vuelve a detectar por nombre.
 
 La carpeta de prueba es `AUTO SEMANA DE LOCURA`:
 
@@ -138,7 +140,7 @@ El acceso a las campañas de la agencia se preparó desde la cuenta `digital@pto
 
 ### 5.2 Autenticación y responsabilidad de cada servidor
 
-**Implementado:** Convex realiza la autenticación con Google y las llamadas a Drive. Usa una cuenta de servicio, un JWT firmado y el alcance `drive.readonly`. La carpeta de cada campaña debe compartirse con esa cuenta como **Lector**. El acceso efectivo a las subcarpetas se valida.
+**Implementado:** Convex realiza la autenticación con Google y las llamadas a Drive. Usa una cuenta de servicio, un JWT firmado y el alcance `drive.readonly` para toda la lectura. La carpeta de cada campaña debe compartirse con esa cuenta como **Lector** (como **Editor** solo si se quiere que QA Visual cree el CSV de producción, ver 5.3). El acceso efectivo a las subcarpetas se valida.
 
 La credencial se configura en el entorno del despliegue de Convex mediante `QA_VISUAL_GOOGLE_SERVICE_ACCOUNT_JSON`. Su contenido es secreto y no debe estar en un archivo versionado, en una variable pública de Next.js o en el navegador.
 
@@ -154,6 +156,7 @@ El token de Google se reutiliza en memoria mientras sigue vigente. Una comprobac
 - En `EDITABLES` se prefieren los CSV con sufijo `_CONVERTED` o `_CONVERTED_vN`.
 - Si no existen esos candidatos, se toman otros CSV excluyendo los que se identifican como `BUILDER`.
 - Si queda más de un candidato o no hay ninguno, la importación informa el problema. No debe escoger arbitrariamente una matriz o un CSV.
+- Si la carpeta del CSV no tiene ninguno y hay una matriz elegida, se puede **crear el CSV desde la matriz** (`campaignRegistration.createCsv`). Se arma una fila por oferta numerada de cada fila de PRODUCCION, con las columnas que lee el vinculador (`ID_PIEZA`, `TXT_PRODUCTO`, `TXT_PRECIO`, `SLOT_FECHA`, `CAMPAÑA`, `FASE`, `CANAL`, `MEDIO_PLATAFORMA`, `FORMATO_TIPO`, `ANCHO_PX`, `ALTO_PX`) y tres columnas informativas (`FILA_MATRIZ`, `OFERTA`, `IMAGEN_QA`). Una imagen se asigna a un pedido solo si la coincidencia es única en ambos sentidos (dimensiones, formato, canal, fecha y todas las palabras del producto en el nombre del archivo); el resto de los pedidos queda con un ID sugerido para renombrar la pieza o corregir la celda. El archivo se guarda como `<CARPETA>_QA_VISUAL.csv` en esa carpeta. Es la única escritura de QA Visual en Drive: usa el alcance `drive` y requiere que la cuenta de servicio sea **Editor** de esa carpeta. En «Mi unidad» Google no deja que una cuenta de servicio sea dueña de archivos; en ese caso, o si falta el permiso, el CSV se ofrece para descargar y subir manualmente.
 - En `DESPLIEGUE` se consideran PNG y JPEG con extensión y MIME compatibles y versión de Drive disponible.
 - Los nombres duplicados de imágenes se rechazan porque la vinculación actual depende de ellos.
 - Los archivos Illustrator y los reportes de biblioteca pueden existir en la carpeta, pero actualmente no se realiza una interpretación completa de su contenido.

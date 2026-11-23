@@ -367,6 +367,10 @@ export const qaVisualTables = {
       v.object({
         excelFileId: v.optional(v.string()),
         csvFileId: v.optional(v.string()),
+        // Folders chosen by the user when the campaign does not use the usual names.
+        resourcesFolderId: v.optional(v.string()),
+        editablesFolderId: v.optional(v.string()),
+        deploymentFolderId: v.optional(v.string()),
       }),
     ),
     client: v.optional(

@@ -16,6 +16,7 @@ import {
 } from "@/app/lib/qa-visual/campaign-model";
 import {
   FolderChecklist,
+  type CsvDownload,
   type FolderInspection,
   type SourceSelection,
 } from "./FolderChecklist";
@@ -25,6 +26,9 @@ const selectionKey = (url: string, selection: SourceSelection) =>
     url.trim(),
     selection.excelFileId ?? "",
     selection.csvFileId ?? "",
+    selection.resourcesFolderId ?? "",
+    selection.editablesFolderId ?? "",
+    selection.deploymentFolderId ?? "",
   ]);
 
 export function CampaignForm({
@@ -48,6 +52,7 @@ export function CampaignForm({
   const chooseSources = useAction(
     api.qaVisual.campaignRegistration.chooseSources,
   );
+  const createCsv = useAction(api.qaVisual.campaignRegistration.createCsv);
   const account = useQuery(api.qaVisual.campaigns.serviceAccount, {});
   const [url, setUrl] = useState(campaign?.folderUrl ?? "");
   const [selection, setSelection] = useState<SourceSelection>(
@@ -59,7 +64,11 @@ export function CampaignForm({
   const [inspection, setInspection] = useState<FolderInspection | null>(null);
   const [verified, setVerified] = useState("");
   const [error, setError] = useState("");
-  const [pending, setPending] = useState<"inspect" | "save" | null>(null);
+  const [pending, setPending] = useState<"inspect" | "save" | "csv" | null>(
+    null,
+  );
+  const [csvNotice, setCsvNotice] = useState("");
+  const [csvDownload, setCsvDownload] = useState<CsvDownload>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const ready = inspection?.ok && verified === selectionKey(url, selection);
@@ -100,6 +109,53 @@ export function CampaignForm({
       if ("folder" in result) {
         setSelection(result.selection);
         if (result.ok) setVerified(selectionKey(url, result.selection));
+      }
+    } catch (cause) {
+      setError(campaignError(cause));
+    } finally {
+      submitting.current = false;
+      setPending(null);
+    }
+  }
+
+  async function generateCsv() {
+    if (submitting.current) return;
+    submitting.current = true;
+    setPending("csv");
+    setError("");
+    setCsvNotice("");
+    setCsvDownload(undefined);
+    try {
+      const result = await createCsv(
+        campaign
+          ? { campaignId: campaign._id, ...selection }
+          : { folderUrl: url.trim(), ...selection },
+      );
+      const summary = result.created ?? result.download;
+      if (summary)
+        setCsvNotice(
+          `${result.created ? `Se creó «${summary.name}»` : "Se armó el CSV"} con ${summary.orders} ${summary.orders === 1 ? "pedido" : "pedidos"}. ` +
+            `${summary.assigned} ${summary.assigned === 1 ? "imagen quedó vinculada" : "imágenes quedaron vinculadas"} por su nombre` +
+            (summary.unassigned
+              ? `; ${summary.unassigned} sin vincular: renombralas con su ID_PIEZA o corregí el CSV en Drive.`
+              : "."),
+        );
+      if (result.download)
+        setCsvDownload({
+          name: result.download.name,
+          content: result.download.content,
+        });
+      if (result.error) setError(result.error);
+      if (result.inspection) {
+        setInspection(result.inspection);
+        if ("folder" in result.inspection) {
+          setSelection(result.inspection.selection);
+          setVerified(
+            result.inspection.ok
+              ? selectionKey(url, result.inspection.selection)
+              : "",
+          );
+        }
       }
     } catch (cause) {
       setError(campaignError(cause));
@@ -186,11 +242,12 @@ export function CampaignForm({
             </h2>
             <p id="qa-campaign-form-description">
               {campaign ? (
-                `Elegí la matriz y el CSV de ${campaign.name}.`
+                `Elegí las carpetas, la matriz y el CSV de ${campaign.name}.`
               ) : (
                 <>
                   Compartí la carpeta con la cuenta de servicio como{" "}
-                  <b>Lector</b> y pegá su enlace.
+                  <b>Lector</b> (o <b>Editor</b> si querés que QA Visual cree el
+                  CSV) y pegá su enlace.
                 </>
               )}
             </p>
@@ -249,6 +306,8 @@ export function CampaignForm({
                 setSelection({});
                 setVerified("");
                 setError("");
+                setCsvNotice("");
+                setCsvDownload(undefined);
               }}
               placeholder="https://drive.google.com/drive/folders/…"
             />
@@ -300,10 +359,14 @@ export function CampaignForm({
                 inspection={inspection}
                 selection={selection}
                 disabled={Boolean(pending)}
+                creatingCsv={pending === "csv"}
+                csvDownload={csvDownload}
                 onSelect={(chosen) => {
                   setSelection(chosen);
+                  setCsvDownload(undefined);
                   void verify(chosen);
                 }}
+                onCreateCsv={() => void generateCsv()}
               />
             ) : (
               <div className="qc-callout danger" role="alert">
@@ -311,6 +374,12 @@ export function CampaignForm({
                 <p>{inspection.error}</p>
               </div>
             ))}
+          {csvNotice && (
+            <div className="qc-callout info" role="status">
+              <Info size={16} aria-hidden />
+              <p>{csvNotice}</p>
+            </div>
+          )}
           {error && (
             <p className="qc-error" role="alert">
               {error}
@@ -378,13 +447,15 @@ export function CampaignForm({
               )}
               {pending === "save"
                 ? "Guardando…"
-                : pending === "inspect"
-                  ? "Verificando…"
-                  : step === "link"
-                    ? "Verificar carpeta"
-                    : campaign
-                      ? "Guardar e importar"
-                      : "Agregar campaña"}
+                : pending === "csv"
+                  ? "Creando CSV…"
+                  : pending === "inspect"
+                    ? "Verificando…"
+                    : step === "link"
+                      ? "Verificar carpeta"
+                      : campaign
+                        ? "Guardar e importar"
+                        : "Agregar campaña"}
             </button>
           </div>
         </div>

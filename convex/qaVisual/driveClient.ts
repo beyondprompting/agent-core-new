@@ -1,14 +1,21 @@
 "use node";
 
-import { createHash, createSign } from "node:crypto";
+import { createHash, createSign, randomUUID } from "node:crypto";
 import { normalize } from "./model/normalize";
 
 const tokenUrl = "https://oauth2.googleapis.com/token";
 const driveUrl = "https://www.googleapis.com/drive/v3/files";
 const fields =
-  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren),shortcutDetails(targetId,targetMimeType)";
+  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren,canAddChildren),shortcutDetails(targetId,targetMimeType),imageMediaMetadata(width,height)";
 export const folderMime = "application/vnd.google-apps.folder";
+/** Roles of the campaign subfolders. DESPLIEGUE also accepts the name VISUALES. */
 export const campaignFolders = ["RECURSOS", "EDITABLES", "DESPLIEGUE"] as const;
+export type CampaignFolder = (typeof campaignFolders)[number];
+export const campaignFolderNames: Record<CampaignFolder, readonly string[]> = {
+  RECURSOS: ["RECURSOS"],
+  EDITABLES: ["EDITABLES"],
+  DESPLIEGUE: ["DESPLIEGUE", "VISUALES"],
+};
 export const matrixLimit = 15 * 1024 * 1024;
 export const csvLimit = 2 * 1024 * 1024;
 export const imageLimit = 20 * 1024 * 1024;
@@ -24,15 +31,19 @@ export type DriveFile = {
   md5Checksum?: string;
   parents?: string[];
   trashed?: boolean;
-  capabilities?: { canListChildren?: boolean };
+  capabilities?: { canListChildren?: boolean; canAddChildren?: boolean };
   shortcutDetails?: { targetId: string; targetMimeType: string };
+  imageMediaMetadata?: { width?: number; height?: number };
 };
 type ServiceAccount = { client_email: string; private_key: string };
 
-let token: { value: string; expiresAt: number } | undefined;
-let pendingToken: Promise<string> | undefined;
+const readScope = "https://www.googleapis.com/auth/drive.readonly";
+// Only used to save a generated CSV; Drive still enforces the folder's sharing (Editor).
+const writeScope = "https://www.googleapis.com/auth/drive";
+const tokens = new Map<string, { value: string; expiresAt: number }>();
+const pendingTokens = new Map<string, Promise<string>>();
 
-async function issueToken() {
+async function issueToken(scope: string) {
   let account: ServiceAccount;
   try {
     account = JSON.parse(
@@ -50,7 +61,7 @@ async function issueToken() {
     Buffer.from(JSON.stringify(value)).toString("base64url");
   const claims = encode({
     iss: account.client_email,
-    scope: "https://www.googleapis.com/auth/drive.readonly",
+    scope,
     aud: tokenUrl,
     iat: now,
     exp: now + 3600,
@@ -73,19 +84,28 @@ async function issueToken() {
     );
   const result: { access_token: string; expires_in: number } =
     await response.json();
-  token = {
+  const issued = {
     value: result.access_token,
     expiresAt: Date.now() + result.expires_in * 1000,
   };
-  return token.value;
+  tokens.set(scope, issued);
+  return issued.value;
 }
 
-export async function driveToken() {
-  if (token && token.expiresAt > Date.now() + 60_000) return token.value;
-  pendingToken ??= issueToken().finally(() => {
-    pendingToken = undefined;
-  });
-  return pendingToken;
+function scopedToken(scope: string) {
+  const cached = tokens.get(scope);
+  if (cached && cached.expiresAt > Date.now() + 60_000)
+    return Promise.resolve(cached.value);
+  let pending = pendingTokens.get(scope);
+  if (!pending) {
+    pending = issueToken(scope).finally(() => pendingTokens.delete(scope));
+    pendingTokens.set(scope, pending);
+  }
+  return pending;
+}
+
+export function driveToken() {
+  return scopedToken(readScope);
 }
 
 async function request(url: string) {
@@ -99,6 +119,7 @@ export class DriveRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly reason?: string,
   ) {
     super(message);
   }
@@ -115,6 +136,7 @@ async function check(response: Response) {
   throw new DriveRequestError(
     `Google Drive respondió HTTP ${response.status}${detail}.`,
     response.status,
+    detail ? (reason as string) : undefined,
   );
 }
 
@@ -169,26 +191,60 @@ export async function downloadDriveFile(file: DriveFile, maxBytes: number) {
   return bytes;
 }
 
-/** Folder names are compared without case, accents or extra spaces ("Despliegue " = "DESPLIEGUE"). */
-export function isCampaignFolder(
-  file: DriveFile,
-  name: (typeof campaignFolders)[number],
-) {
+/** Uploads a new file. Requires the service account to be Editor of the folder. */
+export async function createDriveFile(
+  folderId: string,
+  name: string,
+  mimeType: string,
+  bytes: Buffer,
+): Promise<DriveFile> {
+  const boundary = `qa-visual-${randomUUID()}`;
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(
+        { name, mimeType, parents: [folderId] },
+      )}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+    ),
+    bytes,
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+  const params = new URLSearchParams({
+    uploadType: "multipart",
+    supportsAllDrives: "true",
+    fields,
+  });
+  const response = await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files?${params}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${await scopedToken(writeScope)}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body,
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  await check(response);
+  return response.json();
+}
+
+const isFolder = (file: DriveFile) =>
+  file.mimeType === folderMime ||
+  file.shortcutDetails?.targetMimeType === folderMime;
+
+/**
+ * Folder names are compared without case, accents or extra spaces ("Despliegue " = "DESPLIEGUE").
+ * DESPLIEGUE also matches a folder called VISUALES.
+ */
+export function isCampaignFolder(file: DriveFile, role: CampaignFolder) {
   return (
-    (file.mimeType === folderMime ||
-      file.shortcutDetails?.targetMimeType === folderMime) &&
-    normalize(file.name) === name
+    isFolder(file) && campaignFolderNames[role].includes(normalize(file.name))
   );
 }
 
-export function findCampaignFolder(
-  files: DriveFile[],
-  name: (typeof campaignFolders)[number],
-) {
-  const matches = files.filter((file) => isCampaignFolder(file, name));
-  if (matches.length !== 1)
-    throw new Error(`Se esperaba una única carpeta ${name} en Google Drive.`);
-  return matches[0];
+export function isDriveFolder(file: DriveFile) {
+  return isFolder(file);
 }
 
 export async function resolveFolderShortcut(file: DriveFile | null) {

@@ -5,9 +5,12 @@ import { internal } from "../_generated/api";
 import { action } from "../_generated/server";
 import { driveReviewKey } from "./analysisInput.node";
 import {
+  createProductionCsv,
   DriveFolderError,
   inspectDriveFolder,
+  type CsvCreation,
   type FolderInspection,
+  type SourceSelection,
 } from "./driveSource.node";
 
 type RegistrationResult =
@@ -16,6 +19,9 @@ type RegistrationResult =
 const selection = {
   excelFileId: v.optional(v.string()),
   csvFileId: v.optional(v.string()),
+  resourcesFolderId: v.optional(v.string()),
+  editablesFolderId: v.optional(v.string()),
+  deploymentFolderId: v.optional(v.string()),
 };
 const folderUrl = (id: string) =>
   `https://drive.google.com/drive/folders/${id}`;
@@ -93,10 +99,12 @@ export const inspectCampaign = action({
     if (!campaign)
       return { ok: false, error: "La campaña ya no está disponible." };
     try {
-      return await inspectDriveFolder(folderUrl(campaign.driveFolderId), {
-        ...campaign.sourceSelection,
-        ...chosen,
-      });
+      // The dialog always sends its whole selection (it starts from the saved one), so a
+      // cleared folder or file goes back to automatic detection.
+      return await inspectDriveFolder(
+        folderUrl(campaign.driveFolderId),
+        chosen,
+      );
     } catch {
       return {
         ok: false,
@@ -133,5 +141,64 @@ export const chooseSources = action({
       sourceSelection: preview.selection,
     });
     return {};
+  },
+});
+
+/**
+ * Generates the production CSV from the matrix and saves it in the production folder
+ * (EDITABLES or the chosen one). Works before registering (folderUrl) and from «Elegir
+ * fuentes» (campaignId). The returned inspection already selects the new file.
+ */
+export const createCsv = action({
+  args: {
+    folderUrl: v.optional(v.string()),
+    campaignId: v.optional(v.id("qaVisualCampaigns")),
+    ...selection,
+  },
+  handler: async (
+    ctx,
+    { folderUrl: url, campaignId, ...chosen },
+  ): Promise<CsvCreation & { inspection?: FolderInspection }> => {
+    await ctx.runQuery(internal.qaVisual.access.viewerIsQaAdmin, {});
+    let target = url;
+    const current: SourceSelection = chosen;
+    if (campaignId) {
+      const campaign = await ctx.runQuery(
+        internal.qaVisual.campaigns.getActive,
+        { campaignId },
+      );
+      if (!campaign) return { error: "La campaña ya no está disponible." };
+      target = folderUrl(campaign.driveFolderId);
+    }
+    if (!target) return { error: "Pegá un enlace de carpeta de Google Drive." };
+    let result: CsvCreation;
+    try {
+      result = await createProductionCsv(target, current);
+    } catch (error) {
+      console.error("QA Visual: no se pudo crear el CSV de producción", error);
+      const message = error instanceof Error ? error.message : "";
+      return {
+        error: /Plantilla|PRODUCCION|matriz/i.test(message)
+          ? message
+          : "No se pudo crear el CSV. Revisá la matriz y la conexión con Google Drive e intentá de nuevo.",
+      };
+    }
+    if (!result.created) return result;
+    // Drive may take a moment to list a new file: retry before reporting it missing.
+    let inspection: FolderInspection | undefined;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 1000));
+      inspection = await inspectDriveFolder(target, {
+        ...current,
+        csvFileId: result.created.id,
+      }).catch(() => undefined);
+      if (
+        inspection &&
+        "folder" in inspection &&
+        inspection.selection.csvFileId === result.created.id
+      )
+        break;
+    }
+    return { ...result, inspection };
   },
 });
