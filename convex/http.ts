@@ -46,9 +46,16 @@ http.route({
     const rawId = payload?.corId;
     const corId = typeof rawId === "string" && /^\d+$/.test(rawId.trim())
       ? Number(rawId.trim()) : rawId;
-    if ((event !== "task.updated" && event !== "project.updated" && event !== "project.deleted") ||
-        !Number.isSafeInteger(corId) || corId <= 0) {
-      return Response.json({ error: "Expected task.updated, project.updated or project.deleted and a positive integer corId" }, { status: 400 });
+    if (!Number.isSafeInteger(corId) || corId <= 0) {
+      return Response.json({ error: "Expected a positive integer corId" }, { status: 400 });
+    }
+    if (event === "client.deleted") {
+      console.info(`[COR webhook] ${event} corId=${corId} status=received queued=0`);
+      return Response.json({ event, corId, status: "received", queued: 0 });
+    }
+    if (event !== "task.updated" && event !== "project.updated" && event !== "project.deleted" &&
+        event !== "client.created" && event !== "user.deleted") {
+      return Response.json({ error: "Unsupported COR webhook event" }, { status: 400 });
     }
 
     const queued = await ctx.runMutation(internal.data.corWebhook.enqueue, { event, corId });

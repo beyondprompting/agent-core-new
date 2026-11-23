@@ -139,6 +139,27 @@ function mapCORClient(client: Record<string, unknown>): ExternalClient {
   };
 }
 
+function mapCORClientDetails(client: Record<string, unknown>): ExternalClient {
+  return {
+    ...mapCORClient(client),
+    nameContact: (client.name_contact as string) ?? undefined,
+    lastNameContact: (client.last_name_contact as string) ?? undefined,
+    phone: (client.phone as string) ?? undefined,
+    website: (client.website as string) ?? undefined,
+    description: (client.description as string) ?? undefined,
+    condition: (client.condition as string) ?? undefined,
+  };
+}
+
+async function getDirectoryRecord(entity: "clients" | "users", id: number) {
+  const response = await corApiFetch(`/${entity}/${id}`);
+  if (response.status === 204 || response.status === 404) return null;
+  if (!response.ok) throw new Error(`COR ${entity}/${id}: HTTP ${response.status}`);
+  const row = await response.json() as Record<string, unknown> | null;
+  if (!row || row.id !== id) throw new Error(`COR devolvió un registro inesperado para ${entity}/${id}.`);
+  return row;
+}
+
 async function searchCORClientsByName(name: string): Promise<ClientSearchResult> {
   console.log(`[COR Provider] 🔍 Buscando cliente: "${name}"`);
 
@@ -1350,6 +1371,18 @@ export function createCORProvider(): ProjectManagementProvider {
       return ids;
     },
 
+    async isUserDeleted(userId) {
+      const user = await getDirectoryRecord("users", userId);
+      return user === null || (typeof user.deleted_at === "string" && Number.isFinite(Date.parse(user.deleted_at)));
+    },
+
+    async getClient(clientId) {
+      const client = await getDirectoryRecord("clients", clientId);
+      if (!client || client.deleted_at) return null;
+      if (typeof client.name !== "string" || !client.name.trim()) throw new Error(`Cliente COR ${clientId} sin nombre.`);
+      return mapCORClientDetails(client);
+    },
+
     // ==================== LIST ALL CLIENTS ====================
 
     async listAllClients(): Promise<ExternalClient[]> {
@@ -1376,18 +1409,7 @@ export function createCORProvider(): ProjectManagementProvider {
           `[COR Provider] ✅ Obtenidos ${clients.length} clientes de COR`,
         );
 
-        return clients.map((c: Record<string, unknown>) => ({
-          id: c.id as number,
-          name: (c.name as string) || "",
-          businessName: (c.business_name as string) ?? undefined,
-          email: (c.email_contact as string) ?? undefined,
-          nameContact: (c.name_contact as string) ?? undefined,
-          lastNameContact: (c.last_name_contact as string) ?? undefined,
-          phone: (c.phone as string) ?? undefined,
-          website: (c.website as string) ?? undefined,
-          description: (c.description as string) ?? undefined,
-          condition: (c.condition as string) ?? undefined,
-        }));
+        return clients.map(mapCORClientDetails);
       } catch (error) {
         console.error(`[COR Provider] ❌ Error en listAllClients:`, error);
         return [];

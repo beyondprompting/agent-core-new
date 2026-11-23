@@ -5,6 +5,7 @@ import { getDashboard, setExternalBoardEnabled } from "../convex/data/clientAdmi
 import { syncClientsFromCOR } from "../convex/data/clientAdminActions";
 import { hasPlatformAdminAccess } from "../convex/data/userAccess";
 import { getClientByCorId, upsertClient } from "../convex/data/corClients";
+import { importCreatedClient } from "../convex/data/corWebhook";
 import { backfillCorClients } from "../convex/data/backfill";
 import { hasExternalRequestsAccess, canViewExternalRequest } from "../convex/lib/externalRequestsAccess";
 import { canReceiveTaskCreation } from "../convex/lib/taskCreationNotifications";
@@ -164,5 +165,38 @@ test("manual sync runs the existing COR importer, updates in place and never see
     assert.equal(f.rows.get("assignment").clientId, "client");
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
+test("client.created imports only the named COR ID, preserves existing clients and handles replay", async t => {
+  const f = fixture();
+  const existing = structuredClone(f.rows.get("client"));
+  const saved = { COR_API_KEY: process.env.COR_API_KEY, COR_CLIENT_SECRET: process.env.COR_CLIENT_SECRET };
+  process.env.COR_API_KEY = "test"; process.env.COR_CLIENT_SECRET = "test";
+  const reads: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: any) => {
+    const url = String(input);
+    if (url.includes("/oauth/token")) return Response.json({ access_token: "test" });
+    reads.push(url);
+    assert.ok(url.endsWith("/clients/202"));
+    return Response.json({ id: 202, name: "Nuevo", business_name: "Empresa", email_contact: "a@example.com" });
+  });
+  try {
+    await f.call(importCreatedClient, { corId: 202 });
+    await f.call(importCreatedClient, { corId: 202 });
+    await f.call(importCreatedClient, { corId: 101 });
+    // A manual sync may insert the same client between the action's read and write.
+    await f.call(upsertClient, { corClientId: 101, name: "Stale snapshot", insertOnly: true });
+    assert.deepEqual(f.puts, ["insert:corClients"]);
+    assert.equal(reads.length, 1);
+    const imported = [...f.rows.values()].find(row => row.corClientId === 202);
+    assert.equal(imported.name, "Nuevo");
+    assert.equal(imported.businessName, "Empresa");
+    assert.equal(imported.emailContact, "a@example.com");
+    assert.deepEqual(f.rows.get("client"), existing);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   }
 });
