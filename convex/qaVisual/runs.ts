@@ -270,6 +270,9 @@ async function startRun(
     runner: "pool",
     requestId: args.requestId,
     ...(args.kind === "batch" ? { scope } : {}),
+    ...(registered.analysisInstructions?.trim()
+      ? { instructions: registered.analysisInstructions.trim() }
+      : {}),
   });
   // Stage 4 runner: every piece waits as "queued"; fillSlots starts up to 4 per run.
   for (const [order, { input, pieceId, pieceVersionId }] of selected.entries())
@@ -494,6 +497,8 @@ export const getWork = internalQuery({
             input: review.input,
           },
           rules: ruleSet.rules,
+          // Instructions of the QA team, frozen when the analysis started.
+          instructions: run.instructions,
           status: review.status,
           findings: review.findings,
           // A new version is checked against what the client or the team asked to change before.

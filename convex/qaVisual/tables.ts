@@ -363,6 +363,10 @@ export const qaVisualTables = {
     lastSyncedAt: v.optional(v.number()),
     syncError: v.optional(v.string()),
     syncNeedsSources: v.optional(v.boolean()),
+    /** Instructions of the QA team that the model obeys in every analysis of the campaign. */
+    analysisInstructions: v.optional(v.string()),
+    analysisInstructionsUpdatedAt: v.optional(v.number()),
+    analysisInstructionsUpdatedBy: v.optional(v.id("users")),
     sourceSelection: v.optional(
       v.object({
         excelFileId: v.optional(v.string()),
@@ -498,6 +502,8 @@ export const qaVisualTables = {
     // "pool": stage 4 runner (qaVisualAnalysisPool). Missing: legacy workflow runner.
     runner: v.optional(v.literal("pool")),
     finishedAt: v.optional(v.number()),
+    /** Instructions of the QA team for the model, copied from the campaign at start. */
+    instructions: v.optional(v.string()),
   })
     .index("by_state", ["state"])
     .index("by_campaign_state", ["campaign", "state"])

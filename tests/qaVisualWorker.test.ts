@@ -20,6 +20,17 @@ const requirements = [
   issueIds: [],
 }));
 
+const contextWith = (extra: Record<string, unknown> = {}) =>
+  ({
+    async runQuery() {
+      return {
+        ...((await context.runQuery({} as never, {} as never)) as object),
+        ...extra,
+      };
+    },
+    storage: context.storage,
+  }) as unknown as ActionCtx;
+
 const context = {
   async runQuery() {
     return {
@@ -83,9 +94,17 @@ const controls = [
     observed: "No invita a descargar la app.",
     missingElements: ["invitación a descargar"],
   },
+  {
+    ruleId: "spelling",
+    visibleText: "OFERTA IMPERDIBLE",
+    outcome: "pass",
+    observed: "El texto está bien escrito.",
+    missingElements: [],
+  },
 ].map((control) => ({
   ...control,
   evidenceStatus: "readable",
+  waivedByInstructions: false,
   visibleAnchor: control.visibleText,
   box_2d: [100, 100, 200, 400],
 }));
@@ -114,6 +133,7 @@ test("the worker preserves omissions and semantic fallback through schema parsin
       { ruleId: "date", outcome: "fail", method: "deterministic" },
       { ruleId: "price", outcome: "pass", method: "model" },
       { ruleId: "cta", outcome: "fail", method: "model" },
+      { ruleId: "spelling", outcome: "pass", method: "model" },
     ],
   );
   assert.equal(result.findings[0].observedValue, "JUEVES 15");
@@ -154,4 +174,121 @@ test("readable unsupported syntax cannot be published as incomplete by the worke
   if (result.kind !== "provider") return;
   assert.equal(result.retryable, true);
   assert.equal(result.attempt.code, "invalid_output");
+});
+
+test("every piece is checked for spelling and each error is reported", async (t) => {
+  const previous = qaGemini.model;
+  const mockModel = model(
+    controls.map((control) =>
+      control.ruleId === "spelling"
+        ? {
+            ...control,
+            outcome: "fail",
+            visibleText: "OFERTA IMPERDIVLE",
+            observed: "Hay una palabra mal escrita en el título.",
+            missingElements: ["IMPERDIVLE → IMPERDIBLE", "ULTIMOS → ÚLTIMOS"],
+          }
+        : control,
+    ),
+  );
+  qaGemini.model = mockModel;
+  t.after(() => {
+    qaGemini.model = previous;
+  });
+  const result = await analyzeReview(
+    context,
+    "review" as Id<"qaVisualReviews">,
+    "gemini",
+  );
+  assert.equal(result.kind, "success");
+  if (result.kind !== "success") return;
+  const spelling = result.findings.find((f) => f.ruleId === "spelling")!;
+  assert.equal(spelling.outcome, "fail");
+  assert.equal(spelling.severity, "warning");
+  assert.match(spelling.observed, /IMPERDIVLE → IMPERDIBLE; ULTIMOS → ÚLTIMOS/);
+  const prompt = JSON.stringify(mockModel.doGenerateCalls[0].prompt);
+  assert.match(prompt, /El control spelling revisa todo el texto visible/);
+  assert.match(prompt, /Control general · ortografía/);
+  assert.doesNotMatch(prompt, /instrucciones_del_equipo/);
+  // A spelling error alone is a finding, even when every requirement passes.
+  const passing = result.findings.map((f) =>
+    f.ruleId === "spelling" ? f : { ...f, outcome: "pass" as const },
+  );
+  assert.equal(reviewResult(requirements, passing).verdict, "findings");
+  assert.equal(
+    reviewResult(
+      requirements,
+      passing.map((f) => ({
+        ...f,
+        outcome: "pass" as const,
+        method: "model" as const,
+      })),
+    ).verdict,
+    "validated",
+  );
+});
+
+test("the QA team's instructions reach the model and can waive a control", async (t) => {
+  const previous = qaGemini.model;
+  const mockModel = model(
+    controls.map((control) =>
+      control.ruleId === "date"
+        ? {
+            ...control,
+            outcome: "pass",
+            evidenceStatus: "absent",
+            visibleText: null,
+            observed:
+              "No hay fecha visible; se aplicó la instrucción de no revisar la vigencia.",
+            waivedByInstructions: true,
+          }
+        : control,
+    ),
+  );
+  qaGemini.model = mockModel;
+  t.after(() => {
+    qaGemini.model = previous;
+  });
+  const instructions = "No marques la vigencia: se agrega después.";
+  const result = await analyzeReview(
+    contextWith({ instructions }),
+    "review" as Id<"qaVisualReviews">,
+    "gemini",
+  );
+  assert.equal(result.kind, "success");
+  if (result.kind !== "success") return;
+  assert.equal(
+    result.findings.find((f) => f.ruleId === "date")!.outcome,
+    "pass",
+  );
+  const prompt = JSON.stringify(mockModel.doGenerateCalls[0].prompt);
+  assert.match(prompt, /instrucciones_del_equipo/);
+  assert.ok(prompt.includes(instructions));
+
+  // Without instructions, the same answer cannot waive a confirmed absence.
+  const plain = await analyzeReview(
+    context,
+    "review" as Id<"qaVisualReviews">,
+    "gemini",
+  );
+  assert.equal(plain.kind, "success");
+  if (plain.kind !== "success") return;
+  assert.equal(
+    plain.findings.find((f) => f.ruleId === "date")!.outcome,
+    "fail",
+  );
+});
+
+test("a piece without text does not count the spelling control", () => {
+  const findings = requirements.map((r) => ({
+    ruleId: r.ruleId,
+    outcome: "pass" as const,
+    method: "model" as const,
+  }));
+  const result = reviewResult(requirements, [
+    ...findings,
+    { ruleId: "spelling", outcome: "notApplicable", method: "model" },
+  ]);
+  assert.equal(result.verdict, "validated");
+  assert.equal(result.coverage.requested, requirements.length);
 });

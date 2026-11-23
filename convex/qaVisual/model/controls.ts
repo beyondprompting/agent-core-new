@@ -8,6 +8,15 @@ export type VisualAssessment = {
   visibleText: string | null;
   evidenceStatus: "readable" | "absent" | "unreadable" | "ambiguous";
   missingElements: string[];
+  /** The model passed the control because an instruction of the QA team says so. */
+  waivedByInstructions?: boolean;
+};
+
+type ControlOptions = {
+  /** The model also received what was asked to change on an earlier version. */
+  changeRequests?: boolean;
+  /** The model also received instructions of the QA team for this campaign. */
+  instructions?: boolean;
 };
 
 type Comparison = {
@@ -77,7 +86,7 @@ export function compareVisibleValue(
 export function resolveVisualControl(
   requirement: Requirement,
   control: VisualAssessment,
-  options: { changeRequests?: boolean } = {},
+  options: ControlOptions = {},
 ) {
   const result = (
     outcome: VisualAssessment["outcome"],
@@ -96,6 +105,8 @@ export function resolveVisualControl(
       "No hay una referencia suficiente para evaluar este control.",
       "deterministic",
     );
+  // An instruction of the QA team prevails over the checks below (absence, parsers).
+  if (waived(control, options)) return result("pass", control.observed);
   if (control.evidenceStatus === "absent")
     return result(
       "fail",
@@ -120,11 +131,11 @@ export function resolveVisualControl(
   if (["price", "date"].includes(requirement.ruleId)) {
     if (!control.visibleText?.trim()) throw new Error("invalid_controls");
     const compared = compareVisibleValue(requirement, control.visibleText);
-    // The client or the team may have changed this value on an earlier version: the model
-    // compared it against that ask, so its pass prevails over the original request.
+    // The client or the team may have changed this value on an earlier version, or the QA
+    // team's instructions accept it: the model's pass prevails over the original request.
     if (
       compared?.outcome === "fail" &&
-      options.changeRequests &&
+      (options.changeRequests || options.instructions) &&
       control.outcome === "pass" &&
       control.observed.trim()
     )
@@ -133,6 +144,54 @@ export function resolveVisualControl(
   }
   // The model already evaluated semantics in the same request. A parser miss
   // must preserve that assessment, including readable unsupported formats.
+  if (!["pass", "fail"].includes(control.outcome) || !control.observed.trim())
+    throw new Error("invalid_controls");
+  return result(control.outcome, control.observed);
+}
+
+function waived(control: VisualAssessment, options: ControlOptions) {
+  return Boolean(
+    options.instructions &&
+    control.waivedByInstructions &&
+    control.outcome === "pass" &&
+    control.observed.trim(),
+  );
+}
+
+/**
+ * Writing control of every piece. There is no expected value: the model lists each error in
+ * missingElements as «written → correction». A piece without text has nothing to check.
+ */
+export function resolveSpellingControl(
+  control: VisualAssessment,
+  options: ControlOptions = {},
+) {
+  const result = (outcome: VisualAssessment["outcome"], observed: string) => ({
+    outcome,
+    observed,
+    method: "model" as const,
+  });
+  if (waived(control, options)) return result("pass", control.observed);
+  if (control.evidenceStatus === "absent")
+    return result(
+      "notApplicable",
+      control.observed.trim() || "La pieza no tiene texto para revisar.",
+    );
+  if (
+    control.evidenceStatus === "unreadable" ||
+    control.evidenceStatus === "ambiguous"
+  ) {
+    if (!control.observed.trim()) throw new Error("invalid_controls");
+    return result("unverifiable", control.observed);
+  }
+  const errors = control.missingElements
+    .map((element) => element.trim())
+    .filter(Boolean);
+  if (errors.length)
+    return result(
+      "fail",
+      `Errores de escritura: ${errors.join("; ")}. ${control.observed}`.trim(),
+    );
   if (!["pass", "fail"].includes(control.outcome) || !control.observed.trim())
     throw new Error("invalid_controls");
   return result(control.outcome, control.observed);

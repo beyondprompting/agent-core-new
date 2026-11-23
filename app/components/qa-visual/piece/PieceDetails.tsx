@@ -73,11 +73,13 @@ export function PieceDetails({
     price: "Precio solicitado",
     date: "Vigencia solicitada",
     cta: "Llamado a la acción",
+    spelling: "Ortografía y redacción",
   };
   const resultByRule = new Map(
     findings?.map((result) => [result.ruleId, result]),
   );
   const requirements = piece.clientRequirements ?? [];
+  const spelling = resultByRule.get("spelling");
   const requested: DetailField[] = requirements.map((rule) => {
     const result = resultByRule.get(rule.ruleId);
     return {
@@ -98,6 +100,7 @@ export function PieceDetails({
   for (const result of findings ?? []) {
     if (
       result.outcome === "notApplicable" &&
+      result.ruleId !== "spelling" &&
       !requirements.some((rule) => rule.ruleId === result.ruleId)
     ) {
       requested.push({
@@ -151,6 +154,24 @@ export function PieceDetails({
           value: piece.cta,
           note: "Asset declarado en el CSV de producción",
           pending: piece.cta === "—",
+        },
+        // General control of every piece: it is not part of the client's order.
+        {
+          title: labels.spelling,
+          value: spelling
+            ? spelling.outcome === "pass"
+              ? "Sin errores de escritura"
+              : spelling.outcome === "fail"
+                ? "Hay errores de escritura"
+                : spelling.outcome === "notApplicable"
+                  ? "La pieza no tiene texto"
+                  : "No se pudo verificar"
+            : "Todavía no revisada",
+          note: spelling
+            ? "Revisión IA de todo el texto visible"
+            : "Se revisa en el próximo análisis con IA",
+          control: spelling?.outcome ?? "notEvaluated",
+          observed: spelling?.observed,
         },
         {
           title: "Revisión IA",

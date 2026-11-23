@@ -8,6 +8,7 @@ import { InternalGallery } from "@/app/components/qa-visual/campaign/InternalGal
 import { InternalCarousel } from "@/app/components/qa-visual/campaign/InternalCarousel";
 import { PieceStatusOverview } from "@/app/components/qa-visual/campaign/PieceStatusOverview";
 import { SendToClientDialog } from "@/app/components/qa-visual/deliveries/SendToClientDialog";
+import { AnalysisDialog } from "@/app/components/qa-visual/campaign/AnalysisDialog";
 import type { CampaignView } from "@/app/components/qa-visual/campaign/CampaignHeader";
 import "./gallery.css";
 import { CheckCircle2, ScanLine, X, AlertCircle, Square } from "lucide-react";
@@ -232,6 +233,8 @@ function ReviewWorkspace({
           dashboard?.failedPieceIds,
         )
       : void agent.launch("batch", undefined, undefined, scope);
+  // Analyzing pending pieces or all of them goes through the dialog with the AI instructions.
+  const [confirming, setConfirming] = useState<"pending" | "all" | null>(null);
   const reanalyzePiece = piece.pieceId
     ? () => void agent.launch("piece", [piece.filename], [piece.pieceId!])
     : undefined;
@@ -239,6 +242,17 @@ function ReviewWorkspace({
   const complete = total > 0 && finished === total && !agent.busy;
   return (
     <>
+      {confirming && (
+        <AnalysisDialog
+          campaignId={campaignId}
+          scope={confirming}
+          count={confirming === "all" ? pieces.length : pendingCount}
+          onClose={() => setConfirming(null)}
+          onStart={() =>
+            agent.launch("batch", undefined, undefined, confirming)
+          }
+        />
+      )}
       <CampaignHeader
         campaignName={inventory.campaignName}
         reviewer={reviewer}
@@ -246,7 +260,12 @@ function ReviewWorkspace({
         analyzing={agent.busy}
         onRefresh={onRefresh}
         refreshing={refreshing}
-        onAnalyze={agent.available ? analyze : undefined}
+        onAnalyze={
+          agent.available
+            ? (scope) =>
+                scope === "retry" ? analyze("retry") : setConfirming(scope)
+            : undefined
+        }
         view={view}
         onViewChange={changeView}
         onSendToClient={() => setSending(true)}

@@ -2,7 +2,12 @@ import { publishedId, readImport } from "./importRead";
 import { importId } from "./model/importContracts";
 import { ConvexError, v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { internalMutation, internalQuery, query } from "../_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "../_generated/server";
 import { queueSync, syncIsRunning } from "./campaignSnapshots";
 import { requireCampaign, requireQaAdmin } from "./access";
 import { isCurrentReview } from "./model/verdict";
@@ -255,5 +260,36 @@ export const setSources = internalMutation({
       );
     await ctx.db.patch(campaignId, { sourceSelection });
     await queueSync(ctx, campaignId);
+  },
+});
+
+export const MAX_ANALYSIS_INSTRUCTIONS = 2000;
+
+/** Instructions of the QA team for the AI review of this campaign. */
+export const analysisInstructions = query({
+  args: { campaignId: v.id("qaVisualCampaigns") },
+  handler: async (ctx, { campaignId }) => {
+    const { campaign } = await requireCampaign(ctx, campaignId);
+    return {
+      instructions: campaign.analysisInstructions ?? "",
+      updatedAt: campaign.analysisInstructionsUpdatedAt,
+    };
+  },
+});
+
+export const setAnalysisInstructions = mutation({
+  args: { campaignId: v.id("qaVisualCampaigns"), instructions: v.string() },
+  handler: async (ctx, { campaignId, instructions }) => {
+    const { user } = await requireCampaign(ctx, campaignId);
+    const text = instructions.trim();
+    if (text.length > MAX_ANALYSIS_INSTRUCTIONS)
+      throw new ConvexError(
+        `Las instrucciones no pueden superar los ${MAX_ANALYSIS_INSTRUCTIONS} caracteres.`,
+      );
+    await ctx.db.patch(campaignId, {
+      analysisInstructions: text || undefined,
+      analysisInstructionsUpdatedAt: Date.now(),
+      analysisInstructionsUpdatedBy: user,
+    });
   },
 });

@@ -442,11 +442,13 @@ No se debe mezclar una revisión de una campaña con otra que tenga un nombre de
 | Precio | Entrada de L con el mismo numeral que la oferta seleccionada de K. | Validación documental previa y comparación visual mediante modelo. |
 | Vigencia | Fecha o HOY extraídos de la oferta seleccionada. | Modelo contrasta el texto visible con la referencia. |
 | CTA | Líneas pertinentes de P y referencias de leyenda. | Modelo evalúa el texto o criterio confirmado. |
+| Ortografía (`spelling`) | Control general de todas las piezas; no sale del pedido. | Modelo revisa todo el texto visible (ortografía, tildes, gramática, puntuación) y enumera cada error como «escrito → corrección». Severidad de advertencia; una pieza sin texto queda «No aplica». Lo agrega `worker.ts` en cada análisis, por lo que no requiere reimportar. |
 
-Las instrucciones de revisión tienen dos niveles:
+Las instrucciones de revisión tienen tres niveles:
 
-1. Criterios y prompt escritos en código, en `analysisInput.node.ts` y `worker.ts`.
+1. Criterios y prompt escritos en código, en `analysisInput.node.ts`, `worker.ts` y `model/prompt.ts`.
 2. Valores concretos, contexto y fuentes extraídos del Excel y del CSV.
+3. **Instrucciones del equipo de QA** para la campaña, escritas en el diálogo «Analizar piezas con IA». Se guardan en `qaVisualCampaigns.analysisInstructions` (hasta 2000 caracteres), se copian en cada corrida (`qaVisualRuns.instructions`) y el modelo debe obedecerlas, incluso para no marcar algo como error. Cuando una instrucción libera un control, el modelo lo marca con `waivedByInstructions` y el código respeta ese «cumple» por encima de la regla de ausencia y de la comparación de precio y fecha. Formato y dimensiones se controlan por código y no cambian con estas instrucciones.
 
 La IA recibe una imagen y la lista de controles visuales preparados para esa pieza. No recibe actualmente todo el libro para decidir libremente qué regla aplicar. Por eso un defecto en la preparación puede impedir la revisión antes de llegar al modelo.
 

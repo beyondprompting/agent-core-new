@@ -19,8 +19,19 @@ import {
   structuredRequirements,
   sourceLabel,
 } from "./model/contracts";
-import { canEvaluate, resolveVisualControl } from "./model/controls";
-import { changeRequestsPrompt, visualReviewPrompt } from "./model/prompt";
+import {
+  canEvaluate,
+  resolveSpellingControl,
+  resolveVisualControl,
+} from "./model/controls";
+import {
+  changeRequestsPrompt,
+  instructionsPrompt,
+  SPELLING_RULE_ID,
+  spellingControl,
+  spellingPrompt,
+  visualReviewPrompt,
+} from "./model/prompt";
 import { requestCommentLocations } from "./commentLocalization";
 
 const responseSchema = z.object({
@@ -29,6 +40,7 @@ const responseSchema = z.object({
       visibleText: z.string().nullable(),
       evidenceStatus: z.enum(["readable", "absent", "unreadable", "ambiguous"]),
       missingElements: z.array(z.string()),
+      waivedByInstructions: z.boolean(),
     }),
   ),
 });
@@ -84,6 +96,7 @@ export async function analyzeReview(
       };
     const requirements = structuredRequirements(input);
     const changeRequests = work.changeRequests ?? [];
+    const instructions = work.instructions?.trim() ?? "";
     const results: Infer<typeof finding>[] = [];
     const visual = [];
     for (const rule of work.rules) {
@@ -138,6 +151,16 @@ export async function analyzeReview(
         });
       } else visual.push({ ...rule, ...base, requirement });
     }
+    // Every piece is checked for spelling, whatever the order asks.
+    const { ruleId: _spelling, ...spelling } = spellingControl;
+    visual.push({
+      ...spelling,
+      ruleId: SPELLING_RULE_ID,
+      sources: [],
+      basis: undefined,
+      expectedAlternatives: undefined,
+      requirement: undefined,
+    });
 
     const config = qaModel(provider);
     const started = Date.now();
@@ -165,9 +188,12 @@ export async function analyzeReview(
             ? { openai: { store: false } }
             : qaGemini.providerOptions,
         abortSignal,
-        system: changeRequests.length
-          ? `${visualReviewPrompt}\n\n${changeRequestsPrompt}`
-          : visualReviewPrompt,
+        system: [
+          visualReviewPrompt,
+          spellingPrompt,
+          ...(changeRequests.length ? [changeRequestsPrompt] : []),
+          ...(instructions ? [instructionsPrompt(instructions)] : []),
+        ].join("\n\n"),
         messages: [
           {
             role: "user",
@@ -175,7 +201,7 @@ export async function analyzeReview(
               {
                 type: "text",
                 text: JSON.stringify(
-                  visual.map(({ requirement, ...control }) => control),
+                  visual.map(({ requirement: _, ...control }) => control),
                 ),
               },
               ...(changeRequests.length
@@ -190,16 +216,24 @@ export async function analyzeReview(
           },
         ],
       });
+      const options = {
+        changeRequests: changeRequests.length > 0,
+        instructions: Boolean(instructions),
+      };
       const reviewed = result.output.controls.map(({ box_2d, ...control }) => {
+        if (control.ruleId === SPELLING_RULE_ID)
+          return {
+            ...control,
+            ...resolveSpellingControl(control, options),
+            region: imageBoxToRegion(box_2d),
+          };
         const requirement = requirements.find(
           (r) => r.ruleId === control.ruleId,
         );
         if (!requirement) throw new Error("invalid_controls");
         return {
           ...control,
-          ...resolveVisualControl(requirement, control, {
-            changeRequests: changeRequests.length > 0,
-          }),
+          ...resolveVisualControl(requirement, control, options),
           region: imageBoxToRegion(box_2d),
         };
       });
@@ -242,7 +276,7 @@ export async function analyzeReview(
           ruleId: rule.id,
           source: rule.source,
           sources: rule.sources,
-          basis: rule.basis,
+          ...(rule.basis ? { basis: rule.basis } : {}),
           method: assessment.method,
           modelRead: true,
           evidenceStatus: assessment.evidenceStatus,

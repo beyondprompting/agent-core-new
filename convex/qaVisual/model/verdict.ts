@@ -5,6 +5,9 @@ import {
   type ReviewResult,
 } from "./contracts";
 
+/** Controls applied to every piece, without a requirement in the client's order. */
+const generalControls = new Set(["spelling"]);
+
 type Control = {
   ruleId: string;
   outcome: "pass" | "fail" | "unverifiable" | "notApplicable";
@@ -51,6 +54,29 @@ export function reviewResult(
       coverage.executed++;
       coverage.fail++;
     } else if (control?.outcome === "pass") {
+      coverage.executed++;
+      coverage.pass++;
+    } else coverage.unverifiable++;
+  }
+  // General controls (spelling) do not come from the order: they count when they were run.
+  for (const control of findings) {
+    if (
+      !generalControls.has(control.ruleId) ||
+      requirements.some((r) => r.ruleId === control.ruleId)
+    )
+      continue;
+    if (control.outcome === "notApplicable") {
+      coverage.notApplicable++;
+      continue;
+    }
+    coverage.requested++;
+    coverage.visualRequested++;
+    if (control.modelRead || control.method === "model")
+      coverage.modelControls++;
+    if (control.outcome === "fail") {
+      coverage.executed++;
+      coverage.fail++;
+    } else if (control.outcome === "pass") {
       coverage.executed++;
       coverage.pass++;
     } else coverage.unverifiable++;
