@@ -34,6 +34,40 @@ function constantTimeEqual(a: string, b: string) {
   return result === 0;
 }
 
+http.route({
+  path: "/cor/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.COR_ZAPIER_WEBHOOK_SECRET;
+    if (!secret) return new Response("Webhook not configured", { status: 503 });
+    if (!constantTimeEqual(request.headers.get("Authorization") ?? "", `Bearer ${secret}`)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const payload = await request.json().catch(() => null);
+    const event = payload?.event;
+    const rawId = payload?.corId;
+    const corId = typeof rawId === "string" && /^\d+$/.test(rawId.trim())
+      ? Number(rawId.trim()) : rawId;
+    if (!Number.isSafeInteger(corId) || corId <= 0) {
+      return Response.json({ error: "Expected a positive integer corId" }, { status: 400 });
+    }
+    if (event === "client.deleted") {
+      console.info(`[COR webhook] ${event} corId=${corId} status=received queued=0`);
+      return Response.json({ event, corId, status: "received", queued: 0 });
+    }
+    if (event !== "task.updated" && event !== "project.updated" && event !== "project.deleted" &&
+        event !== "client.created" && event !== "user.deleted") {
+      return Response.json({ error: "Unsupported COR webhook event" }, { status: 400 });
+    }
+
+    const queued = await ctx.runMutation(internal.data.corWebhook.enqueue, { event, corId });
+    const status = queued ? "queued" : "no_local_match";
+    console.info(`[COR webhook] ${event} corId=${corId} status=${status} queued=${queued}`);
+    return Response.json({ event, corId, status, queued }, { status: queued ? 202 : 200 });
+  }),
+});
+
 async function verifyTrelloWebhookSignature(args: {
   bodyText: string;
   callbackURL: string;

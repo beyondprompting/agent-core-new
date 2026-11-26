@@ -939,7 +939,9 @@ export default defineSchema({
 
   trelloOutboundSyncQueue: defineTable({
     taskId: v.id("tasks"),
-    kind: v.union(v.literal("status"), v.literal("fields")),
+    kind: v.union(v.literal("status"), v.literal("fields"), v.literal("brand")),
+    previousSubBrandIds: v.optional(v.array(v.id("subBrands"))),
+    brandRevision: v.optional(v.number()),
     status: v.string(), // "pending" | "processing" | "retrying" | "synced" | "error"
     nextRunAt: v.number(),
     processingUntil: v.optional(v.number()),

@@ -19,12 +19,14 @@ import {
   internalQuery,
   internalMutation,
   internalAction,
+  type ActionCtx,
 } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 import { internal } from "../_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getProjectManagementProvider } from "../integrations/registry";
+import type { ExternalProject, ProjectManagementProvider } from "../integrations/types";
 import { CORNotFoundError } from "../integrations/corProvider";
 import { hashText } from "../lib/briefFormat";
 import { notifyAnalytics } from "../analytics/notify";
@@ -123,6 +125,28 @@ async function hasTaskAccess(ctx: any, task: any, userId: any) {
   }
 
   return task.createdBy === String(userId);
+}
+
+async function ensureInboundProjectProduct(
+  ctx: ActionCtx,
+  provider: ProjectManagementProvider,
+  project: ExternalProject,
+  localClientId: number | undefined,
+) {
+  if (!project.productId || !project.brandId || (localClientId && localClientId !== project.clientId)) return;
+  const catalog = internal.data.subBrands;
+  const existing = await ctx.runQuery(catalog.getByCorProductId, { corProductId: project.productId });
+  if (existing) return;
+  const category = await ctx.runQuery(catalog.getLocalBrandByCorId, { corBrandId: project.brandId });
+  if (!category || category.corClientId !== project.clientId) return;
+  const products = await provider.listAllProducts();
+  const product = products.find(candidate => candidate.id === project.productId &&
+    candidate.brandId === category.corBrandId && candidate.clientId === category.corClientId);
+  if (!product) throw new Error(`No se pudo resolver el producto COR ${project.productId} para el proyecto ${project.id}.`);
+  await ctx.runMutation(catalog.upsertSubBrand, {
+    clientBrandId: category._id, clientId: category.clientId, corClientId: product.clientId,
+    corBrandId: product.brandId, corProductId: product.id, name: product.name,
+  });
 }
 
 async function resolveInboundProjectTaxonomy(
@@ -372,6 +396,7 @@ export const pullFromCORAction = internalAction({
               missing: false,
             },
           );
+          await ensureInboundProjectProduct(ctx, provider, corProject, task.corClientId);
           const analyticsChanged = await ctx.runMutation(
             internal.data.corInboundSync.applyInboundProjectUpdate,
             {
@@ -1140,13 +1165,25 @@ export const runScheduledExpiredInboundSyncAction = internalAction({
   },
 });
 
-/**
- * Worker de task para sync inbound programado.
- * Evita conflictos saltando tasks en syncing/retrying.
- */
+// La vinculación puede cambiar entre el aviso, la lectura de COR y la escritura.
+function matchesWebhookTarget(
+  webhookCorId: number | undefined,
+  currentCorId: number | string | undefined,
+  record: { convexStatus?: string; corSyncStatus?: string },
+) {
+  if (webhookCorId === undefined) return true;
+  if (String(currentCorId) !== String(webhookCorId)) return false;
+  if (record.convexStatus && record.convexStatus !== "active") return false;
+  if (record.corSyncStatus === "syncing" || record.corSyncStatus === "retrying") {
+    throw new Error(`COR webhook ${webhookCorId}: outbound sync in progress`);
+  }
+  return true;
+}
+
 export const pullTaskFromCORWorker = internalAction({
   args: {
     taskId: v.id("tasks"),
+    webhookCorId: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const task = await ctx.runQuery(
@@ -1156,9 +1193,9 @@ export const pullTaskFromCORWorker = internalAction({
       },
     );
 
-    if (!task) return;
+    if (!task || !matchesWebhookTarget(args.webhookCorId, task.corTaskId, task)) return;
 
-    if (task.status === "finalizada") {
+    if (args.webhookCorId === undefined && task.status === "finalizada") {
       console.log(
         `[InboundSync][Cron] ⏭️ Task ${args.taskId} finalizada, se omite`,
       );
@@ -1197,6 +1234,7 @@ export const pullTaskFromCORWorker = internalAction({
           internal.data.corInboundSync.setTaskNotFoundInCOR,
           {
             taskId: args.taskId,
+            webhookCorId: args.webhookCorId,
             missing: true,
           },
         );
@@ -1216,6 +1254,7 @@ export const pullTaskFromCORWorker = internalAction({
 
     await ctx.runMutation(internal.data.corInboundSync.setTaskNotFoundInCOR, {
       taskId: args.taskId,
+      webhookCorId: args.webhookCorId,
       missing: false,
     });
 
@@ -1223,6 +1262,7 @@ export const pullTaskFromCORWorker = internalAction({
       internal.data.corInboundSync.applyInboundTaskUpdate,
       {
         taskId: args.taskId,
+        webhookCorId: args.webhookCorId,
         corTitle: corTask.title,
         corDescription: corTask.description ?? undefined,
         corDeadline: corTask.deadline ?? undefined,
@@ -1247,6 +1287,7 @@ export const pullTaskFromCORWorker = internalAction({
 
     if (taskUpdateResult?.analyticsChanged) await notifyAnalytics(ctx, [args.taskId]);
 
+    if (args.webhookCorId !== undefined) return;
     await ctx.scheduler.runAfter(
       SCHEDULED_ATTACHMENT_DELAY_MS,
       internal.data.corInboundSync.pullTaskAttachmentsFromCORWorker,
@@ -1319,6 +1360,8 @@ export const pullTaskAttachmentsFromCORWorker = internalAction({
 export const pullProjectFromCORWorker = internalAction({
   args: {
     projectId: v.id("projects"),
+    webhookCorId: v.optional(v.number()),
+    verifyDeletion: v.optional(v.literal(true)),
   },
   handler: async (ctx, args) => {
     const project = await ctx.runQuery(
@@ -1328,9 +1371,9 @@ export const pullProjectFromCORWorker = internalAction({
       },
     );
 
-    if (!project) return;
+    if (!project || !matchesWebhookTarget(args.webhookCorId, project.corProjectId, project)) return;
 
-    if (project.status === "finished") {
+    if (args.webhookCorId === undefined && project.status === "finished") {
       console.log(
         `[InboundSync][Cron] ⏭️ Proyecto ${args.projectId} finalizado, se omite`,
       );
@@ -1360,10 +1403,15 @@ export const pullProjectFromCORWorker = internalAction({
       corProject = await provider.getProject(project.corProjectId);
     } catch (error) {
       if (error instanceof CORNotFoundError) {
+        // COR returns 204 for missing projects in this tenant. An empty 200 is ambiguous.
+        if (args.verifyDeletion && error.httpStatus !== 204 && error.httpStatus !== 404) {
+          throw new Error(`Respuesta inconclusa de COR para el proyecto ${project.corProjectId}: HTTP ${error.httpStatus}`);
+        }
         await ctx.runMutation(
           internal.data.corInboundSync.setProjectNotFoundInCOR,
           {
             projectId: args.projectId,
+            webhookCorId: args.webhookCorId,
             missing: true,
           },
         );
@@ -1373,6 +1421,13 @@ export const pullProjectFromCORWorker = internalAction({
         return;
       }
       throw error;
+    }
+    if (args.verifyDeletion) {
+      if (corProject?.id !== project.corProjectId) {
+        throw new Error(`No se pudo verificar el proyecto COR ${project.corProjectId}`);
+      }
+      console.info(`[COR webhook] project.deleted ignorado: el proyecto ${project.corProjectId} sigue en COR`);
+      return;
     }
     if (!corProject) {
       console.warn(
@@ -1385,14 +1440,17 @@ export const pullProjectFromCORWorker = internalAction({
       internal.data.corInboundSync.setProjectNotFoundInCOR,
       {
         projectId: args.projectId,
+        webhookCorId: args.webhookCorId,
         missing: false,
       },
     );
 
+    await ensureInboundProjectProduct(ctx, provider, corProject, project.corClientId);
     const analyticsChanged = await ctx.runMutation(
       internal.data.corInboundSync.applyInboundProjectUpdate,
       {
         projectId: args.projectId,
+        webhookCorId: args.webhookCorId,
         corName: corProject.name,
         corBrief: corProject.brief ?? undefined,
         corStartDate: corProject.startDate ?? undefined,
@@ -1414,11 +1472,12 @@ export const pullProjectFromCORWorker = internalAction({
 export const setTaskNotFoundInCOR = internalMutation({
   args: {
     taskId: v.id("tasks"),
+    webhookCorId: v.optional(v.number()),
     missing: v.boolean(),
   },
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.taskId);
-    if (!task) return;
+    if (!task || !matchesWebhookTarget(args.webhookCorId, task.corTaskId, task)) return;
 
     if (args.missing) {
       await ctx.db.patch(args.taskId, {
@@ -1450,11 +1509,12 @@ export const setTaskNotFoundInCOR = internalMutation({
 export const setProjectNotFoundInCOR = internalMutation({
   args: {
     projectId: v.id("projects"),
+    webhookCorId: v.optional(v.number()),
     missing: v.boolean(),
   },
   handler: async (ctx, args) => {
     const project = await ctx.db.get(args.projectId);
-    if (!project) return;
+    if (!project || !matchesWebhookTarget(args.webhookCorId, project.corProjectId, project)) return;
 
     if (args.missing) {
       await ctx.db.patch(args.projectId, {
@@ -1500,6 +1560,7 @@ export const setProjectNotFoundInCOR = internalMutation({
 export const applyInboundTaskUpdate = internalMutation({
   args: {
     taskId: v.id("tasks"),
+    webhookCorId: v.optional(v.number()),
     corTitle: v.string(),
     corDescription: v.optional(v.string()),
     corDeadline: v.optional(v.string()),
@@ -1509,7 +1570,7 @@ export const applyInboundTaskUpdate = internalMutation({
   handler: async (ctx, args) => {
     // Re-leer la task (estado fresco, atómico dentro de la mutation)
     const task = await ctx.db.get(args.taskId);
-    if (!task) {
+    if (!task || !matchesWebhookTarget(args.webhookCorId, task.corTaskId, task)) {
       return {
         updated: false,
         analyticsChanged: false,
@@ -1520,6 +1581,7 @@ export const applyInboundTaskUpdate = internalMutation({
 
     // Guarda de conflicto: si un outbound sync se inició, no tocar
     if (
+      !(args.webhookCorId !== undefined && task.corSyncStatus === undefined) &&
       task.corSyncStatus !== "synced" &&
       task.corSyncStatus !== "error" &&
       task.corSyncStatus !== "pending"
@@ -1598,6 +1660,7 @@ export const applyInboundTaskUpdate = internalMutation({
 export const applyInboundProjectUpdate = internalMutation({
   args: {
     projectId: v.id("projects"),
+    webhookCorId: v.optional(v.number()),
     corName: v.string(),
     corBrief: v.optional(v.string()),
     corStartDate: v.optional(v.string()),
@@ -1610,10 +1673,11 @@ export const applyInboundProjectUpdate = internalMutation({
   },
   handler: async (ctx, args) => {
     const project = await ctx.db.get(args.projectId);
-    if (!project) return;
+    if (!project || !matchesWebhookTarget(args.webhookCorId, project.corProjectId, project)) return;
 
     // Guarda de conflicto
     if (
+      !(args.webhookCorId !== undefined && project.corSyncStatus === undefined) &&
       project.corSyncStatus !== "synced" &&
       project.corSyncStatus !== "error" &&
       project.corSyncStatus !== "pending"
@@ -1693,6 +1757,11 @@ export const applyInboundProjectUpdate = internalMutation({
 
     const analyticsChanged = ["status", "deliverables", "clientBrandId", "subBrandId"].some(field => field in updates);
     await ctx.db.patch(args.projectId, analyticsChanged ? { ...updates, updatedAt: Date.now() } : updates);
+    if (["productId", "subBrandId", "subBrandName"].some(field => field in updates)) {
+      await ctx.scheduler.runAfter(0, internal.data.corInboundSync.reconcileProjectTaskBrands, {
+        projectId: args.projectId,
+      });
+    }
     console.log(
       `[InboundSync] ✅ Proyecto ${args.projectId} actualizado: ${Object.keys(
         updates,
@@ -1701,5 +1770,56 @@ export const applyInboundProjectUpdate = internalMutation({
         .join(", ")}`,
     );
     return analyticsChanged;
+  },
+});
+
+// Each page reads the latest project so a later COR edit also wins over queued pages.
+export const reconcileProjectTaskBrands = internalMutation({
+  args: { projectId: v.id("projects"), cursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.convexStatus === "deleted") return;
+    // Retain the previous mapping until the COR product can be resolved locally.
+    if (project.productId !== undefined && !project.subBrandId) {
+      console.warn("[InboundSync] Producto pendiente en catálogo", project._id, project.productId);
+      return;
+    }
+    const tasks = await ctx.db.query("tasks")
+      .withIndex("by_projectId", q => q.eq("projectId", args.projectId))
+      .paginate({ cursor: args.cursor ?? null, numItems: 6 });
+    const taxonomy = {
+      brandId: project.brandId,
+      brandName: project.brandName,
+      clientBrandId: project.clientBrandId,
+      productId: project.productId,
+      subBrandId: project.subBrandId,
+      subBrandName: project.subBrandName,
+    };
+    const changed: Id<"tasks">[] = [];
+    for (const task of tasks.page) {
+      if (task.convexStatus === "deleted") continue;
+      if (task.corClientId !== undefined && project.corClientId !== undefined &&
+          task.corClientId !== project.corClientId) continue;
+      if (task.clientId && project.clientId && task.clientId !== project.clientId) continue;
+      if (Object.entries(taxonomy).every(([key, value]) => task[key as keyof typeof taxonomy] === value)) continue;
+      let previousSubBrandId = task.subBrandId;
+      if (!previousSubBrandId && task.productId !== undefined && task.brandId !== undefined) {
+        const prior = await ctx.db.query("subBrands").withIndex("by_corBrandId_and_corProductId",
+          q => q.eq("corBrandId", task.brandId!).eq("corProductId", task.productId!)).unique();
+        if (prior && (!task.corClientId || prior.corClientId === task.corClientId)) previousSubBrandId = prior._id;
+      }
+      await ctx.db.patch(task._id, { ...taxonomy, updatedAt: Date.now() });
+      await ctx.runMutation(internal.data.trello.enqueueTrelloOutboundSyncFromCOR, {
+        taskId: task._id, kind: "brand", previousSubBrandId,
+      });
+      changed.push(task._id);
+    }
+    await notifyAnalytics(ctx, changed);
+    if (!tasks.isDone) {
+      await ctx.scheduler.runAfter(0, internal.data.corInboundSync.reconcileProjectTaskBrands, {
+        projectId: args.projectId, cursor: tasks.continueCursor,
+      });
+    }
+    return { updatedTasks: changed.length, more: !tasks.isDone };
   },
 });

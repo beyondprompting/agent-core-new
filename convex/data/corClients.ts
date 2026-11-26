@@ -151,6 +151,7 @@ export const upsertClient = internalMutation({
     website: v.optional(v.string()),
     description: v.optional(v.string()),
     phone: v.optional(v.string()),
+    insertOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -161,6 +162,7 @@ export const upsertClient = internalMutation({
     const now = Date.now();
 
     if (existing) {
+      if (args.insertOnly) return existing._id;
       await ctx.db.patch(existing._id, {
         name: args.name,
         businessName: args.businessName,

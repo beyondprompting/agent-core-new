@@ -177,6 +177,14 @@ export function createNoopProvider(): ProjectManagementProvider {
       );
     },
 
+    async isUserDeleted() {
+      throw new Error("La integración COR está deshabilitada.");
+    },
+
+    async getClient() {
+      throw new Error("La integración COR está deshabilitada.");
+    },
+
     async listAllClients(): Promise<ExternalClient[]> {
       console.log("[Noop Provider] listAllClients — no hay integración externa configurada");
       return [];

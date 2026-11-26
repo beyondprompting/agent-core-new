@@ -360,6 +360,8 @@ export interface ProjectManagementProvider {
    * bajas locales y nunca puede convertir un error remoto en una lista vacía.
    */
   listActiveUserIds(): Promise<number[]>;
+  isUserDeleted(userId: number): Promise<boolean>;
+  getClient(clientId: number): Promise<ExternalClient | null>;
 
   /**
    * Listar TODOS los clientes del sistema externo.
