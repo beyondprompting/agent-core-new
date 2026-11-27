@@ -643,6 +643,8 @@ function verifyLinks({
   const previous = productionByPiece(before);
   const next = productionByPiece(after);
   const nextRows = csvRows(after);
+  // The ID a row had before the change also tells which piece it was meant for.
+  const previousIds = new Map(csvRows(before).map((r) => [r.csvLine, r.id]));
   const byName = new Map(images.map((i) => [i.name, i]));
   const sameRules = nextOverrides === overrides;
   for (const image of images) {
@@ -721,7 +723,11 @@ function verifyLinks({
         `El pedido de la fila ${chosen.row} es de ${chosen.width} × ${chosen.height} y la fila del CSV de «${image.name}» dice ${fields.width} × ${fields.height}.`,
       );
     if (target.kind === "row" && row) {
-      const missing = numberConflicts(image, row.values);
+      const missing = numberConflicts(
+        image,
+        row.values,
+        previousIds.get(row.csvLine) ?? "",
+      );
       if (missing.length)
         warnings.push(
           `El nombre de «${image.name}» tiene ${missing.map((n) => `«${n}»`).join(", ")} y la fila de la línea ${row.csvLine} no.`,
@@ -750,15 +756,27 @@ function verifyLinks({
 }
 
 /**
- * Numbers of the file name (quantities, versions, dates) that no other column of its new row
- * has: a sign that the row belongs to another piece. Sizes are ignored.
+ * Numbers of the file name (quantities, versions, dates) that neither the other columns of its
+ * new row nor the ID the row had before have: a sign that the row belongs to another piece.
+ * Sizes are ignored. The previous ID counts because names often carry numbers that no other
+ * column repeats (the «11_26» of November 2026 in «…_45_OFF_11_26_…»).
  */
-function numberConflicts(image: MappingImage, values: Record<string, string>) {
+function numberConflicts(
+  image: MappingImage,
+  values: Record<string, string>,
+  previousId: string,
+) {
   const name = stem(image.name).replace(/\d+\s*x\s*\d+/gi, " ");
   const known = new Set(
-    Object.entries(values)
-      .filter(([column]) => column !== "ID_PIEZA")
-      .flatMap(([, value]) => value.match(/\d+/g) ?? [])
+    [
+      previousId,
+      ...Object.entries(values)
+        .filter(([column]) => column !== "ID_PIEZA")
+        .map(([, value]) => value),
+    ]
+      .flatMap(
+        (value) => value.replace(/\d+\s*x\s*\d+/gi, " ").match(/\d+/g) ?? [],
+      )
       .map((n) => String(Number(n))),
   );
   for (const size of [image.width, image.height])

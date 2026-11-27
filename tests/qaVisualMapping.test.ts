@@ -460,6 +460,40 @@ test("ID_PIEZA changes keep every other byte and are checked for coherence", () 
   });
   assert.ok(swapped.ok);
   assert.match(swapped.ok ? swapped.warnings[0] : "", /«5»/);
+  // Numbers that only the row's previous ID repeats (the month and year of the campaign) are
+  // not suspicious; the size of the previous ID is not a known number either.
+  const dated = {
+    name: "OFFLINE_M_11_26_AUTORAPIDO_META_POST_5_PRESAS_1080X1080px_HOY.png",
+    width: 1080,
+    height: 1080,
+  };
+  const datedCsv = csv.replace(
+    POST,
+    "M_11_26_AUTORAPIDO_META_POST_ESTATICO_5_PRESAS_1080X1080px",
+  );
+  const datedEdit = {
+    csvLine: 2,
+    column: "ID_PIEZA" as const,
+    from: "M_11_26_AUTORAPIDO_META_POST_ESTATICO_5_PRESAS_1080X1080px",
+    to: stem(dated.name),
+    piece: dated.name,
+  };
+  const datedCheck = verifyCsvEdits({
+    text: datedCsv,
+    edits: [datedEdit],
+    images: [...images, dated],
+    matrix,
+  });
+  assert.ok(datedCheck.ok);
+  assert.deepEqual(datedCheck.ok && datedCheck.warnings, []);
+  const undated = verifyCsvEdits({
+    text: csv,
+    edits: [{ ...datedEdit, from: POST }],
+    images: [...images, dated],
+    matrix,
+  });
+  assert.ok(undated.ok);
+  assert.match(undated.ok ? undated.warnings.join(" ") : "", /«11», «26»/);
 
   const refused = (edits: EditRef[], text = csv) => {
     const result = applyCsvEdits(text, edits, images, matrix);
