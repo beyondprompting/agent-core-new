@@ -518,7 +518,7 @@ Una aprobación humana **no se hereda** entre versiones. Si cambió el pedido de
 
 ## 7 Importación
 
-### 7.1 Flujo de alta en dos pasos
+### 7.1 Flujo de alta
 
 1. `campaigns.inspectFolder({ url })` es una acción sin escrituras. Valida el enlace y los permisos, lista las subcarpetas y devuelve una vista previa: subcarpetas encontradas, Excel candidatos, CSV candidatos, cantidad de imágenes y archivos ignorados.
 2. El diálogo muestra una lista de verificación (ver HTML). Si falta algo obligatorio, el botón queda deshabilitado y se explica qué falta.
@@ -1212,10 +1212,15 @@ El archivo [`DISENO_QA_VISUAL.html`](./DISENO_QA_VISUAL.html) muestra las propue
 - Las tarjetas con error o que requieren acción muestran su botón (Reintentar o Elegir matriz) en la misma tarjeta.
 - Un filtro simple: Activas / Archivadas.
 
-### 19.2 Alta de campaña en dos pasos
+### 19.2 Alta de campaña en tres pasos
 
-- **Paso 1:** se pega la URL. Debajo se muestra el correo de la cuenta de servicio con un botón para copiarlo.
-- **Paso 2:** lista de verificación con RECURSOS (1 Excel ✓), EDITABLES (1 CSV ✓), DESPLIEGUE (61 imágenes ✓) y archivos ignorados. Si hay varios candidatos, se elige ahí mismo. **Agregar campaña** se habilita solo cuando la lista está completa.
+El diálogo tiene el mismo tamaño en todos los pasos (hasta 1120 × 820 px) para no cambiar de tamaño al avanzar. El cuerpo se desplaza; el encabezado, los pasos y los botones quedan fijos.
+
+- **Enlace:** se pega la URL. Debajo se muestra el correo de la cuenta de servicio con un botón para copiarlo. A la derecha, qué tiene que tener la carpeta (RECURSOS, EDITABLES, DESPLIEGUE o VISUALES).
+- **Fuentes:** lista de verificación con RECURSOS (1 Excel ✓), EDITABLES (1 CSV ✓), DESPLIEGUE (61 imágenes ✓) y archivos ignorados. Cada fila muestra lo encontrado a la izquierda y, a la derecha, la carpeta y el archivo elegidos. Si hay varios candidatos, se elige ahí mismo. Debajo, un resumen del mapeo de piezas. **Siguiente** se habilita cuando la lista está completa.
+- **Piezas** (§5.5 de la especificación): a la izquierda, las piezas sin vincular agrupadas por problema, con búsqueda y el prefijo común de los nombres mostrado una sola vez; a la derecha, el detalle de la pieza elegida. Las filas libres del CSV se ofrecen como lista ordenada por parecido con el nombre del archivo, con búsqueda, y se resaltan las palabras que no están en el otro nombre. Los pedidos de la matriz se comparan columna por columna con la fila del CSV. Abajo, una barra con los cambios elegidos (**Revisar y aplicar**) y las piezas marcadas para excluir. **Agregar campaña** se habilita aunque haya piezas sin vincular; el análisis se habilita cuando todas estén vinculadas o excluidas.
+
+Al editar una campaña registrada, el diálogo muestra solo **Fuentes** y **Piezas**, y abre directamente en **Piezas** cuando el mapeo bloquea el análisis.
 
 ### 19.3 Editor
 
@@ -1271,7 +1276,7 @@ El archivo [`DISENO_QA_VISUAL.html`](./DISENO_QA_VISUAL.html) muestra las propue
 
 | Caso (§21 de la especificación) | Cómo lo resuelve esta arquitectura |
 | --- | --- |
-| Agregar una URL válida y compartida | Alta en dos pasos (§7.1) e importación encolada en la misma transacción. |
+| Agregar una URL válida y compartida | Alta en tres pasos (§7.1 y §19.2) e importación encolada en la misma transacción. |
 | URL inválida o carpeta sin permisos | `inspectFolder` falla sin escribir (§7.6). |
 | Misma carpeta registrada dos veces | `by_drive_folder` y control dentro de la mutación. |
 | Dos campañas con archivos de igual nombre | Todo se asocia a `campaignId` y `pieceId`, nunca a un nombre global. |

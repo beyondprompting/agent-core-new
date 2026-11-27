@@ -127,87 +127,9 @@ export function FolderChecklist({
               <span className={`qc-check-icon ${check.status}`}>
                 <Icon size={14} aria-hidden />
               </span>
-              <div>
+              <div className="qc-check-text">
                 <strong>{check.title}</strong>
                 {check.detail && <p>{check.detail}</p>}
-                {role && showFolder && (
-                  <select
-                    aria-label={roles[role].label}
-                    value={selection[roles[role].folderKey] ?? ""}
-                    disabled={disabled}
-                    onChange={(event) => chooseFolder(role, event.target.value)}
-                  >
-                    <option value="">
-                      Buscar por nombre ({roles[role].names})
-                    </option>
-                    {inspection.folders.map((folder) => (
-                      <option key={folder.id} value={folder.id}>
-                        {folder.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {source &&
-                  (candidates.length > 1 || check.status === "choose") &&
-                  candidates.length > 0 && (
-                    <select
-                      aria-label={
-                        source === "excelFileId"
-                          ? "Matriz del cliente"
-                          : "CSV de producción"
-                      }
-                      value={selection[source] ?? ""}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        onSelect({ ...selection, [source]: event.target.value })
-                      }
-                    >
-                      <option value="" disabled>
-                        Elegí{" "}
-                        {source === "excelFileId" ? "una matriz" : "un CSV"}…
-                      </option>
-                      {candidates.map((file) => (
-                        <option key={file.id} value={file.id}>
-                          {file.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                {(createCsv || (role === "EDITABLES" && csvDownload)) && (
-                  <div className="qc-check-actions">
-                    {createCsv && (
-                      <button
-                        type="button"
-                        className="qc-button secondary small"
-                        disabled={disabled}
-                        onClick={onCreateCsv}
-                      >
-                        {creatingCsv ? (
-                          <LoaderCircle
-                            size={14}
-                            className="qc-spin"
-                            aria-hidden
-                          />
-                        ) : (
-                          <FilePlus2 size={14} aria-hidden />
-                        )}
-                        {creatingCsv
-                          ? "Creando CSV…"
-                          : "Crear CSV desde la matriz"}
-                      </button>
-                    )}
-                    {csvDownload && (
-                      <button
-                        type="button"
-                        className="qc-button ghost small"
-                        onClick={() => download(csvDownload)}
-                      >
-                        <Download size={14} aria-hidden />
-                        Descargar CSV
-                      </button>
-                    )}
-                  </div>
-                )}
                 {createCsv && inspection.csvFolder?.canWrite === false && (
                   <p>
                     Para guardarlo en «{inspection.csvFolder.name}», la cuenta
@@ -215,18 +137,116 @@ export function FolderChecklist({
                     carpeta. Si no, podés descargarlo y subirlo vos.
                   </p>
                 )}
-                {role && !showFolder && (
-                  <button
-                    type="button"
-                    className="qc-link-button"
-                    disabled={disabled}
-                    onClick={() => setChanging([...changing, role])}
-                  >
-                    <FolderOpen size={12} aria-hidden />
-                    Usar otra carpeta
-                  </button>
-                )}
               </div>
+              {role && (
+                <div className="qc-check-controls">
+                  {showFolder && (
+                    <label className="qc-control">
+                      <span>Carpeta</span>
+                      <select
+                        aria-label={roles[role].label}
+                        value={selection[roles[role].folderKey] ?? ""}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          chooseFolder(role, event.target.value)
+                        }
+                      >
+                        <option value="">
+                          Buscar por nombre ({roles[role].names})
+                        </option>
+                        {inspection.folders.map((folder) => (
+                          <option key={folder.id} value={folder.id}>
+                            {folder.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {source &&
+                    (candidates.length > 1 || check.status === "choose") &&
+                    candidates.length > 0 && (
+                      <label className="qc-control">
+                        <span>
+                          {source === "excelFileId" ? "Matriz" : "CSV"} ·{" "}
+                          {candidates.length}{" "}
+                          {candidates.length === 1 ? "archivo" : "archivos"}
+                        </span>
+                        <select
+                          aria-label={
+                            source === "excelFileId"
+                              ? "Matriz del cliente"
+                              : "CSV de producción"
+                          }
+                          value={selection[source] ?? ""}
+                          disabled={disabled}
+                          onChange={(event) =>
+                            onSelect({
+                              ...selection,
+                              [source]: event.target.value,
+                            })
+                          }
+                        >
+                          <option value="" disabled>
+                            Elegí{" "}
+                            {source === "excelFileId" ? "una matriz" : "un CSV"}
+                            …
+                          </option>
+                          {candidates.map((file) => (
+                            <option key={file.id} value={file.id}>
+                              {file.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  {(createCsv || (role === "EDITABLES" && csvDownload)) && (
+                    <div className="qc-check-actions">
+                      {createCsv && (
+                        <button
+                          type="button"
+                          className="qc-button secondary small"
+                          disabled={disabled}
+                          onClick={onCreateCsv}
+                        >
+                          {creatingCsv ? (
+                            <LoaderCircle
+                              size={14}
+                              className="qc-spin"
+                              aria-hidden
+                            />
+                          ) : (
+                            <FilePlus2 size={14} aria-hidden />
+                          )}
+                          {creatingCsv
+                            ? "Creando CSV…"
+                            : "Crear CSV desde la matriz"}
+                        </button>
+                      )}
+                      {csvDownload && (
+                        <button
+                          type="button"
+                          className="qc-button ghost small"
+                          onClick={() => download(csvDownload)}
+                        >
+                          <Download size={14} aria-hidden />
+                          Descargar CSV
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {!showFolder && (
+                    <button
+                      type="button"
+                      className="qc-link-button"
+                      disabled={disabled}
+                      onClick={() => setChanging([...changing, role])}
+                    >
+                      <FolderOpen size={12} aria-hidden />
+                      Usar otra carpeta
+                    </button>
+                  )}
+                </div>
+              )}
             </li>
           );
         })}

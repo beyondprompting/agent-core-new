@@ -1,13 +1,17 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import {
   AlertCircle,
+  ArrowRight,
   Check,
+  CircleCheck,
+  CircleDashed,
   Download,
   EyeOff,
   LoaderCircle,
   RefreshCw,
+  Search,
   ShieldCheck,
   Sparkles,
   Undo2,
@@ -23,6 +27,7 @@ type Mapping = NonNullable<
 type Ready = Extract<Mapping, { status: "ready" }>;
 type Problem = Ready["problems"][number];
 type Candidate = NonNullable<Problem["candidates"]>[number];
+type Row = Ready["freeRows"][number];
 type Review = FunctionReturnType<
   typeof api.qaVisual.campaignRegistration.reviewMapping
 >;
@@ -36,8 +41,126 @@ type Choice = {
   mode?: "csv" | "same";
   scope?: "campaign" | "client";
 };
-const PREVIEW = 6;
+type PieceState = "pending" | "chosen" | "approve" | "exclude";
+type View =
+  | { kind: "piece"; piece: string }
+  | { kind: "changes" | "orphans" | "equivalences" | "exclusions" };
+
+/** Rows shown before «Ver todas»: the most similar ones come first. */
+const TOP_ROWS = 6;
+const IDENTITY = [
+  "CAMPAÑA",
+  "FASE",
+  "CANAL",
+  "MEDIO_PLATAFORMA",
+  "FORMATO_TIPO",
+] as const;
+const statusName: Record<Problem["status"], string> = {
+  csv_missing: "Sin fila en el CSV",
+  csv_duplicate: "ID repetido en el CSV",
+  matrix_missing: "Sin pedido en la matriz",
+  matrix_ambiguous: "Más de un pedido posible",
+};
+const stateName: Record<PieceState, string> = {
+  pending: "Pendiente",
+  chosen: "Cambio elegido",
+  approve: "Falta aprobar",
+  exclude: "Para excluir",
+};
+
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
+const fold = (text: string) =>
+  text.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase();
+const words = (text: string) =>
+  fold(text)
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean);
+
+/** Shared words over all words: how much a CSV ID looks like a file name. */
+function similarity(a: string[], b: string[]) {
+  const left = new Set(a);
+  const right = new Set(b);
+  if (!left.size || !right.size) return 0;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared++;
+  return shared / (left.size + right.size - shared);
+}
+
+/** Start shared by every name, cut at an underscore, shown once above the list. */
+function commonPrefix(names: string[]) {
+  if (names.length < 2) return "";
+  let prefix = names[0];
+  for (const name of names) {
+    let i = 0;
+    while (i < prefix.length && i < name.length && prefix[i] === name[i]) i++;
+    prefix = prefix.slice(0, i);
+    if (!prefix) return "";
+  }
+  const cut = prefix.lastIndexOf("_");
+  return cut >= 7 ? prefix.slice(0, cut + 1) : "";
+}
+
+/** Row and order values arrive as a list: Convex field names cannot be «CAMPAÑA». */
+const valueOf = (
+  values: { column: string; value: string }[] | undefined,
+  column: string,
+) => values?.find((item) => item.column === column)?.value ?? "";
+
+const rowSize = (row: Row) => {
+  const width = Number(valueOf(row.values, "ANCHO_PX"));
+  const height = Number(valueOf(row.values, "ALTO_PX"));
+  return width && height ? { width, height } : undefined;
+};
+
+/**
+ * A file name or an ID that wraps between its words. Words that are not in `other` are
+ * highlighted, so two long names can be compared at a glance.
+ */
+function Name({
+  text,
+  other,
+  prefix = "",
+}: {
+  text: string;
+  other?: Set<string>;
+  prefix?: string;
+}) {
+  const shown =
+    prefix && text.startsWith(prefix) ? text.slice(prefix.length) : text;
+  const parts = shown.split(/([^\p{L}\p{N}]+)/u);
+  return (
+    <>
+      {prefix && text.startsWith(prefix) && (
+        <span className="qc-name-prefix">
+          {prefix.split("_").map((part, i, all) => (
+            <Fragment key={i}>
+              {part}
+              {i < all.length - 1 && (
+                <>
+                  _<wbr />
+                </>
+              )}
+            </Fragment>
+          ))}
+        </span>
+      )}
+      {parts.map((part, i) =>
+        i % 2 ? (
+          <Fragment key={i}>
+            {part}
+            <wbr />
+          </Fragment>
+        ) : part && other && !other.has(fold(part)) ? (
+          <mark key={i} className="qc-diff-word">
+            {part}
+          </mark>
+        ) : (
+          <Fragment key={i}>{part}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 function download(name: string, content: string) {
   const url = URL.createObjectURL(
@@ -49,39 +172,6 @@ function download(name: string, content: string) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-
-/** Row and order values arrive as a list: Convex field names cannot be «CAMPAÑA». */
-const valueOf = (
-  values: { column: string; value: string }[] | undefined,
-  column: string,
-) => values?.find((item) => item.column === column)?.value ?? "";
-
-const rowLabel = (row: Ready["freeRows"][number]) =>
-  [
-    `Línea ${row.csvLine}`,
-    row.id || "(sin ID)",
-    valueOf(row.values, "FORMATO_TIPO"),
-    valueOf(row.values, "ANCHO_PX") && valueOf(row.values, "ALTO_PX")
-      ? `${valueOf(row.values, "ANCHO_PX")}×${valueOf(row.values, "ALTO_PX")}`
-      : "",
-    valueOf(row.values, "SLOT_FECHA"),
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-const orderLabel = (order: Candidate) =>
-  [
-    `Fila ${order.row}`,
-    valueOf(order.values, "FORMATO_TIPO"),
-    valueOf(order.values, "MEDIO_PLATAFORMA"),
-    order.width && order.height ? `${order.width}×${order.height}` : "",
-    order.date,
-    order.differences.length
-      ? `difiere en ${order.differences.map((d) => d.column).join(", ")}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
 /** Changes of the CSV that the choices of the panel produce. */
 function choiceEdits(
@@ -136,18 +226,73 @@ function choiceEdits(
   });
 }
 
+/** One line in «Fuentes»: how many pieces are linked; the details are in «Piezas». */
+export function MappingSummary({
+  mapping,
+  canContinue,
+  onOpen,
+}: {
+  mapping: Mapping;
+  canContinue: boolean;
+  onOpen: () => void;
+}) {
+  const complete = mapping.status === "ready" && mapping.unmapped === 0;
+  return (
+    <div className="qc-mapping-summary-card">
+      <span
+        className={`qc-check-icon ${mapping.status === "error" ? "missing" : complete ? "ok" : "choose"}`}
+      >
+        {complete ? (
+          <Check size={14} aria-hidden />
+        ) : (
+          <AlertCircle size={14} aria-hidden />
+        )}
+      </span>
+      <div>
+        <strong>
+          Mapeo de piezas
+          {mapping.status === "ready"
+            ? ` · ${mapping.linked} de ${mapping.total} vinculadas`
+            : ""}
+        </strong>
+        <p>
+          {mapping.status === "error"
+            ? mapping.error
+            : complete
+              ? "Cada pieza tiene su fila en el CSV y su pedido en la matriz."
+              : `${mapping.unmapped} ${mapping.unmapped === 1 ? "pieza para revisar" : "piezas para revisar"} en el paso siguiente.`}
+        </p>
+      </div>
+      {canContinue && mapping.status === "ready" && (
+        <button
+          type="button"
+          className="qc-button secondary small"
+          onClick={onOpen}
+        >
+          {complete ? "Ver piezas" : "Revisar piezas"}
+          <ArrowRight size={14} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * «Mapeo de piezas» (§5.5). Code compares the pieces, the CSV and the matrix and shows every
  * difference. For each one the team can choose the CSV row or the matrix order by hand, ask
  * Gemini Neon to explain it and propose a fix, fix the CSV in Drive and update, approve that
  * two values say the same, or exclude the piece. Every change is verified by code and needs
  * an explicit authorization. Only the internal CSV can be modified; the client's matrix never.
+ *
+ * Layout: the pieces to solve on the left, the selected one (or the changes to apply) on the
+ * right, and a bar with what is ready to apply or exclude.
  */
 export function MappingPanel({
   mapping,
   target,
   selection,
   disabled,
+  loading = false,
   onBusy,
   onChanged,
 }: {
@@ -155,6 +300,8 @@ export function MappingPanel({
   target: { folderUrl: string } | { campaignId: string };
   selection: SourceSelection;
   disabled: boolean;
+  /** The folder is being inspected again. */
+  loading?: boolean;
   onBusy: (busy: boolean) => void;
   /** The CSV, the exclusions or the equivalences changed: verify again. */
   onChanged: (inspection?: FolderInspection) => void;
@@ -197,12 +344,15 @@ export function MappingPanel({
     next?: string[];
   }>();
   const [authorized, setAuthorized] = useState(false);
-  const [expanded, setExpanded] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [fixed, setFixed] = useState<{ name: string; content: string }>();
+  const [view, setView] = useState<View>();
+  const [query, setQuery] = useState("");
+  // Search and «Ver todas» of the rows offered to one piece.
+  const [picker, setPicker] = useState({ piece: "", text: "", all: false });
   const busy = disabled || Boolean(pending);
 
   const ready = mapping.status === "ready" ? mapping : undefined;
@@ -224,6 +374,10 @@ export function MappingPanel({
     Object.entries(choices).flatMap(([piece, c]) =>
       c.csvLine !== undefined ? [[c.csvLine, piece] as const] : [],
     ),
+  );
+  const rowWords = useMemo(
+    () => new Map((ready?.freeRows ?? []).map((r) => [r.csvLine, words(r.id)])),
+    [ready],
   );
 
   async function run<T>(
@@ -312,6 +466,7 @@ export function MappingPanel({
         return;
       }
       reset();
+      setView(undefined);
       setNotice(
         `Se aplicaron ${result.applied} ${result.applied === 1 ? "cambio" : "cambios"} en «${ready.csv.name}». Drive guarda la versión anterior.` +
           (campaignId
@@ -379,439 +534,741 @@ export function MappingPanel({
 
   const complete = ready.unmapped === 0;
   const byPiece = new Map(ready.problems.map((p) => [p.piece, p]));
+  // Pieces in the order of the groups: the list and «Siguiente» follow it.
+  const ordered = ready.groups.flatMap((g) =>
+    g.pieces.filter((piece) => byPiece.has(piece)),
+  );
+  const prefix = commonPrefix(ordered.map(stem));
+  const stateOf = (piece: string): PieceState => {
+    const choice = choices[piece];
+    if (chosen.includes(piece)) return "exclude";
+    if (
+      choice?.csvLine !== undefined ||
+      (choice?.order && choice.mode === "csv")
+    )
+      return "chosen";
+    if (choice?.mode === "same") return "approve";
+    return "pending";
+  };
+  const pendingCount = ordered.filter((p) => stateOf(p) === "pending").length;
+  const fallback = ordered.find((p) => stateOf(p) === "pending") ?? ordered[0];
+  const current: View | undefined =
+    view && (view.kind !== "piece" || byPiece.has(view.piece))
+      ? view
+      : fallback
+        ? { kind: "piece", piece: fallback }
+        : undefined;
+  const currentPiece = current?.kind === "piece" ? current.piece : undefined;
+  const nextPending = (() => {
+    const at = currentPiece ? ordered.indexOf(currentPiece) : -1;
+    return [...ordered.slice(at + 1), ...ordered.slice(0, at)].find(
+      (p) => stateOf(p) === "pending",
+    );
+  })();
+  const needle = fold(query.trim());
+  const matches = (piece: string) => !needle || fold(piece).includes(needle);
+  const others = [
+    {
+      kind: "orphans" as const,
+      label: "Filas del CSV sin pieza",
+      count: ready.orphanRows.length,
+    },
+    {
+      kind: "equivalences" as const,
+      label: "Equivalencias aprobadas",
+      count: equivalences?.items.length ?? 0,
+    },
+    {
+      kind: "exclusions" as const,
+      label: "Piezas excluidas",
+      count: exclusions?.length ?? 0,
+    },
+  ].filter((item) => item.count > 0);
+  const percent = (n: number) =>
+    `${ready.total ? (n / ready.total) * 100 : 0}%`;
 
-  function problemCard(problem: Problem, rows: Ready["freeRows"]) {
-    const suggestion = suggestions.get(problem.piece);
-    const choice = choices[problem.piece] ?? {};
-    const order = problem.candidates?.find((c) => c.row === choice.order);
-    return (
-      <li key={problem.piece} className="qc-mapping-item">
-        <div className="qc-mapping-item-head">
-          {campaignId ? (
-            <label title="Marcar para excluir del análisis">
-              <input
-                type="checkbox"
-                checked={chosen.includes(problem.piece)}
-                disabled={busy}
-                onChange={(event) =>
-                  setChosen(
-                    event.target.checked
-                      ? [...chosen, problem.piece]
-                      : chosen.filter((p) => p !== problem.piece),
-                  )
-                }
-              />
-              <code>{problem.piece}</code>
-            </label>
-          ) : (
-            <code>{problem.piece}</code>
-          )}
-          {problem.width && problem.height ? (
-            <small>
-              {problem.width}×{problem.height}
-            </small>
-          ) : null}
+  const toggleChosen = (piece: string, on: boolean) =>
+    setChosen((list) =>
+      on ? [...list, piece] : list.filter((p) => p !== piece),
+    );
+
+  function stateIcon(state: PieceState) {
+    if (state === "chosen") return <CircleCheck size={12} aria-hidden />;
+    if (state === "exclude") return <EyeOff size={12} aria-hidden />;
+    return <CircleDashed size={12} aria-hidden />;
+  }
+
+  function rowPicker(problem: Problem, choice: Choice, pieceWords: string[]) {
+    const own = picker.piece === problem.piece;
+    const text = own ? picker.text : "";
+    const all = own && picker.all;
+    const search = fold(text.trim());
+    const ranked = ready!.freeRows
+      .map((row) => {
+        const size = rowSize(row);
+        return {
+          row,
+          size,
+          score: similarity(pieceWords, rowWords.get(row.csvLine) ?? []),
+          sized:
+            !!size &&
+            size.width === problem.width &&
+            size.height === problem.height,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          Number(b.sized) - Number(a.sized) ||
+          a.row.csvLine - b.row.csvLine,
+      );
+    const found = search
+      ? ranked.filter(({ row }) =>
+          fold(
+            [`${row.csvLine}`, row.id, ...row.values.map((v) => v.value)].join(
+              " ",
+            ),
+          ).includes(search),
+        )
+      : ranked;
+    let shown = search || all ? found : found.slice(0, TOP_ROWS);
+    const picked = found.find((r) => r.row.csvLine === choice.csvLine);
+    if (picked && !shown.includes(picked)) shown = [picked, ...shown];
+    const pieceSet = new Set(pieceWords);
+    const setText = (value: string) =>
+      setPicker({ piece: problem.piece, text: value, all });
+
+    if (!ready!.freeRows.length)
+      return (
+        <div className="qc-callout warning">
+          <AlertCircle size={16} aria-hidden />
+          <p>
+            No quedan filas libres en el CSV. Agregá la fila de esta pieza en
+            Drive y tocá «Actualizar», o excluila.
+          </p>
         </div>
-        {suggestion && (
-          <p className="qc-mapping-explain">
-            {suggestion.source === "ai" && (
-              <em className="ai">
-                <Sparkles size={11} aria-hidden /> Gemini Neon
-              </em>
-            )}
-            {suggestion.explanation}
-          </p>
-        )}
-        {suggestion?.rejected && (
-          <p className="qc-mapping-rejected">{suggestion.rejected}</p>
-        )}
-
-        {problem.status === "csv_missing" && (
-          <label className="qc-mapping-field">
-            <span>Fila del CSV de esta pieza</span>
-            <select
-              value={choice.csvLine ?? ""}
-              disabled={busy || !rows.length}
-              onChange={(event) =>
-                choose(
-                  problem.piece,
-                  event.target.value
-                    ? { csvLine: Number(event.target.value) }
-                    : undefined,
-                )
-              }
-            >
-              <option value="">
-                {rows.length
-                  ? "Elegir una fila libre…"
-                  : "No hay filas libres en el CSV"}
-              </option>
-              {rows.map((row) => {
-                const owner = takenLines.get(row.csvLine);
-                return (
-                  <option
-                    key={row.csvLine}
-                    value={row.csvLine}
-                    disabled={Boolean(owner && owner !== problem.piece)}
-                  >
-                    {rowLabel(row)}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
-        )}
-        {problem.status === "csv_duplicate" && (
-          <p className="qc-mapping-explain">
-            Las líneas {problem.csvLines?.join(", ")} repiten este ID. Asigná
-            las que sobran a sus piezas desde este panel o borralas en Drive.
-          </p>
-        )}
-
-        {problem.status === "matrix_missing" && (
-          <>
-            {problem.csv && (
-              <p className="qc-mapping-explain">
-                Fila del CSV (línea {problem.csvLines?.[0]}):{" "}
-                {[
-                  "CAMPAÑA",
-                  "FASE",
-                  "CANAL",
-                  "MEDIO_PLATAFORMA",
-                  "FORMATO_TIPO",
-                ]
-                  .map((column) => valueOf(problem.csv, column))
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            )}
-            <label className="qc-mapping-field">
-              <span>Pedido de la matriz que le corresponde</span>
-              <select
-                value={choice.order ?? ""}
-                disabled={busy || !problem.candidates?.length}
-                onChange={(event) =>
-                  choose(
-                    problem.piece,
-                    event.target.value
-                      ? { order: event.target.value }
-                      : undefined,
-                  )
-                }
+      );
+    return (
+      <section className="qc-detail-section">
+        <div className="qc-section-head">
+          <h4>Fila del CSV de esta pieza</h4>
+          <span>
+            {search
+              ? `${found.length} de ${ranked.length} filas libres`
+              : "Ordenadas por parecido con el nombre del archivo"}
+          </span>
+        </div>
+        <label className="qc-search">
+          <Search size={14} aria-hidden />
+          <input
+            type="search"
+            value={text}
+            placeholder="Buscar por ID, línea, formato o fecha"
+            aria-label="Buscar una fila del CSV"
+            onChange={(event) => setText(event.target.value)}
+          />
+        </label>
+        <div
+          className="qc-options"
+          role="radiogroup"
+          aria-label="Filas libres del CSV"
+        >
+          {shown.map(({ row, size, score, sized }, index) => {
+            const owner = takenLines.get(row.csvLine);
+            const taken = Boolean(owner && owner !== problem.piece);
+            const selected = choice.csvLine === row.csvLine;
+            const format = valueOf(row.values, "FORMATO_TIPO");
+            const date = valueOf(row.values, "SLOT_FECHA");
+            return (
+              <label
+                key={row.csvLine}
+                className={`qc-option${selected ? " selected" : ""}${taken ? " disabled" : ""}`}
               >
-                <option value="">
-                  {problem.candidates?.length
-                    ? "Elegir un pedido…"
-                    : "Ningún pedido se parece a esta fila"}
-                </option>
-                {problem.candidates?.map((candidate) => (
-                  <option key={candidate.row} value={candidate.row}>
-                    {orderLabel(candidate)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {order && (
-              <div className="qc-mapping-choice">
-                <ul className="qc-mapping-diffs">
-                  {order.differences.map((d) => (
-                    <li key={d.column}>
-                      <b>{d.column}</b>: CSV{" "}
-                      <del>{d.csvValue || "(vacío)"}</del> · matriz{" "}
-                      <ins>{d.matrixValue}</ins>
-                    </li>
-                  ))}
-                </ul>
-                <label>
-                  <input
-                    type="radio"
-                    name={`mode-${problem.piece}`}
-                    checked={choice.mode === "csv"}
-                    disabled={busy}
-                    onChange={() =>
-                      choose(problem.piece, { ...choice, mode: "csv" })
-                    }
-                  />
-                  Corregir el CSV con los valores del pedido
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name={`mode-${problem.piece}`}
-                    checked={choice.mode === "same"}
-                    disabled={busy || !campaignId}
-                    onChange={() =>
-                      choose(problem.piece, {
-                        ...choice,
-                        mode: "same",
-                        scope: choice.scope ?? "campaign",
-                      })
-                    }
-                  />
-                  Dicen lo mismo: dejar el CSV como está
-                </label>
-                {!campaignId && (
-                  <small>
-                    Para aprobar una equivalencia, primero agregá la campaña.
-                  </small>
-                )}
-                {choice.mode === "same" && campaignId && (
-                  <div className="qc-mapping-same">
-                    <select
-                      value={choice.scope ?? "campaign"}
-                      disabled={busy}
-                      onChange={(event) =>
-                        choose(problem.piece, {
-                          ...choice,
-                          scope: event.target.value as "campaign" | "client",
-                        })
-                      }
-                    >
-                      <option value="campaign">Solo para esta campaña</option>
-                      <option value="client" disabled={!equivalences?.canShare}>
-                        Para todas las campañas del cliente
-                        {equivalences?.canShare
-                          ? ""
-                          : " (la campaña no tiene cliente)"}
-                      </option>
-                    </select>
-                    <button
-                      type="button"
-                      className="qc-button secondary small"
-                      disabled={busy}
-                      onClick={() => void approveSame(problem, choice)}
-                    >
-                      {pending === "approve" ? (
-                        <LoaderCircle
-                          size={14}
-                          className="qc-spin"
-                          aria-hidden
-                        />
-                      ) : (
-                        <Check size={14} aria-hidden />
-                      )}
-                      Aprobar equivalencia
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
-        {problem.status === "matrix_ambiguous" &&
-          (problem.candidates?.length ?? 0) > 0 && (
-            <p className="qc-mapping-explain">
-              Pedidos posibles:{" "}
-              {problem.candidates!.map((c) => orderLabel(c)).join(" / ")}
+                <input
+                  type="radio"
+                  name={`row-${problem.piece}`}
+                  checked={selected}
+                  disabled={busy || taken}
+                  onChange={() =>
+                    choose(problem.piece, { csvLine: row.csvLine })
+                  }
+                />
+                <span className="qc-option-body">
+                  <span className="qc-option-title">
+                    <b>Línea {row.csvLine}</b>
+                    {index === 0 && !search && score >= 0.5 && (
+                      <em className="qc-tag primary">Más parecida</em>
+                    )}
+                    {suggestions.get(problem.piece)?.csvLine ===
+                      row.csvLine && (
+                      <em className="qc-tag ai">
+                        <Sparkles size={11} aria-hidden /> Gemini Neon
+                      </em>
+                    )}
+                    {taken && owner && (
+                      <em className="qc-tag">Elegida para otra pieza</em>
+                    )}
+                  </span>
+                  <code className="qc-option-id">
+                    {row.id ? (
+                      <Name text={row.id} other={pieceSet} />
+                    ) : (
+                      "(sin ID)"
+                    )}
+                  </code>
+                  <span className="qc-tags">
+                    {format && <span className="qc-tag">{format}</span>}
+                    {size && (
+                      <span
+                        className={`qc-tag ${problem.width ? (sized ? "ok" : "warn") : ""}`}
+                        title={
+                          problem.width && !sized
+                            ? `La pieza mide ${problem.width}×${problem.height}`
+                            : undefined
+                        }
+                      >
+                        {size.width}×{size.height}
+                      </span>
+                    )}
+                    {date && <span className="qc-tag">{date}</span>}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+          {!shown.length && (
+            <p className="qc-mapping-note">
+              Ninguna fila libre coincide con «{text}».
             </p>
           )}
-      </li>
+        </div>
+        {!search && !all && found.length > TOP_ROWS && (
+          <button
+            type="button"
+            className="qc-link-button"
+            onClick={() =>
+              setPicker({ piece: problem.piece, text: "", all: true })
+            }
+          >
+            Ver las {found.length} filas libres
+          </button>
+        )}
+        <p className="qc-mapping-note">
+          <mark className="qc-diff-word">Resaltado</mark>: palabras que no están
+          en el otro nombre.
+        </p>
+      </section>
     );
   }
 
-  return (
-    <section className="qc-mapping" aria-labelledby="qc-mapping-title">
-      <header className="qc-mapping-head">
-        <span className={`qc-check-icon ${complete ? "ok" : "choose"}`}>
-          {complete ? (
-            <Check size={14} aria-hidden />
+  function orderPicker(problem: Problem, choice: Choice) {
+    const order = problem.candidates?.find((c) => c.row === choice.order);
+    const line = problem.csvLines?.[0];
+    const suggestion = suggestions.get(problem.piece);
+    return (
+      <>
+        <section className="qc-detail-section">
+          <div className="qc-section-head">
+            <h4>Pedido de la matriz que le corresponde</h4>
+            <span>Los más parecidos a la línea {line} del CSV</span>
+          </div>
+          {problem.candidates?.length ? (
+            <div
+              className="qc-options"
+              role="radiogroup"
+              aria-label="Pedidos de la matriz"
+            >
+              {problem.candidates.map((candidate) =>
+                orderOption(problem, candidate, {
+                  selected: candidate.row === choice.order,
+                  neon: suggestion?.order === candidate.row,
+                  onSelect: () =>
+                    choose(problem.piece, { order: candidate.row }),
+                }),
+              )}
+            </div>
           ) : (
-            <AlertCircle size={14} aria-hidden />
+            <div className="qc-callout warning">
+              <AlertCircle size={16} aria-hidden />
+              <p>
+                Ningún pedido de la matriz se parece a esta fila. Revisá sus
+                columnas en Drive y tocá «Actualizar», o excluí la pieza.
+              </p>
+            </div>
           )}
-        </span>
-        <div>
-          <strong id="qc-mapping-title">
-            Mapeo de piezas · {ready.linked} de {ready.total} vinculadas
-            {ready.excluded ? ` · ${ready.excluded} excluidas` : ""}
-          </strong>
-          <p>
-            {complete
-              ? "Cada pieza tiene su fila en el CSV y su pedido en la matriz."
-              : `${ready.unmapped} ${ready.unmapped === 1 ? "pieza no se puede vincular" : "piezas no se pueden vincular"}. ` +
-                (campaignId
-                  ? "El análisis se habilita cuando todas estén vinculadas o excluidas."
-                  : "Podés agregar la campaña igual: el análisis se habilita cuando todas estén vinculadas o excluidas.")}
-          </p>
-        </div>
-      </header>
-
-      {!complete && (
-        <div className="qc-check-actions">
-          <button
-            type="button"
-            className="qc-button secondary small"
-            disabled={busy}
-            onClick={() => void askNeon()}
-          >
-            {pending === "review" ? (
-              <LoaderCircle size={14} className="qc-spin" aria-hidden />
-            ) : (
-              <Sparkles size={14} aria-hidden />
+        </section>
+        <section className="qc-detail-section">
+          <div className="qc-section-head">
+            <h4>
+              Línea {line} del CSV
+              {order ? ` y fila ${order.row} de la matriz` : ""}
+            </h4>
+            {order && (
+              <span>
+                {order.differences.length}{" "}
+                {order.differences.length === 1 ? "diferencia" : "diferencias"}
+              </span>
             )}
-            {pending === "review"
-              ? "Revisando…"
-              : review
-                ? "Volver a revisar con Gemini Neon"
-                : "Revisar con Gemini Neon"}
-          </button>
-          <button
-            type="button"
-            className="qc-button ghost small"
-            disabled={busy}
-            onClick={() => void refresh()}
-            title="Después de corregir el CSV en Drive"
-          >
-            <RefreshCw
-              size={14}
-              className={pending === "refresh" ? "qc-spin" : undefined}
-              aria-hidden
-            />
-            Actualizar
-          </button>
-          <p className="qc-mapping-note">
-            Gemini Neon explica cada diferencia y propone cómo corregirla, sin
-            cambiar nada. También podés elegir a mano o corregir el CSV en Drive
-            y tocar «Actualizar». Solo se puede modificar el CSV: la matriz del
-            cliente nunca se modifica.
-          </p>
-        </div>
-      )}
-
-      {ready.groups.map((group) => {
-        const open = expanded.includes(group.code);
-        const shown = open ? group.pieces : group.pieces.slice(0, PREVIEW);
-        return (
-          <div key={group.code} className="qc-mapping-group">
-            <strong>{group.title}</strong>
-            <p>{group.detail}</p>
-            <ul className="qc-mapping-list">
-              {shown.flatMap((piece) => {
-                const problem = byPiece.get(piece);
-                return problem ? [problemCard(problem, ready.freeRows)] : [];
+          </div>
+          <table className="qc-compare">
+            <thead>
+              <tr>
+                <th scope="col">Columna</th>
+                <th scope="col">CSV</th>
+                {order && <th scope="col">Matriz</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {IDENTITY.map((column) => {
+                const differs = order?.differences.some(
+                  (d) => d.column === column,
+                );
+                return (
+                  <tr key={column} className={differs ? "diff" : undefined}>
+                    <th scope="row">{column}</th>
+                    <td>{valueOf(problem.csv, column) || "(vacío)"}</td>
+                    {order && <td>{valueOf(order.values, column)}</td>}
+                  </tr>
+                );
               })}
-            </ul>
-            {group.pieces.length > PREVIEW && (
+            </tbody>
+          </table>
+        </section>
+        {order && order.differences.length > 0 && (
+          <section className="qc-detail-section">
+            <div className="qc-section-head">
+              <h4>¿Cómo lo resolvés?</h4>
               <button
                 type="button"
                 className="qc-link-button"
-                onClick={() =>
-                  setExpanded(
-                    open
-                      ? expanded.filter((c) => c !== group.code)
-                      : [...expanded, group.code],
-                  )
-                }
+                disabled={busy}
+                onClick={() => choose(problem.piece, undefined)}
               >
-                {open ? "Ver menos" : `Ver las ${group.pieces.length}`}
+                Quitar la elección
+              </button>
+            </div>
+            <div
+              className="qc-options two"
+              role="radiogroup"
+              aria-label="Cómo resolver la diferencia"
+            >
+              <label
+                className={`qc-option${choice.mode === "csv" ? " selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name={`mode-${problem.piece}`}
+                  checked={choice.mode === "csv"}
+                  disabled={busy}
+                  onChange={() =>
+                    choose(problem.piece, { ...choice, mode: "csv" })
+                  }
+                />
+                <span className="qc-option-body">
+                  <b>Corregir el CSV</b>
+                  <span className="qc-option-desc">
+                    Se copian{" "}
+                    {order.differences.length === 1
+                      ? "el valor"
+                      : `los ${order.differences.length} valores`}{" "}
+                    de la matriz en la línea {line}. Se verifica antes de
+                    aplicarse.
+                  </span>
+                </span>
+              </label>
+              <label
+                className={`qc-option${choice.mode === "same" ? " selected" : ""}${campaignId ? "" : " disabled"}`}
+              >
+                <input
+                  type="radio"
+                  name={`mode-${problem.piece}`}
+                  checked={choice.mode === "same"}
+                  disabled={busy || !campaignId}
+                  onChange={() =>
+                    choose(problem.piece, {
+                      ...choice,
+                      mode: "same",
+                      scope: choice.scope ?? "campaign",
+                    })
+                  }
+                />
+                <span className="qc-option-body">
+                  <b>Dicen lo mismo</b>
+                  <span className="qc-option-desc">
+                    {campaignId
+                      ? "El CSV queda como está y QA Visual toma los valores como equivalentes."
+                      : "Disponible después de agregar la campaña."}
+                  </span>
+                </span>
+              </label>
+            </div>
+            {choice.mode === "same" && campaignId && (
+              <div className="qc-same">
+                <label>
+                  <span>Aprobar la equivalencia</span>
+                  <select
+                    className="qc-select"
+                    value={choice.scope ?? "campaign"}
+                    disabled={busy}
+                    onChange={(event) =>
+                      choose(problem.piece, {
+                        ...choice,
+                        scope: event.target.value as "campaign" | "client",
+                      })
+                    }
+                  >
+                    <option value="campaign">Solo para esta campaña</option>
+                    <option value="client" disabled={!equivalences?.canShare}>
+                      Para todas las campañas del cliente
+                      {equivalences?.canShare
+                        ? ""
+                        : " (la campaña no tiene cliente)"}
+                    </option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="qc-button primary small"
+                  disabled={busy}
+                  onClick={() => void approveSame(problem, choice)}
+                >
+                  {pending === "approve" ? (
+                    <LoaderCircle size={14} className="qc-spin" aria-hidden />
+                  ) : (
+                    <Check size={14} aria-hidden />
+                  )}
+                  Aprobar equivalencia
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+      </>
+    );
+  }
+
+  function orderOption(
+    problem: Problem,
+    candidate: Candidate,
+    {
+      selected,
+      neon,
+      onSelect,
+    }: { selected?: boolean; neon?: boolean; onSelect?: () => void },
+  ) {
+    const sized =
+      candidate.width === problem.width && candidate.height === problem.height;
+    const body = (
+      <span className="qc-option-body">
+        <span className="qc-option-title">
+          <b>Fila {candidate.row} de la matriz</b>
+          {neon && (
+            <em className="qc-tag ai">
+              <Sparkles size={11} aria-hidden /> Gemini Neon
+            </em>
+          )}
+        </span>
+        <span className="qc-tags">
+          {valueOf(candidate.values, "FORMATO_TIPO") && (
+            <span className="qc-tag">
+              {valueOf(candidate.values, "FORMATO_TIPO")}
+            </span>
+          )}
+          {valueOf(candidate.values, "MEDIO_PLATAFORMA") && (
+            <span className="qc-tag">
+              {valueOf(candidate.values, "MEDIO_PLATAFORMA")}
+            </span>
+          )}
+          {candidate.width && candidate.height ? (
+            <span
+              className={`qc-tag ${problem.width ? (sized ? "ok" : "warn") : ""}`}
+            >
+              {candidate.width}×{candidate.height}
+            </span>
+          ) : null}
+          {candidate.date && <span className="qc-tag">{candidate.date}</span>}
+        </span>
+        {candidate.differences.length > 0 && (
+          <span className="qc-option-desc">
+            Difiere en {candidate.differences.map((d) => d.column).join(", ")}
+          </span>
+        )}
+      </span>
+    );
+    if (!onSelect)
+      return (
+        <div key={candidate.row} className="qc-option static">
+          {body}
+        </div>
+      );
+    return (
+      <label
+        key={candidate.row}
+        className={`qc-option${selected ? " selected" : ""}`}
+      >
+        <input
+          type="radio"
+          name={`order-${problem.piece}`}
+          checked={Boolean(selected)}
+          disabled={busy}
+          onChange={onSelect}
+        />
+        {body}
+      </label>
+    );
+  }
+
+  function pieceDetail(problem: Problem) {
+    const suggestion = suggestions.get(problem.piece);
+    const choice = choices[problem.piece] ?? {};
+    const group = ready!.groups.find((g) => g.code === problem.status);
+    const pieceWords = words(stem(problem.piece));
+    const row =
+      choice.csvLine !== undefined
+        ? ready!.freeRows.find((r) => r.csvLine === choice.csvLine)
+        : undefined;
+    const state = stateOf(problem.piece);
+    return (
+      <article className="qc-detail" key={problem.piece}>
+        <header className="qc-detail-head">
+          <div className="qc-detail-meta">
+            <span className="qc-tag warn">{statusName[problem.status]}</span>
+            {problem.width && problem.height ? (
+              <span className="qc-tag">
+                {problem.width}×{problem.height}
+              </span>
+            ) : null}
+            <span className={`qc-piece-state ${state}`}>
+              {stateIcon(state)}
+              {stateName[state]}
+            </span>
+            {campaignId && (
+              <button
+                type="button"
+                className="qc-button ghost small qc-detail-exclude"
+                disabled={busy}
+                onClick={() => toggleChosen(problem.piece, state !== "exclude")}
+              >
+                <EyeOff size={14} aria-hidden />
+                {state === "exclude" ? "No excluir" : "Excluir del análisis"}
               </button>
             )}
           </div>
-        );
-      })}
+          <h3 className="qc-detail-name">
+            <Name
+              text={stem(problem.piece)}
+              other={row ? new Set(rowWords.get(row.csvLine)) : undefined}
+            />
+            <span className="qc-name-prefix">
+              {problem.piece.slice(stem(problem.piece).length)}
+            </span>
+          </h3>
+          {group && <p className="qc-detail-why">{group.detail}</p>}
+        </header>
 
-      {campaignId && chosen.length > 0 && (
-        <div className="qc-mapping-exclude">
-          <label className="qc-label" htmlFor="qc-exclude-reason">
-            Excluir {chosen.length} {chosen.length === 1 ? "pieza" : "piezas"}{" "}
-            del análisis
-          </label>
-          <input
-            id="qc-exclude-reason"
-            value={reason}
-            maxLength={500}
-            disabled={busy}
-            placeholder="Motivo (por ejemplo: es el logo, no se revisa)"
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <button
-            type="button"
-            className="qc-button secondary small"
-            disabled={busy || !reason.trim()}
-            onClick={() => void excludeChosen()}
+        {suggestion && (
+          <div
+            className={`qc-neon${suggestion.source === "ai" ? "" : " code"}`}
           >
-            {pending === "exclude" ? (
-              <LoaderCircle size={14} className="qc-spin" aria-hidden />
-            ) : (
-              <EyeOff size={14} aria-hidden />
-            )}
-            Excluir del análisis
-          </button>
-        </div>
-      )}
+            <Sparkles size={15} aria-hidden />
+            <div>
+              <strong>
+                {suggestion.source === "ai"
+                  ? "Gemini Neon"
+                  : "Revisión automática"}
+              </strong>
+              <p>{suggestion.explanation}</p>
+              {suggestion.rejected && (
+                <p className="qc-mapping-rejected">{suggestion.rejected}</p>
+              )}
+            </div>
+          </div>
+        )}
 
-      {edits.length > 0 && (
-        <div className="qc-mapping-proposal">
-          <strong>
+        {problem.status === "csv_missing" &&
+          rowPicker(problem, choice, pieceWords)}
+        {problem.status === "csv_missing" && row && (
+          <div className="qc-detail-result">
+            <ShieldCheck size={15} aria-hidden />
+            <p>
+              Al aplicar, el ID_PIEZA de la línea {row.csvLine} pasa a ser{" "}
+              <code>
+                <Name text={stem(problem.piece)} />
+              </code>
+              . Antes de aplicarlo se verifica y se pide tu autorización.{" "}
+              <button
+                type="button"
+                className="qc-link-button"
+                disabled={busy}
+                onClick={() => choose(problem.piece, undefined)}
+              >
+                Quitar la elección
+              </button>
+            </p>
+          </div>
+        )}
+
+        {problem.status === "csv_duplicate" && (
+          <section className="qc-detail-section">
+            <div className="qc-section-head">
+              <h4>Líneas con este ID</h4>
+              <span>{problem.csvLines?.join(", ")}</span>
+            </div>
+            <p className="qc-mapping-note">
+              Elegí estas filas para sus piezas desde las otras piezas de la
+              lista, o borrá la que sobra en Drive y tocá «Actualizar».
+            </p>
+          </section>
+        )}
+
+        {problem.status === "matrix_missing" && orderPicker(problem, choice)}
+
+        {problem.status === "matrix_ambiguous" && (
+          <section className="qc-detail-section">
+            <div className="qc-section-head">
+              <h4>Pedidos posibles</h4>
+              <span>No se distinguen por medidas ni por fecha</span>
+            </div>
+            <div className="qc-options">
+              {(problem.candidates ?? []).map((candidate) =>
+                orderOption(problem, candidate, {}),
+              )}
+            </div>
+          </section>
+        )}
+
+        <footer className="qc-detail-nav">
+          <span>
+            Pieza {ordered.indexOf(problem.piece) + 1} de {ordered.length}
+          </span>
+          {nextPending && (
+            <button
+              type="button"
+              className="qc-button secondary small"
+              onClick={() => setView({ kind: "piece", piece: nextPending })}
+            >
+              Siguiente pendiente
+              <ArrowRight size={14} aria-hidden />
+            </button>
+          )}
+        </footer>
+      </article>
+    );
+  }
+
+  function changesDetail() {
+    return (
+      <article className="qc-detail">
+        <header className="qc-detail-head">
+          <h3 className="qc-detail-title">
             {edits.length} {edits.length === 1 ? "cambio" : "cambios"} en «
-            {ready.csv.name}»
-          </strong>
-          <ol className="qc-diff">
+            {ready!.csv.name}»
+          </h3>
+          <p className="qc-detail-why">
+            Solo cambian estas celdas del CSV interno. La matriz del cliente no
+            se modifica.
+          </p>
+        </header>
+        {edits.length > 0 ? (
+          <ol className="qc-changes">
             {edits.map((edit) => (
               <li key={`${edit.csvLine}:${edit.column}`}>
-                <span className="qc-diff-line">
-                  Línea {edit.csvLine} · {edit.column}
-                  <em className={edit.origin}>
+                <div className="qc-change-head">
+                  <b>Línea {edit.csvLine}</b>
+                  <span>{edit.column}</span>
+                  <em className={`qc-tag ${edit.origin === "ai" ? "ai" : ""}`}>
                     {edit.origin === "ai" ? "Gemini Neon" : "Elegido a mano"}
                   </em>
-                </span>
-                <del>{edit.from || "(vacío)"}</del>
-                <ins>{edit.to}</ins>
-                <small>{edit.reason}</small>
+                  <button
+                    type="button"
+                    className="qc-link-button"
+                    onClick={() =>
+                      setView({ kind: "piece", piece: edit.piece })
+                    }
+                  >
+                    Ver pieza
+                  </button>
+                </div>
+                <dl className="qc-change-values">
+                  <dt>Antes</dt>
+                  <dd>
+                    <del>
+                      {edit.from ? <Name text={edit.from} /> : "(vacío)"}
+                    </del>
+                  </dd>
+                  <dt>Después</dt>
+                  <dd>
+                    <ins>
+                      <Name text={edit.to} />
+                    </ins>
+                  </dd>
+                </dl>
+                <p className="qc-change-reason">{edit.reason}</p>
               </li>
             ))}
           </ol>
-          {checked?.key === editsKey && checked.errors?.length ? (
-            <div className="qc-callout danger" role="alert">
-              <AlertCircle size={16} aria-hidden />
-              <div>
-                <strong>Los cambios no pasaron la verificación</strong>
-                <ul className="qc-mapping-list">
-                  {checked.errors.map((e) => (
-                    <li key={e}>{e}</li>
-                  ))}
-                </ul>
-              </div>
+        ) : (
+          <p className="qc-mapping-note">Todavía no elegiste ningún cambio.</p>
+        )}
+        {checked?.key === editsKey && checked.errors?.length ? (
+          <div className="qc-callout danger" role="alert">
+            <AlertCircle size={16} aria-hidden />
+            <div>
+              <strong>Los cambios no pasaron la verificación</strong>
+              <ul className="qc-plain-list">
+                {checked.errors.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
             </div>
-          ) : null}
-          {verified && (
-            <>
-              <p className="qc-mapping-note success">
-                <ShieldCheck size={13} aria-hidden /> Verificado: solo cambian
-                estas celdas, cada pieza queda con su propia fila del CSV, los
-                pedidos elegidos son los que quedan vinculados y ninguna pieza
-                vinculada pierde su vínculo.
+          </div>
+        ) : null}
+        {verified && (
+          <div className="qc-verify">
+            <div className="qc-callout success">
+              <ShieldCheck size={16} aria-hidden />
+              <p>
+                Verificado: solo cambian estas celdas, cada pieza queda con su
+                propia fila del CSV, los pedidos elegidos son los que quedan
+                vinculados y ninguna pieza vinculada pierde su vínculo.
               </p>
-              {verified.warnings?.map((w) => (
-                <p key={w} className="qc-mapping-rejected">
-                  Revisá antes de autorizar: {w}
-                </p>
-              ))}
-              {verified.next?.map((n) => (
-                <p key={n} className="qc-mapping-note">
-                  {n} Lo vas a poder resolver en el próximo paso.
-                </p>
-              ))}
-              {!ready.csv.canEdit && (
-                <p className="qc-mapping-note">
-                  La cuenta de servicio no tiene permiso de <b>Editor</b> sobre
-                  «{ready.csv.name}». Si Drive rechaza el cambio, vas a poder
-                  descargar el CSV corregido y reemplazarlo a mano.
-                </p>
-              )}
-              <label className="qc-mapping-authorize">
-                <input
-                  type="checkbox"
-                  checked={authorized}
-                  disabled={busy}
-                  onChange={(event) => setAuthorized(event.target.checked)}
-                />
-                Autorizo reemplazar el contenido de «{ready.csv.name}» en Drive
+            </div>
+            {verified.warnings?.map((w) => (
+              <div key={w} className="qc-callout warning">
+                <AlertCircle size={16} aria-hidden />
+                <p>Revisá antes de autorizar: {w}</p>
+              </div>
+            ))}
+            {verified.next?.map((n) => (
+              <div key={n} className="qc-callout info">
+                <ArrowRight size={16} aria-hidden />
+                <p>{n} Lo vas a poder resolver después de aplicar.</p>
+              </div>
+            ))}
+            {!ready!.csv.canEdit && (
+              <p className="qc-mapping-note">
+                La cuenta de servicio no tiene permiso de <b>Editor</b> sobre «
+                {ready!.csv.name}». Si Drive rechaza el cambio, vas a poder
+                descargar el CSV corregido y reemplazarlo a mano.
+              </p>
+            )}
+            <label className="qc-authorize">
+              <input
+                type="checkbox"
+                checked={authorized}
+                disabled={busy}
+                onChange={(event) => setAuthorized(event.target.checked)}
+              />
+              <span>
+                Autorizo reemplazar el contenido de «{ready!.csv.name}» en Drive
                 con estos {edits.length} cambios. Drive guarda la versión
                 anterior.
-              </label>
-            </>
-          )}
-          <div className="qc-check-actions">
+              </span>
+            </label>
+          </div>
+        )}
+        {edits.length > 0 && (
+          <div className="qc-detail-actions">
             {!verified ? (
               <button
                 type="button"
@@ -851,81 +1308,76 @@ export function MappingPanel({
                 setChoices({});
                 setChecked(undefined);
                 setAuthorized(false);
+                setView(undefined);
               }}
             >
               Descartar cambios
             </button>
           </div>
-        </div>
-      )}
+        )}
+        {fixed && (
+          <div className="qc-detail-actions">
+            <button
+              type="button"
+              className="qc-button secondary small"
+              onClick={() => download(fixed.name, fixed.content)}
+            >
+              <Download size={14} aria-hidden />
+              Descargar CSV corregido
+            </button>
+          </div>
+        )}
+      </article>
+    );
+  }
 
-      {fixed && (
-        <div className="qc-check-actions">
-          <button
-            type="button"
-            className="qc-button ghost small"
-            onClick={() => download(fixed.name, fixed.content)}
-          >
-            <Download size={14} aria-hidden />
-            Descargar CSV corregido
-          </button>
-        </div>
-      )}
-
-      {ready.orphanRows.length > 0 && (
-        <div className="qc-mapping-group">
-          <strong>
-            Aviso: {ready.orphanRows.length}{" "}
-            {ready.orphanRows.length === 1
-              ? "fila del CSV no corresponde"
-              : "filas del CSV no corresponden"}{" "}
-            a ninguna pieza de la carpeta
-          </strong>
-          <p>
-            Puede faltar una pieza en la carpeta o sobrar una fila en el CSV. No
-            bloquea el análisis.
-          </p>
-          <ul className="qc-mapping-list">
-            {(expanded.includes("orphans")
-              ? ready.orphanRows
-              : ready.orphanRows.slice(0, PREVIEW)
-            ).map((row) => (
+  function listDetail(kind: "orphans" | "equivalences" | "exclusions") {
+    if (kind === "orphans")
+      return (
+        <article className="qc-detail">
+          <header className="qc-detail-head">
+            <h3 className="qc-detail-title">
+              {ready!.orphanRows.length}{" "}
+              {ready!.orphanRows.length === 1
+                ? "fila del CSV no corresponde"
+                : "filas del CSV no corresponden"}{" "}
+              a ninguna pieza
+            </h3>
+            <p className="qc-detail-why">
+              Puede faltar una pieza en la carpeta o sobrar una fila en el CSV.
+              Es solo un aviso: no bloquea el análisis. Estas filas se pueden
+              elegir para las piezas sin fila.
+            </p>
+          </header>
+          <ul className="qc-rows">
+            {ready!.orphanRows.map((row) => (
               <li key={row.csvLine}>
+                <b>Línea {row.csvLine}</b>
                 <code>
-                  Línea {row.csvLine} · {row.id}
+                  <Name text={row.id} />
                 </code>
               </li>
             ))}
           </ul>
-          {ready.orphanRows.length > PREVIEW && (
-            <button
-              type="button"
-              className="qc-link-button"
-              onClick={() =>
-                setExpanded(
-                  expanded.includes("orphans")
-                    ? expanded.filter((c) => c !== "orphans")
-                    : [...expanded, "orphans"],
-                )
-              }
-            >
-              {expanded.includes("orphans")
-                ? "Ver menos"
-                : `Ver las ${ready.orphanRows.length}`}
-            </button>
-          )}
-        </div>
-      )}
-
-      {equivalences && equivalences.items.length > 0 && (
-        <div className="qc-mapping-group">
-          <strong>Equivalencias aprobadas</strong>
-          <ul className="qc-mapping-list">
-            {equivalences.items.map((row) => (
+        </article>
+      );
+    if (kind === "equivalences")
+      return (
+        <article className="qc-detail">
+          <header className="qc-detail-head">
+            <h3 className="qc-detail-title">Equivalencias aprobadas</h3>
+            <p className="qc-detail-why">
+              Valores del CSV que dicen lo mismo que la matriz. El CSV no se
+              modificó.
+            </p>
+          </header>
+          <ul className="qc-rows">
+            {(equivalences?.items ?? []).map((row) => (
               <li key={row.id}>
-                <code>
-                  {row.column}: «{row.csvValue}» = «{row.matrixValue}»
-                </code>
+                <b>{row.column}</b>
+                <span>
+                  «{row.csvValue}» = «{row.matrixValue}»
+                </span>
                 <small>
                   {row.scope === "client"
                     ? "Para todas las campañas del cliente"
@@ -953,49 +1405,375 @@ export function MappingPanel({
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        </article>
+      );
+    return (
+      <article className="qc-detail">
+        <header className="qc-detail-head">
+          <h3 className="qc-detail-title">Piezas excluidas del análisis</h3>
+        </header>
+        <ul className="qc-rows">
+          {(exclusions ?? []).map((row) => (
+            <li key={row.id}>
+              <code>
+                <Name text={row.name} />
+              </code>
+              <small>{row.note}</small>
+              <button
+                type="button"
+                className="qc-link-button"
+                disabled={busy}
+                onClick={() =>
+                  void run("exclude", async () => {
+                    await include({ overrideId: row.id });
+                    setNotice(
+                      `«${row.name}» vuelve a analizarse. La campaña se está actualizando.`,
+                    );
+                    onChanged();
+                  })
+                }
+              >
+                <Undo2 size={12} aria-hidden />
+                Volver a incluir
+              </button>
+            </li>
+          ))}
+        </ul>
+      </article>
+    );
+  }
 
-      {exclusions && exclusions.length > 0 && (
-        <div className="qc-mapping-group">
-          <strong>Excluidas del análisis</strong>
-          <ul className="qc-mapping-list">
-            {exclusions.map((row) => (
-              <li key={row.id}>
-                <code>{row.name}</code>
-                <small>{row.note}</small>
-                <button
-                  type="button"
-                  className="qc-link-button"
-                  disabled={busy}
-                  onClick={() =>
-                    void run("exclude", async () => {
-                      await include({ overrideId: row.id });
-                      setNotice(
-                        `«${row.name}» vuelve a analizarse. La campaña se está actualizando.`,
-                      );
-                      onChanged();
-                    })
-                  }
-                >
-                  <Undo2 size={12} aria-hidden />
-                  Volver a incluir
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+  const currentProblem = currentPiece ? byPiece.get(currentPiece) : undefined;
 
-      {notice && (
-        <p className="qc-mapping-note success" role="status">
-          {notice}
+  return (
+    <section className="qc-mapping" aria-labelledby="qc-mapping-title">
+      <header className="qc-mapping-toolbar">
+        <div className="qc-mapping-summary">
+          <span className={`qc-check-icon ${complete ? "ok" : "choose"}`}>
+            {complete ? (
+              <Check size={14} aria-hidden />
+            ) : (
+              <AlertCircle size={14} aria-hidden />
+            )}
+          </span>
+          <div>
+            <strong id="qc-mapping-title">
+              {ready.linked} de {ready.total} piezas vinculadas
+            </strong>
+            <p>
+              {complete
+                ? "Cada pieza tiene su fila en el CSV y su pedido en la matriz."
+                : [
+                    `${pendingCount} ${pendingCount === 1 ? "pendiente" : "pendientes"}`,
+                    edits.length
+                      ? `${edits.length} ${edits.length === 1 ? "cambio elegido" : "cambios elegidos"}`
+                      : "",
+                    ready.excluded
+                      ? `${ready.excluded} ${ready.excluded === 1 ? "excluida" : "excluidas"}`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+            </p>
+          </div>
+          <div className="qc-progress qc-mapping-progress" aria-hidden>
+            <span
+              className="validated"
+              style={{ width: percent(ready.linked) }}
+            />
+            <span
+              className="partial"
+              style={{ width: percent(ready.excluded) }}
+            />
+          </div>
+        </div>
+        <div className="qc-mapping-tools">
+          {loading && (
+            <span className="qc-loading inline" role="status">
+              <LoaderCircle size={14} className="qc-spin" aria-hidden />
+              Actualizando…
+            </span>
+          )}
+          {!complete && (
+            <button
+              type="button"
+              className="qc-button secondary small"
+              disabled={busy}
+              onClick={() => void askNeon()}
+              title="Explica cada diferencia y propone cómo corregirla, sin cambiar nada"
+            >
+              {pending === "review" ? (
+                <LoaderCircle size={14} className="qc-spin" aria-hidden />
+              ) : (
+                <Sparkles size={14} aria-hidden />
+              )}
+              {pending === "review"
+                ? "Revisando…"
+                : review
+                  ? "Volver a revisar con Gemini Neon"
+                  : "Revisar con Gemini Neon"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="qc-button ghost small"
+            disabled={busy}
+            onClick={() => void refresh()}
+            title="Volver a leer el CSV y la matriz después de corregirlos en Drive"
+          >
+            <RefreshCw
+              size={14}
+              className={pending === "refresh" ? "qc-spin" : undefined}
+              aria-hidden
+            />
+            Actualizar
+          </button>
+        </div>
+      </header>
+      {!complete && (
+        <p className="qc-mapping-note">
+          Gemini Neon explica cada diferencia y propone cómo corregirla, sin
+          cambiar nada. Si corregís el CSV en Drive, tocá «Actualizar». Solo se
+          modifica el CSV: la matriz del cliente nunca.
+          {!campaignId &&
+            " Excluir piezas y aprobar equivalencias se habilita después de agregar la campaña."}
         </p>
+      )}
+      {notice && (
+        <div className="qc-callout success" role="status">
+          <CircleCheck size={16} aria-hidden />
+          <p>{notice}</p>
+        </div>
       )}
       {error && (
-        <p className="qc-error" role="alert">
-          {error}
-        </p>
+        <div className="qc-callout danger" role="alert">
+          <AlertCircle size={16} aria-hidden />
+          <p>{error}</p>
+        </div>
+      )}
+
+      <div className="qc-mapping-workspace">
+        <nav className="qc-mapping-list-pane" aria-label="Piezas para revisar">
+          {ordered.length > 0 && (
+            <div className="qc-mapping-list-head">
+              <label className="qc-search">
+                <Search size={14} aria-hidden />
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="Buscar pieza"
+                  aria-label="Buscar pieza"
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </label>
+              {prefix && (
+                <p className="qc-mapping-prefix">
+                  Todas empiezan con <code>{prefix}</code>
+                </p>
+              )}
+            </div>
+          )}
+          <div className="qc-piece-groups">
+            {ready.groups.map((group) => {
+              const pieces = group.pieces.filter(
+                (piece) => byPiece.has(piece) && matches(piece),
+              );
+              if (!pieces.length) return null;
+              return (
+                <div key={group.code} className="qc-piece-group">
+                  <h3>
+                    {statusName[group.code]}
+                    <span>{group.pieces.length}</span>
+                  </h3>
+                  <ul>
+                    {pieces.map((piece) => {
+                      const problem = byPiece.get(piece)!;
+                      const state = stateOf(piece);
+                      const active = piece === currentPiece;
+                      return (
+                        <li
+                          key={piece}
+                          className={`qc-piece${active ? " active" : ""}`}
+                        >
+                          {campaignId && (
+                            <input
+                              type="checkbox"
+                              aria-label={`Marcar ${piece} para excluir`}
+                              title="Marcar para excluir del análisis"
+                              checked={state === "exclude"}
+                              disabled={busy}
+                              onChange={(event) =>
+                                toggleChosen(piece, event.target.checked)
+                              }
+                            />
+                          )}
+                          <button
+                            type="button"
+                            aria-current={active || undefined}
+                            onClick={() => setView({ kind: "piece", piece })}
+                          >
+                            <span className="qc-piece-name">
+                              <Name text={stem(piece).slice(prefix.length)} />
+                            </span>
+                            <span className="qc-piece-meta">
+                              <span className={`qc-piece-state ${state}`}>
+                                {stateIcon(state)}
+                                {stateName[state]}
+                              </span>
+                              {problem.width && problem.height ? (
+                                <span>
+                                  {problem.width}×{problem.height}
+                                </span>
+                              ) : null}
+                              {suggestions.get(piece)?.source === "ai" && (
+                                <Sparkles
+                                  size={11}
+                                  className="qc-piece-ai"
+                                  aria-label="Revisada por Gemini Neon"
+                                />
+                              )}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+            {!ordered.length && (
+              <p className="qc-mapping-done">
+                <CircleCheck size={16} aria-hidden />
+                Todas las piezas están vinculadas.
+              </p>
+            )}
+            {ordered.length > 0 && !ordered.some(matches) && (
+              <p className="qc-mapping-note qc-mapping-nomatch">
+                Ninguna pieza coincide con «{query}».
+              </p>
+            )}
+          </div>
+          {others.length > 0 && (
+            <div className="qc-mapping-others">
+              {others.map((item) => (
+                <button
+                  key={item.kind}
+                  type="button"
+                  aria-current={current?.kind === item.kind || undefined}
+                  onClick={() => setView({ kind: item.kind })}
+                >
+                  {item.label}
+                  <b>{item.count}</b>
+                </button>
+              ))}
+            </div>
+          )}
+        </nav>
+
+        <div className="qc-mapping-detail">
+          {current?.kind === "changes" ? (
+            changesDetail()
+          ) : current?.kind === "orphans" ||
+            current?.kind === "equivalences" ||
+            current?.kind === "exclusions" ? (
+            listDetail(current.kind)
+          ) : currentProblem ? (
+            pieceDetail(currentProblem)
+          ) : (
+            <div className="qc-mapping-empty">
+              <span className="qc-check-icon ok">
+                <Check size={16} aria-hidden />
+              </span>
+              <strong>Las {ready.total} piezas están listas</strong>
+              <p>
+                Cada pieza tiene su fila en el CSV y su pedido en la matriz
+                {ready.excluded
+                  ? `, o está excluida del análisis (${ready.excluded})`
+                  : ""}
+                .
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {((campaignId && chosen.length > 0) || edits.length > 0) && (
+        <div className="qc-mapping-bars">
+          {campaignId && chosen.length > 0 && (
+            <div className="qc-mapping-bar">
+              <EyeOff size={15} aria-hidden />
+              <strong>
+                {chosen.length}{" "}
+                {chosen.length === 1
+                  ? "pieza para excluir"
+                  : "piezas para excluir"}
+              </strong>
+              <input
+                value={reason}
+                maxLength={500}
+                disabled={busy}
+                aria-label="Motivo de la exclusión"
+                placeholder="Motivo (por ejemplo: es el logo, no se revisa)"
+                onChange={(event) => setReason(event.target.value)}
+              />
+              <button
+                type="button"
+                className="qc-button ghost small"
+                disabled={busy}
+                onClick={() => setChosen([])}
+              >
+                Desmarcar
+              </button>
+              <button
+                type="button"
+                className="qc-button secondary small"
+                disabled={busy || !reason.trim()}
+                onClick={() => void excludeChosen()}
+              >
+                {pending === "exclude" ? (
+                  <LoaderCircle size={14} className="qc-spin" aria-hidden />
+                ) : (
+                  <EyeOff size={14} aria-hidden />
+                )}
+                Excluir del análisis
+              </button>
+            </div>
+          )}
+          {edits.length > 0 && (
+            <div className="qc-mapping-bar primary">
+              <CircleCheck size={15} aria-hidden />
+              <strong>
+                {edits.length}{" "}
+                {edits.length === 1 ? "cambio elegido" : "cambios elegidos"}
+              </strong>
+              <span className="qc-mapping-bar-text">en «{ready.csv.name}»</span>
+              <button
+                type="button"
+                className="qc-button ghost small"
+                disabled={busy}
+                onClick={() => {
+                  setChoices({});
+                  setChecked(undefined);
+                  setAuthorized(false);
+                  if (current?.kind === "changes") setView(undefined);
+                }}
+              >
+                Descartar
+              </button>
+              {current?.kind !== "changes" && (
+                <button
+                  type="button"
+                  className="qc-button primary small"
+                  disabled={busy}
+                  onClick={() => setView({ kind: "changes" })}
+                >
+                  Revisar y aplicar
+                  <ArrowRight size={14} aria-hidden />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </section>
   );

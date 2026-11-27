@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAction, useQuery } from "convex/react";
 import {
+  ArrowRight,
   Check,
   Copy,
+  FileSpreadsheet,
+  FileText,
+  Images,
   Info,
   Link2,
   LoaderCircle,
@@ -20,7 +24,14 @@ import {
   type FolderInspection,
   type SourceSelection,
 } from "./FolderChecklist";
-import { MappingPanel } from "./MappingPanel";
+import { MappingPanel, MappingSummary } from "./MappingPanel";
+
+type Step = "link" | "sources" | "pieces";
+const stepNames: Record<Step, string> = {
+  link: "Enlace",
+  sources: "Fuentes",
+  pieces: "Piezas",
+};
 
 const selectionKey = (url: string, selection: SourceSelection) =>
   JSON.stringify([
@@ -59,9 +70,13 @@ export function CampaignForm({
   const [selection, setSelection] = useState<SourceSelection>(
     campaign?.sourceSelection ?? {},
   );
-  const [step, setStep] = useState<"link" | "check">(
-    campaign ? "check" : "link",
+  // The dialog keeps one size for every step; each step uses the whole body.
+  const [step, setStep] = useState<Step>(
+    campaign ? (campaign.mapping.locked ? "pieces" : "sources") : "link",
   );
+  const steps: Step[] = campaign
+    ? ["sources", "pieces"]
+    : ["link", "sources", "pieces"];
   const [inspection, setInspection] = useState<FolderInspection | null>(null);
   const [verified, setVerified] = useState("");
   const [error, setError] = useState("");
@@ -102,7 +117,7 @@ export function CampaignForm({
     if (submitting.current || !url.trim()) return;
     submitting.current = true;
     setPending("inspect");
-    setStep("check");
+    setStep((current) => (current === "link" ? "sources" : current));
     setError("");
     setVerified("");
     try {
@@ -187,6 +202,10 @@ export function CampaignForm({
       await verify();
       return;
     }
+    if (step === "sources") {
+      if (ready) setStep("pieces");
+      return;
+    }
     if (submitting.current || !ready) return;
     submitting.current = true;
     setPending("save");
@@ -235,6 +254,54 @@ export function CampaignForm({
     }
   }
 
+  function goTo(next: Step) {
+    if (next === "link") {
+      setVerified("");
+      setError("");
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+    setStep(next);
+  }
+
+  const serviceAccount = (
+    <>
+      <div className="qc-service-account">
+        <span>
+          Cuenta de servicio ·{" "}
+          {account ? (
+            <code>{account}</code>
+          ) : account === undefined ? (
+            "Cargando…"
+          ) : (
+            "No configurada"
+          )}
+        </span>
+        {account && (
+          <button
+            type="button"
+            className="qc-button ghost small"
+            onClick={copyAccount}
+          >
+            {copied ? (
+              <Check size={14} aria-hidden />
+            ) : (
+              <Copy size={14} aria-hidden />
+            )}
+            {copied ? "Copiado" : "Copiar"}
+          </button>
+        )}
+      </div>
+      <p className="qc-sr-only" role="status">
+        {copied ? "Correo de la cuenta de servicio copiado." : ""}
+      </p>
+      {copyError && (
+        <p className="qc-error" role="alert">
+          {copyError}
+        </p>
+      )}
+    </>
+  );
+
   return (
     <dialog
       ref={dialogRef}
@@ -265,6 +332,10 @@ export function CampaignForm({
                 `Hay piezas de ${campaign.name} que no se pueden vincular con el CSV o la matriz. Corregilas o excluilas para abrir el editor.`
               ) : campaign ? (
                 `Elegí las carpetas, la matriz y el CSV de ${campaign.name}.`
+              ) : step === "sources" ? (
+                "Revisá qué encontró QA Visual en la carpeta y elegí la matriz y el CSV si hay más de uno."
+              ) : step === "pieces" ? (
+                "Cada pieza tiene que tener su fila en el CSV y su pedido en la matriz para poder analizarla."
               ) : (
                 <>
                   Compartí la carpeta con la cuenta de servicio como{" "}
@@ -284,122 +355,184 @@ export function CampaignForm({
             <X size={18} aria-hidden />
           </button>
         </div>
-        {!campaign && (
-          <ol
-            className="qc-stepper"
-            aria-label="Pasos para agregar una campaña"
-          >
-            <li
-              className={step === "link" ? "current" : "done"}
-              aria-current={step === "link" ? "step" : undefined}
-            >
-              <span>
-                {step === "check" ? <Check size={12} aria-hidden /> : "1"}
-              </span>
-              Enlace
-            </li>
-            <li
-              className={step === "check" ? "current" : ""}
-              aria-current={step === "check" ? "step" : undefined}
-            >
-              <span>2</span>Verificación
-            </li>
-          </ol>
-        )}
-        <div className="qc-dialog-body">
-          <label className="qc-label" htmlFor="qa-drive-folder">
-            Enlace de la carpeta de Drive
-          </label>
-          <div className="qc-url-field">
-            <Link2 size={14} aria-hidden />
-            <input
-              ref={inputRef}
-              id="qa-drive-folder"
-              type="url"
-              required
-              maxLength={2048}
-              value={url}
-              readOnly={
-                step === "check" || Boolean(campaign) || Boolean(pending)
-              }
-              onChange={(event) => {
-                setUrl(event.target.value);
-                setInspection(null);
-                setSelection({});
-                setVerified("");
-                setError("");
-                setCsvNotice("");
-                setCsvDownload(undefined);
-              }}
-              placeholder="https://drive.google.com/drive/folders/…"
-            />
-          </div>
-          <div className="qc-service-account">
-            <span>
-              Cuenta de servicio ·{" "}
-              {account ? (
-                <code>{account}</code>
-              ) : account === undefined ? (
-                "Cargando…"
-              ) : (
-                "No configurada"
-              )}
-            </span>
-            {account && (
-              <button
-                type="button"
-                className="qc-button ghost small"
-                onClick={copyAccount}
+        <ol className="qc-stepper" aria-label="Pasos">
+          {steps.map((name, index) => {
+            const at = steps.indexOf(step);
+            const state =
+              index < at ? "done" : index === at ? "current" : "next";
+            // Going back is always possible; going to the pieces needs valid sources.
+            const reachable =
+              index < at || (name === "pieces" && at < index && ready);
+            return (
+              <li
+                key={name}
+                className={state}
+                aria-current={state === "current" ? "step" : undefined}
               >
-                {copied ? (
-                  <Check size={14} aria-hidden />
-                ) : (
-                  <Copy size={14} aria-hidden />
-                )}
-                {copied ? "Copiado" : "Copiar"}
-              </button>
-            )}
-          </div>
-          <p className="qc-sr-only" role="status">
-            {copied ? "Correo de la cuenta de servicio copiado." : ""}
-          </p>
-          {copyError && (
-            <p className="qc-error" role="alert">
-              {copyError}
-            </p>
+                <button
+                  type="button"
+                  disabled={!reachable || Boolean(pending) || mappingBusy}
+                  onClick={() => goTo(name)}
+                >
+                  <span className="qc-step-num">
+                    {state === "done" ? (
+                      <Check size={12} aria-hidden />
+                    ) : (
+                      index + 1
+                    )}
+                  </span>
+                  {stepNames[name]}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+        <div className={`qc-dialog-body${step === "pieces" ? " fill" : ""}`}>
+          {step === "link" && (
+            <div className="qc-link-step">
+              <div>
+                <label className="qc-label" htmlFor="qa-drive-folder">
+                  Enlace de la carpeta de Drive
+                </label>
+                <div className="qc-url-field">
+                  <Link2 size={14} aria-hidden />
+                  <input
+                    ref={inputRef}
+                    id="qa-drive-folder"
+                    type="url"
+                    required
+                    maxLength={2048}
+                    value={url}
+                    readOnly={Boolean(campaign) || Boolean(pending)}
+                    onChange={(event) => {
+                      setUrl(event.target.value);
+                      setInspection(null);
+                      setSelection({});
+                      setVerified("");
+                      setError("");
+                      setCsvNotice("");
+                      setCsvDownload(undefined);
+                    }}
+                    placeholder="https://drive.google.com/drive/folders/…"
+                  />
+                </div>
+                {serviceAccount}
+              </div>
+              <aside
+                className="qc-guide"
+                aria-label="Qué tiene que tener la carpeta"
+              >
+                <h3>Qué tiene que tener la carpeta</h3>
+                <ol>
+                  <li>
+                    <span className="qc-guide-icon">
+                      <FileSpreadsheet size={15} aria-hidden />
+                    </span>
+                    <div>
+                      <b>RECURSOS</b>
+                      <span>La matriz del cliente en .xlsx.</span>
+                    </div>
+                  </li>
+                  <li>
+                    <span className="qc-guide-icon">
+                      <FileText size={15} aria-hidden />
+                    </span>
+                    <div>
+                      <b>EDITABLES</b>
+                      <span>
+                        El CSV de producción, con cualquier nombre. Si no
+                        existe, QA Visual lo puede crear desde la matriz.
+                      </span>
+                    </div>
+                  </li>
+                  <li>
+                    <span className="qc-guide-icon">
+                      <Images size={15} aria-hidden />
+                    </span>
+                    <div>
+                      <b>DESPLIEGUE o VISUALES</b>
+                      <span>Las piezas en PNG o JPEG.</span>
+                    </div>
+                  </li>
+                </ol>
+                <p>
+                  Si las carpetas tienen otros nombres, en el paso siguiente
+                  podés elegir cada una. Nada se modifica en Drive sin que lo
+                  pidas.
+                </p>
+              </aside>
+            </div>
           )}
-          {pending === "inspect" && (
+
+          {step !== "link" && pending === "inspect" && !inspection && (
             <p className="qc-loading" role="status">
               <LoaderCircle size={16} className="qc-spin" aria-hidden />
               Verificando carpeta…
             </p>
           )}
-          {step === "check" &&
+
+          {step === "sources" && (
+            <>
+              {pending === "inspect" && inspection && (
+                <p className="qc-loading" role="status">
+                  <LoaderCircle size={16} className="qc-spin" aria-hidden />
+                  Verificando carpeta…
+                </p>
+              )}
+              {inspection &&
+                ("folder" in inspection ? (
+                  <>
+                    <FolderChecklist
+                      inspection={inspection}
+                      selection={selection}
+                      disabled={Boolean(pending)}
+                      creatingCsv={pending === "csv"}
+                      csvDownload={csvDownload}
+                      onSelect={(chosen) => {
+                        setSelection(chosen);
+                        setCsvDownload(undefined);
+                        void verify(chosen);
+                      }}
+                      onCreateCsv={() => void generateCsv()}
+                    />
+                    {inspection.mapping && (
+                      <MappingSummary
+                        mapping={inspection.mapping}
+                        canContinue={Boolean(ready)}
+                        onOpen={() => setStep("pieces")}
+                      />
+                    )}
+                    {!inspection.ok && serviceAccount}
+                  </>
+                ) : (
+                  <div className="qc-callout danger" role="alert">
+                    <Info size={16} aria-hidden />
+                    <p>{inspection.error}</p>
+                  </div>
+                ))}
+              {csvNotice && (
+                <div className="qc-callout info" role="status">
+                  <Info size={16} aria-hidden />
+                  <p>{csvNotice}</p>
+                </div>
+              )}
+              {inspection && !ready && !pending && (
+                <div className="qc-callout info">
+                  <Info size={16} aria-hidden />
+                  <p>
+                    {campaign
+                      ? "No se cambiaron las fuentes."
+                      : "No se registró la campaña."}{" "}
+                    Cuando corrijas la carpeta en Drive, volvé a verificar.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {step === "pieces" &&
             inspection &&
-            ("folder" in inspection ? (
-              <FolderChecklist
-                inspection={inspection}
-                selection={selection}
-                disabled={Boolean(pending)}
-                creatingCsv={pending === "csv"}
-                csvDownload={csvDownload}
-                onSelect={(chosen) => {
-                  setSelection(chosen);
-                  setCsvDownload(undefined);
-                  void verify(chosen);
-                }}
-                onCreateCsv={() => void generateCsv()}
-              />
-            ) : (
-              <div className="qc-callout danger" role="alert">
-                <Info size={16} aria-hidden />
-                <p>{inspection.error}</p>
-              </div>
-            ))}
-          {step === "check" &&
-            inspection &&
-            "folder" in inspection &&
-            inspection.mapping && (
+            ("folder" in inspection && inspection.mapping ? (
               <MappingPanel
                 mapping={inspection.mapping}
                 target={
@@ -409,6 +542,7 @@ export function CampaignForm({
                 }
                 selection={selection}
                 disabled={Boolean(pending)}
+                loading={pending === "inspect"}
                 onBusy={setMappingBusy}
                 onChanged={(next) => {
                   if (campaign) setUpdating(true);
@@ -416,43 +550,62 @@ export function CampaignForm({
                   else void verify();
                 }}
               />
+            ) : (
+              <div className="qc-callout info">
+                <Info size={16} aria-hidden />
+                <div>
+                  <strong>No se puede revisar el mapeo todavía</strong>
+                  <p>
+                    {"folder" in inspection
+                      ? "Hacen falta la matriz, el CSV y la carpeta de piezas con imágenes."
+                      : inspection.error}
+                  </p>
+                  <button
+                    type="button"
+                    className="qc-link-button"
+                    disabled={Boolean(pending)}
+                    onClick={() => setStep("sources")}
+                  >
+                    Revisar las fuentes
+                  </button>
+                </div>
+              </div>
+            ))}
+          {step === "pieces" &&
+            inspection &&
+            "folder" in inspection &&
+            inspection.mapping &&
+            !inspection.ok &&
+            !pending && (
+              <div className="qc-callout warning">
+                <Info size={16} aria-hidden />
+                <p>
+                  Falta resolver alguna fuente.{" "}
+                  <button
+                    type="button"
+                    className="qc-link-button"
+                    onClick={() => setStep("sources")}
+                  >
+                    Ir a Fuentes
+                  </button>
+                </p>
+              </div>
             )}
-          {csvNotice && (
-            <div className="qc-callout info" role="status">
-              <Info size={16} aria-hidden />
-              <p>{csvNotice}</p>
-            </div>
-          )}
+
           {error && (
             <p className="qc-error" role="alert">
               {error}
             </p>
           )}
-          {step === "check" && inspection && !ready && !pending && (
-            <div className="qc-callout info">
-              <Info size={16} aria-hidden />
-              <p>
-                {campaign
-                  ? "No se cambiaron las fuentes."
-                  : "No se registró la campaña."}{" "}
-                Cuando corrijas la carpeta en Drive, volvé a verificar.
-              </p>
-            </div>
-          )}
         </div>
         <div className="qc-dialog-footer">
           <div>
-            {step === "check" && !campaign && (
+            {steps.indexOf(step) > 0 && (
               <button
                 type="button"
                 className="qc-button ghost"
-                disabled={Boolean(pending)}
-                onClick={() => {
-                  setStep("link");
-                  setVerified("");
-                  setError("");
-                  requestAnimationFrame(() => inputRef.current?.focus());
-                }}
+                disabled={Boolean(pending) || mappingBusy}
+                onClick={() => goTo(steps[steps.indexOf(step) - 1])}
               >
                 Volver
               </button>
@@ -467,7 +620,7 @@ export function CampaignForm({
             >
               Cancelar
             </button>
-            {step === "check" && !ready && (
+            {step === "sources" && inspection && !ready && (
               <button
                 type="button"
                 className="qc-button secondary"
@@ -485,7 +638,7 @@ export function CampaignForm({
                 Boolean(pending) ||
                 mappingBusy ||
                 !url.trim() ||
-                (step === "check" && !ready && !(campaign && updating))
+                (step !== "link" && !ready && !(campaign && updating))
               }
             >
               {pending && (
@@ -499,11 +652,16 @@ export function CampaignForm({
                     ? "Verificando…"
                     : step === "link"
                       ? "Verificar carpeta"
-                      : campaign && updating
-                        ? "Listo"
-                        : campaign
-                          ? "Guardar e importar"
-                          : "Agregar campaña"}
+                      : step === "sources"
+                        ? "Siguiente: piezas"
+                        : campaign && updating
+                          ? "Listo"
+                          : campaign
+                            ? "Guardar e importar"
+                            : "Agregar campaña"}
+              {!pending && step === "sources" && (
+                <ArrowRight size={14} aria-hidden />
+              )}
             </button>
           </div>
         </div>
