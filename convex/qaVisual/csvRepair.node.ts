@@ -23,11 +23,22 @@ import {
   type Equivalence,
   type MappingProblem,
 } from "./model/mapping";
+import { rankRows } from "./model/similarity";
 import { qaCsvFixer } from "./qaModels";
 
 /** The prompt is JSON for the model, not a Convex value: here columns may be keys again. */
 const asObject = (values: ColumnValue[] = []) =>
   Object.fromEntries(values.map(({ column, value }) => [column, value]));
+const valueOf = (values: ColumnValue[], column: string) =>
+  values.find((item) => item.column === column)?.value ?? "";
+
+/**
+ * Free rows sent to the model for each piece without a row: the most similar ones. Sending
+ * every free row with every piece made the request too long for large campaigns.
+ */
+export const ROWS_PER_PIECE = 8;
+/** Pieces reviewed per request; the panel sends them in batches and shows each as it arrives. */
+export const REVIEW_BATCH = 15;
 
 /**
  * Mapping review and CSV fixes (§5.5). Code detects the differences between the pieces, the
@@ -59,17 +70,17 @@ Cada imagen de la carpeta de piezas tiene que tener una fila en el CSV interno d
 El código ya detectó las diferencias. Tu trabajo es explicarlas y proponer cómo corregirlas. No modificás nada: una persona decide.
 
 Recibís:
-- "sinFila": piezas que no tienen fila en el CSV (o cuyo ID está repetido), con "filasLibres": filas del CSV que no usa ninguna pieza.
+- "sinFila": piezas que no tienen fila en el CSV (o cuyo ID está repetido). Cada una trae "filasPosibles": las filas libres del CSV (que no usa ninguna pieza) más parecidas a su nombre.
 - "sinPedido": piezas cuya fila del CSV no coincide con ningún pedido, con los pedidos más parecidos de la matriz y las columnas en las que difieren.
 - "variosPedidos": piezas cuya fila coincide con más de un pedido.
 
-Para cada pieza de "sinFila" respondé en "rows": la línea (csvLine) de la fila libre que le corresponde o null si ninguna corresponde con seguridad, y una explicación.
+Para cada pieza de "sinFila" respondé en "rows": la línea (csvLine) de una de sus "filasPosibles" que le corresponde o null si ninguna corresponde con seguridad, y una explicación.
 Para cada pieza de "sinPedido" y "variosPedidos" respondé en "orders": la fila del pedido de la matriz ("order") que le corresponde o null si no se puede saber con seguridad, y una explicación.
 
 Reglas:
 - Elegí solo entre las opciones que recibís. Usá cada fila libre como máximo una vez.
 - Emparejá solo si los datos son coherentes (formato, medidas, canal, medio, producto, fecha). Si dudás entre dos opciones o las medidas no coinciden, respondé null.
-- La explicación es en español, de una o dos oraciones: qué diferencia hay (citando los valores) y qué tiene que hacer la persona para corregirla en el CSV. Si la diferencia es solo de nombre (por ejemplo «BANNER HOR» frente a «Banner»), decí que puede corregir el CSV o aprobar que dicen lo mismo.
+- La explicación es en español, de una sola oración breve (menos de 200 caracteres): qué diferencia hay (citando los valores) y qué tiene que hacer la persona para corregirla en el CSV. Si la diferencia es solo de nombre (por ejemplo «BANNER HOR» frente a «Banner»), decí que puede corregir el CSV o aprobar que dicen lo mismo.
 - Nunca propongas cambiar la matriz del cliente.`;
 
 export type MappingSuggestion = {
@@ -87,6 +98,8 @@ export type MappingSuggestion = {
   warnings: string[];
   /** The model proposed something that did not pass the verification. */
   rejected?: string;
+  /** Gemini Neon did not answer for this piece (timeout, error or too many differences). */
+  failed?: boolean;
 };
 export type MappingReview = {
   error?: string;
@@ -132,10 +145,13 @@ function codeExplanation(problem: MappingProblem) {
 }
 
 /**
- * «Revisar con Gemini Neon»: an explanation and a verified proposal for every difference.
- * Nothing is written.
+ * «Revisar con Gemini Neon»: an explanation and a verified proposal for every difference, or
+ * only for `pieces` (the panel reviews in batches of REVIEW_BATCH). Nothing is written.
  */
-export async function reviewMapping(context: Context): Promise<MappingReview> {
+export async function reviewMapping(
+  context: Context,
+  pieces?: string[],
+): Promise<MappingReview> {
   const loaded = await load(context);
   if ("error" in loaded) return { error: loaded.error, suggestions: [] };
   const { sources } = loaded;
@@ -162,7 +178,10 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
     version: sources.csv.version!,
     canEdit: Boolean(sources.csv.capabilities?.canEdit),
   };
-  const problems = report.problems;
+  const only = pieces && new Set(pieces);
+  const problems = only
+    ? report.problems.filter((p) => only.has(p.piece))
+    : report.problems;
   if (!problems.length) return { csv, suggestions: [] };
   const rowProblems = problems.filter(
     (p) => p.status === "csv_missing" || p.status === "csv_duplicate",
@@ -171,10 +190,28 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
     (p) => p.status === "matrix_missing" || p.status === "matrix_ambiguous",
   );
   const free = new Map(report.freeRows.map((row) => [row.csvLine, row]));
+  const rowSize = (row: (typeof report.freeRows)[number]) => {
+    const width = Number(valueOf(row.values, "ANCHO_PX"));
+    const height = Number(valueOf(row.values, "ALTO_PX"));
+    return width && height ? { width, height } : undefined;
+  };
+  // The rows offered to each piece; the model may only choose among them.
+  const offered = new Map(
+    rowProblems.map((p) => [
+      p.piece,
+      rankRows(
+        { name: p.piece, width: p.width, height: p.height },
+        report.freeRows,
+        rowSize,
+      )
+        .slice(0, ROWS_PER_PIECE)
+        .map(({ row }) => row),
+    ]),
+  );
 
   let output: z.infer<typeof reviewSchema> | undefined;
   let notice: string | undefined;
-  if (problems.length > 300 || report.freeRows.length > 600)
+  if (problems.length > 300)
     notice =
       "Hay demasiadas diferencias para revisarlas con IA. Revisá la nomenclatura del CSV y de las piezas.";
   else
@@ -192,13 +229,11 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
               ? { medidas: `${p.width}x${p.height}` }
               : {}),
             ...(p.csvLines?.length ? { lineasConElMismoId: p.csvLines } : {}),
+            filasPosibles: (offered.get(p.piece) ?? []).map((row) => ({
+              csvLine: row.csvLine,
+              ...asObject(row.values),
+            })),
           })),
-          filasLibres: rowProblems.length
-            ? report.freeRows.map((row) => ({
-                csvLine: row.csvLine,
-                ...asObject(row.values),
-              }))
-            : [],
           // Only the identity, size and date of the candidate orders: read-only data.
           ...Object.fromEntries(
             (["matrix_missing", "matrix_ambiguous"] as const).map((status) => [
@@ -247,8 +282,13 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
       edits: [],
       equivalences: [],
       warnings: [],
+      ...(notice ? { failed: true } : {}),
     };
-    const row = answer?.csvLine != null ? free.get(answer.csvLine) : undefined;
+    const row =
+      answer?.csvLine != null &&
+      offered.get(problem.piece)?.some((r) => r.csvLine === answer.csvLine)
+        ? free.get(answer.csvLine)
+        : undefined;
     if (answer?.csvLine != null && (!row || usedLines.has(row.csvLine)))
       suggestion.rejected =
         "La IA propuso una fila que no está libre en el CSV. Elegí la fila a mano.";
@@ -287,6 +327,7 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
       edits: [],
       equivalences: [],
       warnings: [],
+      ...(notice ? { failed: true } : {}),
     };
     if (answer?.order && !candidate)
       suggestion.rejected =

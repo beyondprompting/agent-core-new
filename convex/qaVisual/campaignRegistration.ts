@@ -272,15 +272,18 @@ const connectionError =
  * identity, size and date of the candidate orders of the matrix, read-only.
  */
 export const reviewMapping = action({
-  args: where,
+  // `pieces`: one batch of the panel; without it every difference is reviewed.
+  args: { ...where, pieces: v.optional(v.array(v.string())) },
   handler: async (
     ctx,
-    { folderUrl: url, campaignId, ...chosen },
+    { folderUrl: url, campaignId, pieces, ...chosen },
   ): Promise<MappingReview> => {
+    if (pieces && pieces.length > 50)
+      return { error: "Se revisan hasta 50 piezas por vez.", suggestions: [] };
     const target = await mappingTarget(ctx, url, campaignId);
     if ("error" in target) return { error: target.error, suggestions: [] };
     try {
-      return await review({ ...target, selection: chosen });
+      return await review({ ...target, selection: chosen }, pieces);
     } catch (error) {
       console.error("QA Visual: no se pudo revisar el mapeo", error);
       return { error: connectionError, suggestions: [] };

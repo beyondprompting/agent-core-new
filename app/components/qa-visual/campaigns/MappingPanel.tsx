@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import {
@@ -19,6 +19,11 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { campaignError } from "@/app/lib/qa-visual/campaign-model";
+import {
+  foldName as fold,
+  nameWords as words,
+  rankRows,
+} from "@/convex/qaVisual/model/similarity";
 import type { FolderInspection, SourceSelection } from "./FolderChecklist";
 
 type Mapping = NonNullable<
@@ -69,22 +74,9 @@ const stateName: Record<PieceState, string> = {
 };
 
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
-const fold = (text: string) =>
-  text.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase();
-const words = (text: string) =>
-  fold(text)
-    .split(/[^A-Z0-9]+/)
-    .filter(Boolean);
-
-/** Shared words over all words: how much a CSV ID looks like a file name. */
-function similarity(a: string[], b: string[]) {
-  const left = new Set(a);
-  const right = new Set(b);
-  if (!left.size || !right.size) return 0;
-  let shared = 0;
-  for (const word of left) if (right.has(word)) shared++;
-  return shared / (left.size + right.size - shared);
-}
+/** Pieces per request to Gemini Neon and requests at the same time (REVIEW_BATCH on the server). */
+const BATCH = 15;
+const PARALLEL = 3;
 
 /** Start shared by every name, cut at an underscore, shown once above the list. */
 function commonPrefix(names: string[]) {
@@ -333,9 +325,18 @@ export function MappingPanel({
     campaignId ? { campaignId } : "skip",
   );
   const [pending, setPending] = useState<
-    "review" | "check" | "apply" | "exclude" | "approve" | "refresh" | null
+    "check" | "apply" | "exclude" | "approve" | "refresh" | null
   >(null);
-  const [review, setReview] = useState<Review>();
+  // Gemini Neon answers arrive by batches and are shown as they come.
+  const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(
+    () => new Map(),
+  );
+  const [reviewing, setReviewing] = useState<{
+    queue: Set<string>;
+    done: number;
+    total: number;
+  }>();
+  const [aiModel, setAiModel] = useState<string>();
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [checked, setChecked] = useState<{
     key: string;
@@ -354,12 +355,24 @@ export function MappingPanel({
   // Search and «Ver todas» of the rows offered to one piece.
   const [picker, setPicker] = useState({ piece: "", text: "", all: false });
   const busy = disabled || Boolean(pending);
+  // While Neon reviews, pieces can be browsed and chosen, but nothing is verified or written.
+  const locked = busy || Boolean(reviewing);
+  const choicesRef = useRef(choices);
+  choicesRef.current = choices;
+  // Pieces whose choice came from Neon: a new review may replace it, a manual one never.
+  const fromNeon = useRef(new Set<string>());
+  const alive = useRef(true);
+  useEffect(
+    () => () => {
+      alive.current = false;
+    },
+    [],
+  );
+  useEffect(() => {
+    onBusy(Boolean(pending) || Boolean(reviewing));
+  }, [pending, reviewing, onBusy]);
 
   const ready = mapping.status === "ready" ? mapping : undefined;
-  const suggestions = useMemo(
-    () => new Map((review?.suggestions ?? []).map((s) => [s.piece, s])),
-    [review],
-  );
   const edits = useMemo(
     () =>
       ready
@@ -385,7 +398,6 @@ export function MappingPanel({
     task: () => Promise<T>,
   ) {
     setPending(kind);
-    onBusy(true);
     setError("");
     setNotice("");
     try {
@@ -394,11 +406,11 @@ export function MappingPanel({
       setError(campaignError(cause));
     } finally {
       setPending(null);
-      onBusy(false);
     }
   }
 
   const choose = (piece: string, choice: Choice | undefined) => {
+    fromNeon.current.delete(piece);
     setChoices((current) => {
       const next = { ...current };
       if (choice) next[piece] = choice;
@@ -409,32 +421,110 @@ export function MappingPanel({
   };
 
   const reset = () => {
-    setReview(undefined);
+    setSuggestions(new Map());
+    fromNeon.current.clear();
     setChoices({});
     setChecked(undefined);
     setAuthorized(false);
   };
 
-  const askNeon = () =>
-    run("review", async () => {
-      setFixed(undefined);
-      const result = await reviewMapping({ ...where, ...selection });
-      if (result.error) return setError(result.error);
-      setReview(result);
-      // Neon's verified proposals start chosen; the team can change any of them.
-      const next: Record<string, Choice> = {};
-      for (const s of result.suggestions)
-        if (s.edits.length && s.csvLine !== undefined)
-          next[s.piece] = { csvLine: s.csvLine };
-        else if (s.order)
-          next[s.piece] = {
-            order: s.order,
-            ...(s.edits.length ? { mode: "csv" as const } : {}),
+  /** Adds the answers of one batch; Neon's verified proposals start chosen. */
+  function mergeReview(batch: Suggestion[]) {
+    const next = { ...choicesRef.current };
+    const taken = new Map(
+      Object.entries(next).flatMap(([piece, c]) =>
+        c.csvLine !== undefined ? [[c.csvLine, piece] as const] : [],
+      ),
+    );
+    const added = batch.map((s) => {
+      const replaceable = !next[s.piece] || fromNeon.current.has(s.piece);
+      if (!replaceable) return s;
+      if (s.edits.length && s.csvLine !== undefined) {
+        const owner = taken.get(s.csvLine);
+        // Another batch already proposed this row for another piece.
+        if (owner && owner !== s.piece)
+          return {
+            ...s,
+            edits: [],
+            csvLine: undefined,
+            rejected: `La fila de la línea ${s.csvLine} ya está elegida para otra pieza. Elegí la fila a mano.`,
           };
-      setChoices(next);
-      setChecked(undefined);
-      setAuthorized(false);
+        next[s.piece] = { csvLine: s.csvLine };
+        taken.set(s.csvLine, s.piece);
+        fromNeon.current.add(s.piece);
+      } else if (s.order) {
+        next[s.piece] = {
+          order: s.order,
+          ...(s.edits.length ? { mode: "csv" as const } : {}),
+        };
+        fromNeon.current.add(s.piece);
+      }
+      return s;
     });
+    choicesRef.current = next;
+    setChoices(next);
+    setSuggestions((current) => {
+      const merged = new Map(current);
+      for (const s of added) merged.set(s.piece, s);
+      return merged;
+    });
+    setChecked(undefined);
+    setAuthorized(false);
+  }
+
+  /** Reviews the pieces in batches, several at a time, and shows each batch as it arrives. */
+  async function askNeon() {
+    if (!ready || reviewing) return;
+    const pieces = ready.groups.flatMap((g) => g.pieces);
+    if (!pieces.length) return;
+    setError("");
+    setNotice("");
+    setFixed(undefined);
+    setSuggestions(new Map());
+    const batches: string[][] = [];
+    for (let i = 0; i < pieces.length; i += BATCH)
+      batches.push(pieces.slice(i, i + BATCH));
+    setReviewing({ queue: new Set(pieces), done: 0, total: pieces.length });
+    let stop = "";
+    const worker = async () => {
+      for (let batch = batches.shift(); batch; batch = batches.shift()) {
+        if (!alive.current || stop) return;
+        let result: Awaited<ReturnType<typeof reviewMapping>> | undefined;
+        try {
+          result = await reviewMapping({
+            ...where,
+            ...selection,
+            pieces: batch,
+          });
+        } catch (cause) {
+          stop = campaignError(cause);
+        }
+        if (!alive.current) return;
+        if (result?.error) stop = result.error;
+        if (result && !result.error) {
+          mergeReview(result.suggestions);
+          if (result.model) setAiModel(result.model);
+        }
+        const finished = batch;
+        setReviewing(
+          (current) =>
+            current && {
+              queue: new Set(
+                [...current.queue].filter((p) => !finished.includes(p)),
+              ),
+              done: current.done + finished.length,
+              total: current.total,
+            },
+        );
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(PARALLEL, batches.length) }, worker),
+    );
+    if (!alive.current) return;
+    setReviewing(undefined);
+    if (stop) setError(stop);
+  }
 
   const verifyEdits = () =>
     run("check", async () => {
@@ -452,7 +542,7 @@ export function MappingPanel({
   const authorize = () =>
     run("apply", async () => {
       if (!ready) return;
-      const model = review?.model;
+      const model = aiModel;
       const result = await apply({
         ...where,
         ...selection,
@@ -603,25 +693,12 @@ export function MappingPanel({
     const text = own ? picker.text : "";
     const all = own && picker.all;
     const search = fold(text.trim());
-    const ranked = ready!.freeRows
-      .map((row) => {
-        const size = rowSize(row);
-        return {
-          row,
-          size,
-          score: similarity(pieceWords, rowWords.get(row.csvLine) ?? []),
-          sized:
-            !!size &&
-            size.width === problem.width &&
-            size.height === problem.height,
-        };
-      })
-      .sort(
-        (a, b) =>
-          b.score - a.score ||
-          Number(b.sized) - Number(a.sized) ||
-          a.row.csvLine - b.row.csvLine,
-      );
+    // Same order as the rows sent to Gemini Neon.
+    const ranked = rankRows(
+      { name: problem.piece, width: problem.width, height: problem.height },
+      ready!.freeRows,
+      rowSize,
+    );
     const found = search
       ? ranked.filter(({ row }) =>
           fold(
@@ -929,7 +1006,7 @@ export function MappingPanel({
                 <button
                   type="button"
                   className="qc-button primary small"
-                  disabled={busy}
+                  disabled={locked}
                   onClick={() => void approveSame(problem, choice)}
                 >
                   {pending === "approve" ? (
@@ -1066,11 +1143,24 @@ export function MappingPanel({
           {group && <p className="qc-detail-why">{group.detail}</p>}
         </header>
 
+        {reviewing?.queue.has(problem.piece) && !suggestion && (
+          <div className="qc-neon">
+            <LoaderCircle size={15} className="qc-spin" aria-hidden />
+            <div>
+              <strong>Gemini Neon</strong>
+              <p>Revisando esta pieza…</p>
+            </div>
+          </div>
+        )}
         {suggestion && (
           <div
-            className={`qc-neon${suggestion.source === "ai" ? "" : " code"}`}
+            className={`qc-neon${suggestion.source === "ai" ? "" : suggestion.failed ? " failed" : " code"}`}
           >
-            <Sparkles size={15} aria-hidden />
+            {suggestion.failed ? (
+              <AlertCircle size={15} aria-hidden />
+            ) : (
+              <Sparkles size={15} aria-hidden />
+            )}
             <div>
               <strong>
                 {suggestion.source === "ai"
@@ -1256,7 +1346,7 @@ export function MappingPanel({
               <input
                 type="checkbox"
                 checked={authorized}
-                disabled={busy}
+                disabled={locked}
                 onChange={(event) => setAuthorized(event.target.checked)}
               />
               <span>
@@ -1273,7 +1363,7 @@ export function MappingPanel({
               <button
                 type="button"
                 className="qc-button primary small"
-                disabled={busy}
+                disabled={locked}
                 onClick={() => void verifyEdits()}
               >
                 {pending === "check" ? (
@@ -1287,7 +1377,7 @@ export function MappingPanel({
               <button
                 type="button"
                 className="qc-button primary small"
-                disabled={busy || !authorized}
+                disabled={locked || !authorized}
                 onClick={() => void authorize()}
               >
                 {pending === "apply" ? (
@@ -1303,7 +1393,7 @@ export function MappingPanel({
             <button
               type="button"
               className="qc-button ghost small"
-              disabled={busy}
+              disabled={locked}
               onClick={() => {
                 setChoices({});
                 setChecked(undefined);
@@ -1387,7 +1477,7 @@ export function MappingPanel({
                 <button
                   type="button"
                   className="qc-link-button"
-                  disabled={busy}
+                  disabled={locked}
                   onClick={() =>
                     void run("approve", async () => {
                       if (!campaignId) return;
@@ -1422,7 +1512,7 @@ export function MappingPanel({
               <button
                 type="button"
                 className="qc-link-button"
-                disabled={busy}
+                disabled={locked}
                 onClick={() =>
                   void run("exclude", async () => {
                     await include({ overrideId: row.id });
@@ -1498,18 +1588,18 @@ export function MappingPanel({
             <button
               type="button"
               className="qc-button secondary small"
-              disabled={busy}
+              disabled={locked}
               onClick={() => void askNeon()}
               title="Explica cada diferencia y propone cómo corregirla, sin cambiar nada"
             >
-              {pending === "review" ? (
+              {reviewing ? (
                 <LoaderCircle size={14} className="qc-spin" aria-hidden />
               ) : (
                 <Sparkles size={14} aria-hidden />
               )}
-              {pending === "review"
-                ? "Revisando…"
-                : review
+              {reviewing
+                ? `Revisando… ${reviewing.done} de ${reviewing.total}`
+                : suggestions.size
                   ? "Volver a revisar con Gemini Neon"
                   : "Revisar con Gemini Neon"}
             </button>
@@ -1517,7 +1607,7 @@ export function MappingPanel({
           <button
             type="button"
             className="qc-button ghost small"
-            disabled={busy}
+            disabled={locked}
             onClick={() => void refresh()}
             title="Volver a leer el CSV y la matriz después de corregirlos en Drive"
           >
@@ -1625,6 +1715,14 @@ export function MappingPanel({
                                   {problem.width}×{problem.height}
                                 </span>
                               ) : null}
+                              {reviewing?.queue.has(piece) &&
+                                !suggestions.has(piece) && (
+                                  <LoaderCircle
+                                    size={11}
+                                    className="qc-spin qc-piece-ai"
+                                    aria-label="Gemini Neon la está revisando"
+                                  />
+                                )}
                               {suggestions.get(piece)?.source === "ai" && (
                                 <Sparkles
                                   size={11}
@@ -1727,7 +1825,7 @@ export function MappingPanel({
               <button
                 type="button"
                 className="qc-button secondary small"
-                disabled={busy || !reason.trim()}
+                disabled={locked || !reason.trim()}
                 onClick={() => void excludeChosen()}
               >
                 {pending === "exclude" ? (
@@ -1750,7 +1848,7 @@ export function MappingPanel({
               <button
                 type="button"
                 className="qc-button ghost small"
-                disabled={busy}
+                disabled={locked}
                 onClick={() => {
                   setChoices({});
                   setChecked(undefined);

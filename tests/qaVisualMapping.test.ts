@@ -906,3 +906,56 @@ test("an approved equivalence links the pieces in the folder check without writi
   assert.equal(inspection.mapping.linked, 3);
   assert.equal(d.calls.writes.length, 0);
 });
+
+test("Gemini Neon reviews one batch of pieces with their most similar rows and marks the pieces it could not review", async (t) => {
+  const d = await drive(t, [
+    {
+      rows: [
+        {
+          piece: images[1].name,
+          csvLine: 3,
+          explanation: "El ID del CSV no tiene el prefijo OFFLINE_.",
+        },
+      ],
+      orders: [],
+    },
+  ]);
+  // Only the pieces of the batch are sent and answered, each with its own rows.
+  const batch = await reviewMapping(context(), [images[1].name]);
+  assert.equal(batch.error, undefined);
+  assert.deepEqual(
+    batch.suggestions.map((s) => [s.piece, s.csvLine, s.failed]),
+    [[images[1].name, 3, undefined]],
+  );
+  const body = d.calls.model[0].body;
+  assert.match(body, /filasPosibles/);
+  assert.doesNotMatch(body, /filasLibres/);
+  assert.equal(
+    body.match(/\\"archivo\\"/g)?.length,
+    1,
+    "one piece in the batch",
+  );
+  // Its rows come most similar first; the story row (another size) goes last.
+  assert.ok(
+    body.indexOf("_8_PRESAS_1_PAPA_") < body.indexOf("STORIES_ESTATICA"),
+  );
+
+  // No answer (timeout or error): the pieces say Neon could not review them; nothing chosen.
+  const failed = await reviewMapping(context(), [
+    images[0].name,
+    "logo_96.png",
+  ]);
+  assert.equal(failed.error, undefined);
+  assert.equal(failed.model, undefined);
+  assert.deepEqual(
+    failed.suggestions
+      .map((s) => [s.piece, s.failed, s.edits.length])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    [
+      [images[0].name, true, 0],
+      ["logo_96.png", true, 0],
+    ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  );
+  assert.match(failed.suggestions[0].explanation, /no pudo revisar/);
+  assert.equal(d.calls.writes.length, 0);
+});
