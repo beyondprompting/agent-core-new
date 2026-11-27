@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { QaViewer } from "../QaViewer";
 import type { ReviewLocation } from "@/app/lib/qa-visual/review-location";
+import { pieceMappingStatus } from "@/convex/qaVisual/model/mappingStatus";
+import { MappingLocked } from "./MappingLocked";
 
 export function CampaignSnapshotViewer({
   preloaded,
@@ -45,6 +47,14 @@ export function CampaignSnapshotViewer({
       />
     );
   }
+
+  if (data.mapping.locked)
+    return (
+      <MappingLocked
+        campaignName={data.campaignName}
+        unmapped={data.mapping.unmapped}
+      />
+    );
 
   const {
     campaignId,
@@ -94,6 +104,7 @@ export function CampaignSnapshotViewer({
             openThreads,
             threadCount,
             humanStatus,
+            issues,
           }) => ({
             ...file,
             thumbnailReady,
@@ -106,6 +117,7 @@ export function CampaignSnapshotViewer({
             openThreads,
             threadCount,
             humanStatus,
+            mappingStatus: pieceMappingStatus(issues),
           }),
         ),
         production: Object.fromEntries(
@@ -132,10 +144,13 @@ export function CampaignSnapshotViewer({
           ? {
               campaignId,
               snapshotId,
-              inputs: pieces.map(({ file, contextKey }) => ({
-                name: file.name,
-                contextKey,
-              })),
+              // Unlinked or excluded pieces are not analyzed (§5.5).
+              inputs: pieces
+                .filter(({ issues }) => pieceMappingStatus(issues) === "linked")
+                .map(({ file, contextKey }) => ({
+                  name: file.name,
+                  contextKey,
+                })),
             }
           : undefined
       }

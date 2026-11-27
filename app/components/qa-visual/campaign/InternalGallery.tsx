@@ -140,7 +140,18 @@ export function InternalGallery({
                 ? "warning"
                 : undefined;
           // Internal approval is a step; the client's approval of the current version closes the piece.
-          const flag = needsNewVersion(p.client) ? (
+          const flag = p.mapping && p.mapping !== "linked" ? (
+            <span
+              className={`qa-flag ${p.mapping === "excluded" ? "info" : "warning"}`}
+              title={
+                p.mapping === "excluded"
+                  ? "El equipo decidió no analizar esta pieza."
+                  : "No tiene su fila en el CSV o su pedido en la matriz: no se analiza hasta resolverlo."
+              }
+            >
+              {p.mapping === "excluded" ? "Excluida del análisis" : "Sin vincular"}
+            </span>
+          ) : needsNewVersion(p.client) ? (
             <span className="qa-flag warning">Falta versión nueva</span>
           ) : humanStatus !== "Aprobada" || final ? undefined : clientState === "none" || clientState === "outdated" ? (
               <span className="qa-flag info">Lista para enviar</span>

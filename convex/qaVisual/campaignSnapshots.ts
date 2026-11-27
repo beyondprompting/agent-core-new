@@ -27,6 +27,7 @@ import { findImageCopy } from "./imageCopies";
 import { queueImageWarmup } from "./imageWarmup";
 import { campaignPiece, rule } from "./validators";
 import { importStage } from "./model/importProgress";
+import { mappingLocked } from "./model/mappingStatus";
 
 export async function syncIsRunning(
   ctx: QueryCtx,
@@ -248,6 +249,11 @@ export const viewer = query({
     return {
       campaignId: campaign._id,
       campaignName: campaign.name,
+      mapping: {
+        unmapped: campaign.mappingCheck?.unmapped ?? 0,
+        excluded: campaign.mappingCheck?.excluded ?? 0,
+        locked: mappingLocked(campaign),
+      },
       syncing,
       syncError,
       lastSyncedAt: campaign.lastSyncedAt,

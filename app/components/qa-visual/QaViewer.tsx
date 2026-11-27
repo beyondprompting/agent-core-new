@@ -219,8 +219,11 @@ function ReviewWorkspace({
     ),
   );
   // Pieces without a current result (never analyzed, outdated, failed or stopped).
+  const analyzable = pieces.filter(
+    (p) => !p.mapping || p.mapping === "linked",
+  );
   const pendingCount = dashboard
-    ? pieces.filter((p) => {
+    ? analyzable.filter((p) => {
         const row = dashboard.reviews.find((r) => r?.name === p.filename);
         return (
           !row ||
@@ -230,7 +233,7 @@ function ReviewWorkspace({
     : undefined;
   // Pieces whose current analysis has findings: they can be run again with instructions.
   const findingsCount = dashboard
-    ? pieces.filter((p) => {
+    ? analyzable.filter((p) => {
         const row = dashboard.reviews.find((r) => r?.name === p.filename);
         // Same rule as the backend: the latest current completed result has findings.
         return (

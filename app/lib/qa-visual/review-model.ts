@@ -32,6 +32,8 @@ export type Piece = {
   campaign: string;
   formatName: string;
   productionLinked: boolean;
+  /** §5.5: pieces not linked to the CSV and the matrix, or excluded, are not analyzed. */
+  mapping?: import("../../../convex/qaVisual/model/mappingStatus").MappingStatus;
   clientRequirements?: ClientRequirement[];
   platform?: string;
   extension?: string;

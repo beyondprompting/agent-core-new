@@ -31,7 +31,7 @@ function reviewPrice({
     phase: "NOTORIEDAD",
     channel: "OFFLINE",
     platform: "META",
-    format: "POST",
+    format: "POST ESTÁTICO",
     width: 1080,
     height: 1080,
   };

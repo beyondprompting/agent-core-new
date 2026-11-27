@@ -18,6 +18,164 @@ import { linkOffer } from "./linking";
 
 const ids = ["format", "dimensions", "product", "price", "date", "cta"];
 
+/** Columns of the CSV that identify the order of a piece and their column in PRODUCCION. */
+export const IDENTITY_COLUMNS = [
+  ["CAMPAÑA", "A"],
+  ["FASE", "B"],
+  ["CANAL", "C"],
+  ["MEDIO_PLATAFORMA", "D"],
+  ["FORMATO_TIPO", "E"],
+] as const;
+export type IdentityColumn = (typeof IDENTITY_COLUMNS)[number][0];
+
+export const identityOf = (production: ProductionFields) =>
+  ({
+    CAMPAÑA: production.campaign,
+    FASE: production.phase,
+    CANAL: production.channel,
+    MEDIO_PLATAFORMA: production.platform,
+    FORMATO_TIPO: production.format,
+  }) satisfies Record<IdentityColumn, string>;
+
+/** One order of the PRODUCCION sheet: its identity, size and date. */
+export type MatrixOrder = {
+  row: string;
+  values: Record<IdentityColumn, string>;
+  width?: number;
+  height?: number;
+  date?: string;
+};
+
+/** Orders of the PRODUCCION sheet (rows under the header whose column A is CAMPAÑA). */
+export function matrixOrders(matrix: Matrix | undefined) {
+  const cells = new Map(
+    matrix?.cells.map((c) => [`${c.sheet}!${c.cell}`, c.text]),
+  );
+  const header = matrix?.cells.find(
+    (c) =>
+      c.sheet === "PRODUCCION" &&
+      /^A\d+$/.test(c.cell) &&
+      normalize(c.text) === "CAMPANA",
+  );
+  const headerRow = header?.cell.slice(1);
+  // Newer templates repeat an order once per date and keep the date in its own column (FECHA).
+  const dateColumn = headerRow
+    ? matrix?.cells
+        .find(
+          (c) =>
+            c.sheet === "PRODUCCION" &&
+            c.cell.replace(/^[A-Z]+/, "") === headerRow &&
+            /^(?:FECHA|VIGENCIA)\b/.test(normalize(c.text)),
+        )
+        ?.cell.replace(/\d+$/, "")
+    : undefined;
+  const get = (column: string, row: string) =>
+    cells.get(`PRODUCCION!${column}${row}`) ?? "";
+  const orders: MatrixOrder[] = (matrix?.cells ?? [])
+    .filter(
+      (c) =>
+        c.sheet === "PRODUCCION" &&
+        /^A\d+$/.test(c.cell) &&
+        headerRow &&
+        Number(c.cell.slice(1)) > Number(headerRow) &&
+        c.text.trim(),
+    )
+    .map((c) => {
+      const row = c.cell.slice(1);
+      const width = Number(get("I", row)) || undefined;
+      const height = Number(get("J", row)) || undefined;
+      const date = dateColumn ? get(dateColumn, row).trim() : "";
+      return {
+        row,
+        values: Object.fromEntries(
+          IDENTITY_COLUMNS.map(([name, column]) => [name, get(column, row)]),
+        ) as Record<IdentityColumn, string>,
+        ...(width ? { width } : {}),
+        ...(height ? { height } : {}),
+        ...(date ? { date } : {}),
+      };
+    });
+  return { orders, dateColumn, cells };
+}
+
+/**
+ * Whether a CSV value and a matrix value say the same: equal ignoring case, accents and
+ * separators, or declared equivalent by the team (§5.5). There are no hidden equivalences.
+ */
+export function sameIdentity(
+  column: IdentityColumn,
+  csvValue: string,
+  matrixValue: string,
+  overrides: LinkOverride[] = [],
+) {
+  const a = normalize(csvValue),
+    b = normalize(matrixValue);
+  return (
+    a === b ||
+    overrides.some(
+      (o) =>
+        o.kind === "matrixEquivalence" &&
+        o.column === column &&
+        normalize(o.from ?? "") === a &&
+        normalize(o.to ?? "") === b,
+    )
+  );
+}
+
+/**
+ * Orders of the matrix a CSV row points to: the five identity columns must say the same and,
+ * when several orders remain, the size (I/J) and then the date column pick one.
+ */
+export function linkOrders(
+  matrix: Matrix | undefined,
+  fileName: string,
+  production: ProductionFields,
+  overrides: LinkOverride[] = [],
+): {
+  rows: string[];
+  dateColumn?: string;
+  byDate?: { row: string; among: number };
+} {
+  const { orders, dateColumn } = matrixOrders(matrix);
+  const identity = identityOf(production);
+  let matched = orders.filter((order) =>
+    IDENTITY_COLUMNS.every(([name]) =>
+      sameIdentity(name, identity[name], order.values[name], overrides),
+    ),
+  );
+  // The same piece type can be ordered in several sizes (Banner 300 × 250 and 728 × 90).
+  if (matched.length > 1 && production.width && production.height) {
+    const sized = matched.filter(
+      (o) => o.width === production.width && o.height === production.height,
+    );
+    if (sized.length) matched = sized;
+  }
+  const rows = matched.map((o) => o.row);
+  if (matched.length > 1 && dateColumn) {
+    const compact = (value: string) => normalize(value).replaceAll(" ", "");
+    const byDate = (text: string) => {
+      const target = compact(text);
+      const matches = target
+        ? matched
+            .map((order) => ({ order, date: compact(order.date ?? "") }))
+            .filter(({ date }) => date && target.includes(date))
+        : [];
+      // «MIERCOLES2» is inside «MIERCOLES25»: the longest date wins.
+      const longest = Math.max(0, ...matches.map(({ date }) => date.length));
+      return matches.filter(({ date }) => date.length === longest);
+    };
+    let chosen = byDate(production.dateAsset);
+    if (chosen.length !== 1) chosen = byDate(fileName.replace(/\.[^.]+$/, ""));
+    if (chosen.length === 1)
+      return {
+        rows,
+        dateColumn,
+        byDate: { row: chosen[0].order.row, among: matched.length },
+      };
+  }
+  return { rows, ...(dateColumn ? { dateColumn } : {}) };
+}
+
 export function buildRequirements(
   matrix: Matrix | undefined,
   fileName: string,
@@ -146,44 +304,29 @@ export function buildRequirements(
       });
     return { requirements, issues };
   }
-  const header = matrix?.cells.find(
-    (c) =>
-      c.sheet === "PRODUCCION" &&
-      /^A\d+$/.test(c.cell) &&
-      normalize(c.text) === "CAMPANA",
-  );
-  const rows =
-    matrix?.cells
-      .filter(
-        (c) =>
-          c.sheet === "PRODUCCION" &&
-          /^A\d+$/.test(c.cell) &&
-          header &&
-          Number(c.cell.slice(1)) > Number(header.cell.slice(1)) &&
-          normalize(c.text) === normalize(production.campaign),
-      )
-      .map((c) => c.cell.slice(1))
-      .filter(
-        (row) =>
-          [
-            ["B", production.phase],
-            ["C", production.channel],
-            ["D", production.platform],
-          ].every(
-            ([col, value]) =>
-              normalize(cells.get(`PRODUCCION!${col}${row}`) ?? "") ===
-              normalize(value),
-          ) &&
-          formatLabel(cells.get(`PRODUCCION!E${row}`) ?? "") ===
-            formatLabel(production.format),
-      ) ?? [];
-  const identityColumns = [
-    "CAMPAÑA",
-    "FASE",
-    "CANAL",
-    "MEDIO_PLATAFORMA",
-    "FORMATO_TIPO",
-  ];
+  const link = linkOrders(matrix, fileName, production, overrides);
+  const { dateColumn } = link;
+  let rows = link.rows;
+  if (link.byDate) {
+    const row = link.byDate.row;
+    addIssue(
+      "excel_row_by_date",
+      `El pedido tiene ${link.byDate.among} filas iguales que solo cambian la fecha. Se usa la fila ${row} («${cells.get(`PRODUCCION!${dateColumn}${row}`)}»).`,
+      [],
+      [
+        source(
+          `${dateColumn}${row}`,
+          cells.get(`PRODUCCION!${dateColumn}${row}`) ?? "",
+        ),
+        ...(production.dateAsset
+          ? [csv("SLOT_FECHA", production.dateAsset)]
+          : [{ file: "filename" as const, text: fileName }]),
+      ],
+      "info",
+    );
+    rows = [row];
+  }
+  const identityColumns: string[] = IDENTITY_COLUMNS.map(([name]) => name);
   const duplicateColumns = production.duplicates?.length
     ? Object.keys(production.duplicates[0].values).filter(
         (key) =>
@@ -450,7 +593,15 @@ export function buildRequirements(
         );
       else add("price", "notRequested", undefined, [priceSource]);
       const offerDate = temporal(value);
-      if (offerDate) {
+      const rowDate = dateColumn ? get(dateColumn).trim() : "";
+      if (!offerDate && rowDate)
+        add("date", "ready", rowDate, [
+          ref(dateColumn!),
+          ...(production.dateAsset
+            ? [csv("SLOT_FECHA", production.dateAsset)]
+            : []),
+        ]);
+      else if (offerDate) {
         const conflict = date && date !== offerDate;
         const sources = [
           productSource,

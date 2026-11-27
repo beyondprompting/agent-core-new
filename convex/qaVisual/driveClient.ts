@@ -6,7 +6,7 @@ import { normalize } from "./model/normalize";
 const tokenUrl = "https://oauth2.googleapis.com/token";
 const driveUrl = "https://www.googleapis.com/drive/v3/files";
 const fields =
-  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren,canAddChildren),shortcutDetails(targetId,targetMimeType),imageMediaMetadata(width,height)";
+  "id,name,mimeType,size,createdTime,modifiedTime,version,md5Checksum,parents,trashed,capabilities(canListChildren,canAddChildren,canEdit),shortcutDetails(targetId,targetMimeType),imageMediaMetadata(width,height)";
 export const folderMime = "application/vnd.google-apps.folder";
 /** Roles of the campaign subfolders. DESPLIEGUE also accepts the name VISUALES. */
 export const campaignFolders = ["RECURSOS", "EDITABLES", "DESPLIEGUE"] as const;
@@ -31,14 +31,18 @@ export type DriveFile = {
   md5Checksum?: string;
   parents?: string[];
   trashed?: boolean;
-  capabilities?: { canListChildren?: boolean; canAddChildren?: boolean };
+  capabilities?: {
+    canListChildren?: boolean;
+    canAddChildren?: boolean;
+    canEdit?: boolean;
+  };
   shortcutDetails?: { targetId: string; targetMimeType: string };
   imageMediaMetadata?: { width?: number; height?: number };
 };
 type ServiceAccount = { client_email: string; private_key: string };
 
 const readScope = "https://www.googleapis.com/auth/drive.readonly";
-// Only used to save a generated CSV; Drive still enforces the folder's sharing (Editor).
+// Only used to save a generated or corrected CSV; Drive still enforces the folder's sharing (Editor).
 const writeScope = "https://www.googleapis.com/auth/drive";
 const tokens = new Map<string, { value: string; expiresAt: number }>();
 const pendingTokens = new Map<string, Promise<string>>();
@@ -222,6 +226,46 @@ export async function createDriveFile(
         "Content-Type": `multipart/related; boundary=${boundary}`,
       },
       body,
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  await check(response);
+  return response.json();
+}
+
+/**
+ * Replaces the content of an existing file (a new revision: Drive keeps the previous ones in
+ * «Administrar versiones»). Requires the service account to be Editor of the file. When
+ * `expectedVersion` is given, the write is refused if the file changed since it was read.
+ */
+export async function updateDriveFileContent(
+  file: DriveFile,
+  bytes: Buffer,
+  expectedVersion?: string,
+): Promise<DriveFile> {
+  if (expectedVersion) {
+    const current = await getDriveFile(file.id);
+    if (current?.version !== expectedVersion)
+      throw new DriveRequestError(
+        "El archivo cambió en Drive desde que se leyó.",
+        409,
+        "versionChanged",
+      );
+  }
+  const params = new URLSearchParams({
+    uploadType: "media",
+    supportsAllDrives: "true",
+    fields,
+  });
+  const response = await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(file.id)}?${params}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${await scopedToken(writeScope)}`,
+        "Content-Type": file.mimeType || "text/csv",
+      },
+      body: new Uint8Array(bytes),
       signal: AbortSignal.timeout(30_000),
     },
   );

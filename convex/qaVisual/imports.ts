@@ -548,6 +548,7 @@ async function publishManifest(
     finishedAt: Date.now(),
     updatedAt: Date.now(),
   });
+  const unmapped = row.counts.unmapped ?? 0;
   await ctx.db.patch(campaign._id, {
     currentImportId: row._id,
     activeImportId: undefined,
@@ -556,6 +557,18 @@ async function publishManifest(
     sync: undefined,
     syncError: undefined,
     syncNeedsSources: undefined,
+    mappingCheck: {
+      unmapped,
+      excluded: row.counts.excludedFromAnalysis ?? 0,
+      at: Date.now(),
+    },
+    // §5.5: a new campaign opens once every piece is linked or excluded. Campaigns already
+    // reviewed before the mapping check never lock; new unlinked pieces wait apart.
+    ...(!campaign.mappingCompletedAt &&
+    (unmapped === 0 ||
+      (!campaign.mappingCheck && publishedId(campaign) !== undefined))
+      ? { mappingCompletedAt: Date.now() }
+      : {}),
   });
   // Keep the existing image runner; moving images to their own pool is stage 3.
   await queueImageWarmup(ctx, row._id);

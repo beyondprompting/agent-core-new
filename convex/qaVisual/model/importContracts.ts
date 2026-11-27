@@ -38,6 +38,9 @@ export const importCounts = v.object({
   blocked: v.number(),
   csvRowsWithoutImage: v.number(),
   ignoredFiles: v.number(),
+  // §5.5. Optional for imports made before the mapping check.
+  unmapped: v.optional(v.number()),
+  excludedFromAnalysis: v.optional(v.number()),
 });
 export const display = v.object({
   title: v.string(),

@@ -52,7 +52,7 @@ function storyInput({
         B7: production.phase,
         C7: production.channel,
         D7: production.platform,
-        E7: format === "STORY" ? "Stories Estática" : "Post Estático",
+        E7: format === "STORY" ? "Story" : "Post",
         G7: "PNG",
         I7: "1080",
         J7: String(production.height),

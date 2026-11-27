@@ -327,6 +327,8 @@ export const qaVisualTables = {
       v.literal("offerLink"),
       v.literal("keepDuplicate"),
       v.literal("mergeAsVersion"),
+      // §5.5: a piece of the pieces folder the team decided not to analyze.
+      v.literal("excludeFromAnalysis"),
     ),
     baseKey: v.optional(v.string()),
     keepDriveFileId: v.optional(v.string()),
@@ -363,6 +365,16 @@ export const qaVisualTables = {
     lastSyncedAt: v.optional(v.number()),
     syncError: v.optional(v.string()),
     syncNeedsSources: v.optional(v.boolean()),
+    /** Mapping of the last import (§5.5): pieces without a CSV row or matrix order. */
+    mappingCheck: v.optional(
+      v.object({
+        unmapped: v.number(),
+        excluded: v.number(),
+        at: v.number(),
+      }),
+    ),
+    /** First import with every piece linked or excluded; after it the editor never locks. */
+    mappingCompletedAt: v.optional(v.number()),
     /** Instructions of the QA team that the model obeys in every analysis of the campaign. */
     analysisInstructions: v.optional(v.string()),
     analysisInstructionsUpdatedAt: v.optional(v.number()),
@@ -396,6 +408,48 @@ export const qaVisualTables = {
     .index("by_review_key", ["reviewKey"])
     .index("by_drive_folder", ["driveFolderId"])
     .index("by_status", ["status"]),
+  // Audit of every authorized change of a production CSV (§5.5): ID_PIEZA or one of the
+  // identity columns, copied from the matrix order the team chose.
+  qaVisualCsvEdits: defineTable({
+    campaignId: v.optional(v.id("qaVisualCampaigns")),
+    driveFolderId: v.string(),
+    csvFileId: v.string(),
+    csvName: v.string(),
+    previousVersion: v.string(),
+    newVersion: v.optional(v.string()),
+    edits: v.array(
+      v.object({
+        csvLine: v.number(),
+        column: v.string(),
+        from: v.string(),
+        to: v.string(),
+        origin: v.union(v.literal("manual"), v.literal("ai")),
+        order: v.optional(v.string()),
+        reason: v.string(),
+      }),
+    ),
+    model: v.optional(v.string()),
+    authorizedBy: v.id("users"),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_folder", ["driveFolderId"]),
+  // §5.5: a CSV value and a matrix value of an identity column that the team declared to say
+  // the same, for one campaign or for every campaign of the client.
+  qaVisualEquivalences: defineTable({
+    scope: v.union(v.literal("campaign"), v.literal("client")),
+    campaignId: v.id("qaVisualCampaigns"),
+    clientId: v.optional(v.id("corClients")),
+    column: v.string(),
+    csvValue: v.string(),
+    matrixValue: v.string(),
+    key: v.string(),
+    piece: v.optional(v.string()),
+    createdBy: v.id("users"),
+    revokedAt: v.optional(v.number()),
+    revokedBy: v.optional(v.id("users")),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_client", ["clientId"]),
   qaVisualSourceDocuments: defineTable({
     campaign: v.string(),
     name: v.string(),

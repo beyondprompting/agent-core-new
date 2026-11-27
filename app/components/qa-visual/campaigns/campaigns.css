@@ -808,3 +808,250 @@ html.dark .qa-campaigns .qc-stepper .current > span {
 .qa-campaigns .qc-ai-line b.success { color: var(--qc-success); }
 .qa-campaigns .qc-ai-line b.warning { color: var(--qc-warning); }
 .qa-campaigns .qc-ai-line i { font-style: normal; color: var(--qc-subtle); margin: 0 2px; }
+/* §5.5 Mapeo de piezas */
+.qa-campaigns .qc-mapping {
+  margin-top: 14px;
+  padding: 12px 13px;
+  border: 1px solid var(--qc-line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.qa-campaigns .qc-mapping > .qc-callout {
+  margin: 0;
+}
+.qa-campaigns .qc-mapping-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.qa-campaigns .qc-mapping-head strong,
+.qa-campaigns .qc-mapping-group > strong,
+.qa-campaigns .qc-mapping-proposal > strong {
+  font-weight: 650;
+  font-size: 12.5px;
+}
+.qa-campaigns .qc-mapping-head p,
+.qa-campaigns .qc-mapping-group > p,
+.qa-campaigns .qc-mapping-proposal > p,
+.qa-campaigns .qc-mapping-note {
+  color: var(--qc-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.qa-campaigns .qc-mapping-note.success {
+  color: var(--qc-success);
+}
+.qa-campaigns .qc-mapping-item {
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid var(--qc-line);
+  border-radius: 8px;
+}
+.qa-campaigns .qc-mapping-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.qa-campaigns .qc-mapping-explain {
+  color: var(--qc-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.qa-campaigns .qc-mapping-explain em.ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 650;
+  background: var(--qc-primary-soft);
+  color: var(--qc-primary);
+}
+.qa-campaigns .qc-mapping-rejected {
+  color: var(--qc-warning);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.qa-campaigns .qc-mapping-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--qc-muted);
+}
+.qa-campaigns .qc-mapping-field select,
+.qa-campaigns .qc-mapping-same select {
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--qc-line);
+  background: var(--qc-surface);
+  color: var(--qc-text);
+  font-size: 12px;
+  max-width: 100%;
+}
+.qa-campaigns .qc-mapping-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.qa-campaigns .qc-mapping-choice > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.qa-campaigns .qc-mapping-diffs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+}
+.qa-campaigns .qc-mapping-diffs del {
+  color: var(--qc-danger);
+}
+.qa-campaigns .qc-mapping-diffs ins {
+  color: var(--qc-success);
+  text-decoration: none;
+}
+.qa-campaigns .qc-mapping-same {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.qa-campaigns .qc-mapping-group {
+  padding-top: 10px;
+  border-top: 1px solid var(--qc-line);
+}
+.qa-campaigns .qc-mapping-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.qa-campaigns .qc-mapping-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11.5px;
+}
+.qa-campaigns .qc-mapping-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
+}
+.qa-campaigns .qc-mapping-list code,
+.qa-campaigns .qc-diff del,
+.qa-campaigns .qc-diff ins {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.qa-campaigns .qc-mapping-list small,
+.qa-campaigns .qc-diff small {
+  color: var(--qc-muted);
+  font-size: 11.5px;
+}
+.qa-campaigns .qc-mapping-exclude {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.qa-campaigns .qc-mapping-exclude .qc-label {
+  width: 100%;
+  margin: 0;
+}
+.qa-campaigns .qc-mapping-exclude input {
+  flex: 1;
+  min-width: 180px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--qc-line);
+  background: var(--qc-surface);
+  color: var(--qc-text);
+  font-size: 12px;
+}
+.qa-campaigns .qc-mapping-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--qc-line);
+}
+.qa-campaigns .qc-diff {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--qc-line);
+  border-radius: 8px;
+}
+.qa-campaigns .qc-diff li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border-top: 1px solid var(--qc-line);
+}
+.qa-campaigns .qc-diff li:first-child {
+  border-top: 0;
+}
+.qa-campaigns .qc-diff-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--qc-muted);
+}
+.qa-campaigns .qc-diff-line em {
+  font-style: normal;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--qc-background);
+}
+.qa-campaigns .qc-diff-line em.ai {
+  background: var(--qc-primary-soft);
+  color: var(--qc-primary);
+}
+.qa-campaigns .qc-diff del {
+  color: var(--qc-danger);
+}
+.qa-campaigns .qc-diff ins {
+  color: var(--qc-success);
+  text-decoration: none;
+}
+.qa-campaigns .qc-mapping-authorize {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.qa-campaigns .qc-mapping-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--qc-warning);
+}
+.qa-campaigns .qc-mapping-line .qc-link-button {
+  margin: 0;
+}

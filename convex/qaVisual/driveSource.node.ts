@@ -7,6 +7,12 @@ import type {
 import { productionByPiece } from "./model/productionCsv";
 import { buildProductionCsv } from "./model/productionCsvBuilder";
 import { normalize } from "./model/normalize";
+import type { LinkOverride } from "./model/contracts";
+import {
+  mappingReport,
+  type MappingImage,
+  type MappingReport,
+} from "./model/mapping";
 import { parseClientMatrix } from "./clientMatrix.node";
 import {
   campaignFolders,
@@ -158,6 +164,8 @@ export type FolderInspection =
       /** No CSV in the production folder and a matrix is chosen: QA Visual can generate it. */
       canCreateCsv: boolean;
       csvFolder?: { id: string; name: string; canWrite: boolean };
+      /** Pieces ↔ CSV ↔ matrix check, once the three sources are found (§5.5). */
+      mapping?: FolderMapping;
     };
 
 /** Keys of {@link SourceSelection} that pin the folder of each source. */
@@ -363,7 +371,7 @@ async function folderOptions(
   return options.slice(0, 300);
 }
 
-async function readFolderState(url: string, selection: SourceSelection) {
+export async function readFolderState(url: string, selection: SourceSelection) {
   let id: string;
   try {
     id = parseFolderUrl(url);
@@ -423,6 +431,8 @@ async function readFolderState(url: string, selection: SourceSelection) {
 export async function inspectDriveFolder(
   url: string,
   selection: SourceSelection = {},
+  excluded: Set<string> = new Set(),
+  overrides: LinkOverride[] = [],
 ): Promise<FolderInspection> {
   const state = await readFolderState(url, selection);
   if ("error" in state) return { ok: false, error: state.error! };
@@ -434,7 +444,7 @@ export async function inspectDriveFolder(
       status: "ok",
       title: root.name,
       detail:
-        "Accesible para QA Visual. Solo se escribe en Drive si pedís crear el CSV de producción.",
+        "Accesible para QA Visual. Solo se escribe en Drive si pedís crear o corregir el CSV de producción; la matriz del cliente nunca se modifica.",
     },
   ];
   for (const role of campaignFolders) {
@@ -569,6 +579,7 @@ export async function inspectDriveFolder(
       ...(csv ? { csvFileId: csv.id } : {}),
     },
     canCreateCsv,
+    mapping: await folderMapping(state, excluded, overrides),
     ...(editables
       ? {
           csvFolder: {
@@ -824,6 +835,127 @@ export async function createProductionCsv(
     return {
       error: csvWriteError(error, folder.name),
       download: { ...summary, content: built.text },
+    };
+  }
+}
+
+/** Mapping check and CSV repair (§5.5): reading side. */
+export type CsvEncoding = "utf-8" | "windows-1252";
+
+export function decodeCsv(bytes: Buffer): {
+  text: string;
+  encoding: CsvEncoding;
+} {
+  try {
+    // ignoreBOM keeps the BOM in the text, so writing it back keeps the same bytes.
+    return {
+      text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+        bytes,
+      ),
+      encoding: "utf-8",
+    };
+  } catch {
+    return {
+      text: new TextDecoder("windows-1252").decode(bytes),
+      encoding: "windows-1252",
+    };
+  }
+}
+
+let cp1252: Map<string, number> | undefined;
+export function encodeCsv(text: string, encoding: CsvEncoding) {
+  if (encoding === "utf-8") return Buffer.from(text, "utf8");
+  if (!cp1252) {
+    const decoder = new TextDecoder("windows-1252");
+    cp1252 = new Map(
+      Array.from({ length: 256 }, (_, byte) => [
+        decoder.decode(Uint8Array.of(byte)),
+        byte,
+      ]),
+    );
+  }
+  const bytes = Buffer.alloc(text.length);
+  for (let i = 0; i < text.length; i++) {
+    const byte = cp1252.get(text[i]);
+    if (byte === undefined)
+      throw new Error(
+        `El CSV usa Windows-1252 y «${text[i]}» no se puede escribir en esa codificación.`,
+      );
+    bytes[i] = byte;
+  }
+  return bytes;
+}
+
+export const pieceImages = (files: DriveFile[]): MappingImage[] =>
+  files
+    .filter((file) => file.version && imageMime(file))
+    .map((file) => ({
+      name: file.name,
+      width: file.imageMediaMetadata?.width,
+      height: file.imageMediaMetadata?.height,
+    }));
+
+type FolderState = Exclude<
+  Awaited<ReturnType<typeof readFolderState>>,
+  { error: string }
+>;
+
+export async function readMappingSources(state: FolderState) {
+  if (!state.csv || !state.matrix) return null;
+  const [csvBytes, matrix] = await Promise.all([
+    downloadDriveFile(state.csv, csvLimit),
+    loadDriveMatrix(state.matrix),
+  ]);
+  return {
+    csv: state.csv,
+    csvBytes,
+    ...decodeCsv(csvBytes),
+    matrix,
+    images: pieceImages(state.deployment),
+  };
+}
+
+export type FolderMapping =
+  | ({ status: "ready" } & MappingReport & {
+        csv: { name: string; canEdit: boolean; version: string };
+      })
+  | { status: "error"; error: string };
+
+/** Mapping report shown in the folder checklist. Needs the three sources. */
+export async function folderMapping(
+  state: FolderState,
+  excluded: Set<string>,
+  overrides: LinkOverride[] = [],
+): Promise<FolderMapping | undefined> {
+  if (!state.csv || !state.matrix || !state.listings.has("DESPLIEGUE"))
+    return undefined;
+  try {
+    const sources = await readMappingSources(state);
+    if (!sources?.images.length) return undefined;
+    return {
+      status: "ready",
+      ...mappingReport({
+        images: sources.images,
+        csvText: sources.text,
+        matrix: sources.matrix,
+        excluded,
+        overrides,
+      }),
+      csv: {
+        name: sources.csv.name,
+        canEdit: Boolean(sources.csv.capabilities?.canEdit),
+        version: sources.csv.version ?? "",
+      },
+    };
+  } catch (error) {
+    console.warn("QA Visual: no se pudo revisar el mapeo", error);
+    return {
+      status: "error",
+      error:
+        error instanceof Error &&
+        /CSV|ID_PIEZA|Plantilla|PRODUCCION/.test(error.message)
+          ? error.message
+          : "No se pudo leer el CSV o la matriz para revisar el mapeo.",
     };
   }
 }

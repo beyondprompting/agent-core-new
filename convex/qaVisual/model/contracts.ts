@@ -90,7 +90,12 @@ export type ReviewResult = Infer<typeof result>;
 export type MatrixCell = { sheet: string; cell: string; text: string };
 export type Matrix = { name: string; cells: MatrixCell[]; issues?: Issue[] };
 export type LinkOverride = {
-  kind: "productAlias" | "offerLink";
+  /**
+   * `matrixEquivalence` (§5.5): the team declared that a CSV value (`from`) and a matrix value
+   * (`to`) of an identity column say the same.
+   */
+  kind: "productAlias" | "offerLink" | "matrixEquivalence";
+  column?: string;
   from?: string;
   to?: string;
   row?: string;
@@ -100,7 +105,7 @@ export type LinkOverride = {
   at?: number;
 };
 export const ANALYSIS_POLICY_VERSION = "qa-visual-5";
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
 
 export function structuredRequirements(input: {
   requirements?: ({ ruleId: string } | { id: string })[];

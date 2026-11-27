@@ -48,6 +48,6 @@ El detalle carga hasta 200 hilos, 200 entradas por hilo, 200 versiones y las 100
 ## Etapas 3 a 11 (segunda tanda)
 
 - Imágenes: `qaVisualImagePool` prepara una imagen por trabajo (miniatura, vista previa de 640 px e imagen de análisis) sin espera activa. Los errores definitivos quedan visibles en la pieza.
-- Análisis: `qaVisualAnalysisPool` con concurrencia global `QA_VISUAL_ANALYSIS_CONCURRENCY` (por defecto 24, ajustable con mediciones) y 4 piezas por corrida. La máquina de estados está en `runner.ts`, la política de reintentos en `model/retryPolicy.ts` y los modelos exclusivos de QA en `qaModels.ts` (`QA_VISUAL_GEMINI_MODEL`, `QA_VISUAL_OPENAI_MODEL`).
+- Análisis: `qaVisualAnalysisPool` con concurrencia global `QA_VISUAL_ANALYSIS_CONCURRENCY` (por defecto 24, ajustable con mediciones) y 4 piezas por corrida. La máquina de estados está en `runner.ts`, la política de reintentos en `model/retryPolicy.ts` y los modelos exclusivos de QA en `qaModels.ts` (`QA_VISUAL_GEMINI_MODEL`, `QA_VISUAL_OPENAI_MODEL`; `QA_VISUAL_CSV_FIX_MODEL` para la revisión del mapeo de piezas, §5.5 de la especificación; las equivalencias aprobadas están en `equivalences.ts`).
 - Revisión del cliente: `clientReview.ts` (configuración y rondas), `clientPortal.ts` (portal con validadores de retorno), `audio.ts` y `voice.ts` (voz y transcripción). El portal está en `/workspace/reviews`.
 - Para publicar hace falta desplegar juntos el esquema, las funciones y los componentes `qaVisualImagePool` y `qaVisualAnalysisPool`, registrados en `convex/convex.config.ts`.

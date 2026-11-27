@@ -2,7 +2,8 @@
 
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { action } from "../_generated/server";
+import { action, type ActionCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
 import { driveReviewKey } from "./analysisInput.node";
 import {
   createProductionCsv,
@@ -12,6 +13,18 @@ import {
   type FolderInspection,
   type SourceSelection,
 } from "./driveSource.node";
+import {
+  applyCsvFix as applyFix,
+  checkCsvFix as checkFix,
+  checkEquivalences,
+  reviewMapping as review,
+  type CsvFixResult,
+  type MappingReview,
+} from "./csvRepair.node";
+import { csvEdit } from "./csvEdits";
+import { equivalence } from "./equivalences";
+import type { LinkOverride } from "./model/contracts";
+import type { Equivalence } from "./model/mapping";
 
 type RegistrationResult =
   | { name: string; campaignId: string }
@@ -101,9 +114,17 @@ export const inspectCampaign = action({
     try {
       // The dialog always sends its whole selection (it starts from the saved one), so a
       // cleared folder or file goes back to automatic detection.
+      const [excluded, overrides] = await Promise.all([
+        ctx.runQuery(internal.qaVisual.overrides.excludedKeys, { campaignId }),
+        ctx.runQuery(internal.qaVisual.equivalences.forCampaign, {
+          campaignId,
+        }),
+      ]);
       return await inspectDriveFolder(
         folderUrl(campaign.driveFolderId),
         chosen,
+        new Set(excluded),
+        overrides,
       );
     } catch {
       return {
@@ -200,5 +221,209 @@ export const createCsv = action({
         break;
     }
     return { ...result, inspection };
+  },
+});
+
+/** Target folder of the mapping actions: a folder before registering or a campaign. */
+async function mappingTarget(
+  ctx: ActionCtx,
+  url: string | undefined,
+  campaignId: Id<"qaVisualCampaigns"> | undefined,
+): Promise<
+  | { error: string }
+  | {
+      url: string;
+      excluded: Set<string>;
+      overrides: LinkOverride[];
+      campaign?: Doc<"qaVisualCampaigns">;
+    }
+> {
+  await ctx.runQuery(internal.qaVisual.access.viewerIsQaAdmin, {});
+  if (!campaignId)
+    return url
+      ? { url, excluded: new Set(), overrides: [] }
+      : { error: "Pegá un enlace de carpeta de Google Drive." };
+  const campaign = await ctx.runQuery(internal.qaVisual.campaigns.getActive, {
+    campaignId,
+  });
+  if (!campaign) return { error: "La campaña ya no está disponible." };
+  const [excluded, overrides] = await Promise.all([
+    ctx.runQuery(internal.qaVisual.overrides.excludedKeys, { campaignId }),
+    ctx.runQuery(internal.qaVisual.equivalences.forCampaign, { campaignId }),
+  ]);
+  return {
+    url: folderUrl(campaign.driveFolderId),
+    excluded: new Set(excluded),
+    overrides,
+    campaign,
+  };
+}
+const where = {
+  folderUrl: v.optional(v.string()),
+  campaignId: v.optional(v.id("qaVisualCampaigns")),
+  ...selection,
+};
+const connectionError =
+  "No se pudo leer la carpeta. Revisá la conexión con Google Drive e intentá de nuevo.";
+
+/**
+ * §5.5 «Revisar con Gemini Neon»: explains every difference of the mapping and proposes how to
+ * fix it, verified by code. Nothing is written. The model gets the pieces, the CSV rows and the
+ * identity, size and date of the candidate orders of the matrix, read-only.
+ */
+export const reviewMapping = action({
+  args: where,
+  handler: async (
+    ctx,
+    { folderUrl: url, campaignId, ...chosen },
+  ): Promise<MappingReview> => {
+    const target = await mappingTarget(ctx, url, campaignId);
+    if ("error" in target) return { error: target.error, suggestions: [] };
+    try {
+      return await review({ ...target, selection: chosen });
+    } catch (error) {
+      console.error("QA Visual: no se pudo revisar el mapeo", error);
+      return { error: connectionError, suggestions: [] };
+    }
+  },
+});
+
+/** Verifies the changes chosen in the panel before the user authorizes them. */
+export const checkCsvFix = action({
+  args: { ...where, csvVersion: v.string(), edits: v.array(csvEdit) },
+  handler: async (
+    ctx,
+    { folderUrl: url, campaignId, csvVersion, edits, ...chosen },
+  ): Promise<{
+    error?: string;
+    errors?: string[];
+    warnings?: string[];
+    next?: string[];
+  }> => {
+    if (edits.length > 1000) return { error: "Demasiados cambios." };
+    const target = await mappingTarget(ctx, url, campaignId);
+    if ("error" in target) return { error: target.error };
+    try {
+      return await checkFix(
+        { ...target, selection: chosen },
+        csvVersion,
+        edits,
+      );
+    } catch (error) {
+      console.error("QA Visual: no se pudo verificar el CSV", error);
+      return { error: connectionError };
+    }
+  },
+});
+
+/** Writes the changes the user authorized, after verifying them again against Drive. */
+export const applyCsvFix = action({
+  args: {
+    ...where,
+    csvVersion: v.string(),
+    edits: v.array(csvEdit),
+    model: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { folderUrl: url, campaignId, csvVersion, edits, model, ...chosen },
+  ): Promise<CsvFixResult & { inspection?: FolderInspection }> => {
+    if (edits.length > 1000) return { error: "Demasiados cambios." };
+    const target = await mappingTarget(ctx, url, campaignId);
+    if ("error" in target) return { error: target.error };
+    let result: Awaited<ReturnType<typeof applyFix>>;
+    try {
+      result = await applyFix(
+        { ...target, selection: chosen },
+        csvVersion,
+        edits,
+      );
+    } catch (error) {
+      console.error("QA Visual: no se pudo corregir el CSV", error);
+      return {
+        error:
+          "No se pudo corregir el CSV. Revisá la conexión con Google Drive e intentá de nuevo.",
+      };
+    }
+    const { csv, previousVersion, ...response } = result;
+    if (!csv || !previousVersion) return response;
+    await ctx.runMutation(internal.qaVisual.csvEdits.record, {
+      ...(target.campaign ? { campaignId: target.campaign._id } : {}),
+      driveFolderId:
+        target.campaign?.driveFolderId ??
+        target.url.split("/folders/")[1]?.split(/[/?]/)[0] ??
+        "",
+      csvFileId: csv.id,
+      csvName: csv.name,
+      previousVersion,
+      ...(csv.version ? { newVersion: csv.version } : {}),
+      edits,
+      ...(model && edits.some((e) => e.origin === "ai") ? { model } : {}),
+    });
+    const inspection = await inspectDriveFolder(
+      target.url,
+      chosen,
+      target.excluded,
+      target.overrides,
+    ).catch(() => undefined);
+    return { ...response, inspection };
+  },
+});
+
+/**
+ * «Dicen lo mismo»: approves that the CSV and the matrix values of a piece are equivalent, for
+ * the campaign or for every campaign of its client. Verified before saving; files untouched.
+ */
+export const approveEquivalence = action({
+  args: {
+    campaignId: v.id("qaVisualCampaigns"),
+    ...selection,
+    piece: v.string(),
+    order: v.string(),
+    scope: v.union(v.literal("campaign"), v.literal("client")),
+    equivalences: v.array(equivalence),
+  },
+  handler: async (
+    ctx,
+    { campaignId, piece, order, scope, equivalences, ...chosen },
+  ): Promise<{ error?: string; inspection?: FolderInspection }> => {
+    if (!equivalences.length || equivalences.length > 5)
+      return { error: "La equivalencia no es válida." };
+    const target = await mappingTarget(ctx, undefined, campaignId);
+    if ("error" in target) return { error: target.error };
+    if (scope === "client" && !target.campaign?.client?.clientId)
+      return {
+        error:
+          "La campaña no tiene un cliente asignado: aprobá la equivalencia solo para esta campaña.",
+      };
+    try {
+      const checked = await checkEquivalences(
+        { ...target, selection: chosen },
+        piece,
+        order,
+        equivalences as Equivalence[],
+      );
+      if (checked.error) return checked;
+    } catch (error) {
+      console.error("QA Visual: no se pudo verificar la equivalencia", error);
+      return { error: connectionError };
+    }
+    await ctx.runMutation(internal.qaVisual.equivalences.record, {
+      campaignId,
+      scope,
+      piece,
+      items: equivalences,
+    });
+    const overrides = await ctx.runQuery(
+      internal.qaVisual.equivalences.forCampaign,
+      { campaignId },
+    );
+    const inspection = await inspectDriveFolder(
+      target.url,
+      chosen,
+      target.excluded,
+      overrides,
+    ).catch(() => undefined);
+    return { ...(inspection ? { inspection } : {}) };
   },
 });

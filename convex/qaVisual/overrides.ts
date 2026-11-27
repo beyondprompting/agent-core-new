@@ -4,6 +4,7 @@ import {
   query,
   internalQuery,
   type MutationCtx,
+  type QueryCtx,
 } from "../_generated/server";
 import { requireCampaign } from "./access";
 import { queueSync } from "./campaignSnapshots";
@@ -276,5 +277,91 @@ export const resolveDuplicate = mutation({
     });
     await queueSync(ctx, campaign._id, true);
     return id;
+  },
+});
+
+const MAX_EXCLUDED = 1000;
+async function activeExclusions(
+  ctx: QueryCtx,
+  campaignId: Id<"qaVisualCampaigns">,
+) {
+  return (
+    await ctx.db
+      .query("qaVisualLinkOverrides")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+      .collect()
+  ).filter((row) => !row.revokedAt && row.kind === "excludeFromAnalysis");
+}
+
+/** Piece keys excluded from the analysis (§5.5), read by the folder check and the import. */
+export const excludedKeys = internalQuery({
+  args: { campaignId: v.id("qaVisualCampaigns") },
+  handler: async (ctx, { campaignId }) =>
+    (await activeExclusions(ctx, campaignId)).flatMap((row) =>
+      row.pieceKey ? [row.pieceKey] : [],
+    ),
+});
+
+export const exclusions = query({
+  args: { campaignId: v.id("qaVisualCampaigns") },
+  handler: async (ctx, { campaignId }) => {
+    await requireCampaign(ctx, campaignId);
+    return (await activeExclusions(ctx, campaignId)).map((row) => ({
+      id: row._id,
+      name: row.from ?? row.pieceKey ?? "",
+      note: row.note,
+      at: row._creationTime,
+    }));
+  },
+});
+
+/**
+ * Excludes pieces of the pieces folder from the analysis. Every image must be in the CSV
+ * unless someone decides, with a reason, that it does not need a review (a logo, a test).
+ */
+export const excludePieces = mutation({
+  args: {
+    campaignId: v.id("qaVisualCampaigns"),
+    fileNames: v.array(v.string()),
+    note: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { user } = await editableCampaign(ctx, args.campaignId);
+    const note = args.note.trim();
+    if (!note || note.length > 4000)
+      throw new ConvexError("Indicá por qué no se analizan estas piezas.");
+    const names = [...new Set(args.fileNames.map((n) => n.trim()))].filter(
+      Boolean,
+    );
+    if (!names.length || names.some((n) => n.length > 500))
+      throw new ConvexError("Elegí las piezas que querés excluir.");
+    const current = await activeExclusions(ctx, args.campaignId);
+    const known = new Set(current.map((row) => row.pieceKey));
+    const added = names.filter((name) => !known.has(pieceKey(name)));
+    if (current.length + added.length > MAX_EXCLUDED)
+      throw new ConvexError(`Se pueden excluir hasta ${MAX_EXCLUDED} piezas.`);
+    for (const name of added)
+      await ctx.db.insert("qaVisualLinkOverrides", {
+        campaignId: args.campaignId,
+        kind: "excludeFromAnalysis",
+        pieceKey: pieceKey(name),
+        from: name,
+        note,
+        createdBy: user,
+      });
+    if (added.length) await queueSync(ctx, args.campaignId, true);
+    return { excluded: added.length };
+  },
+});
+
+export const includePiece = mutation({
+  args: { overrideId: v.id("qaVisualLinkOverrides") },
+  handler: async (ctx, { overrideId }) => {
+    const row = await ctx.db.get(overrideId);
+    if (!row || row.kind !== "excludeFromAnalysis" || row.revokedAt)
+      throw new ConvexError("La exclusión ya no está vigente.");
+    const { user } = await editableCampaign(ctx, row.campaignId);
+    await ctx.db.patch(row._id, { revokedAt: Date.now(), revokedBy: user });
+    await queueSync(ctx, row.campaignId, true);
   },
 });

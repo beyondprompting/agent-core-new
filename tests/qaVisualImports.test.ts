@@ -17,7 +17,10 @@ import {
   preparedPiece,
   importMetadata,
 } from "../convex/qaVisual/model/importContracts";
-import { ANALYSIS_POLICY_VERSION } from "../convex/qaVisual/model/contracts";
+import {
+  ANALYSIS_POLICY_VERSION,
+  PARSER_VERSION,
+} from "../convex/qaVisual/model/contracts";
 
 const modules = {
   "../convex/qaVisual/imageWarmup.ts": () =>
@@ -37,6 +40,8 @@ const modules = {
   "../convex/qaVisual/editor.ts": () => import("../convex/qaVisual/editor"),
   "../convex/qaVisual/overrides.ts": () =>
     import("../convex/qaVisual/overrides"),
+  "../convex/qaVisual/equivalences.ts": () =>
+    import("../convex/qaVisual/equivalences"),
   "../convex/qaVisual/imageCopies.ts": () =>
     import("../convex/qaVisual/imageCopies"),
   "../convex/qaVisual/runs.ts": () => import("../convex/qaVisual/runs"),
@@ -683,7 +688,7 @@ async function syntheticDrive(t: TestContext, count = 61) {
         names
           .map(
             (name) =>
-              `${name};FESTIN;8,99;HOY;Semana;NOTORIEDAD;OFFLINE;META;POST;1080;1080`,
+              `${name};FESTIN;8,99;HOY;Semana;NOTORIEDAD;OFFLINE;META;POST ESTÁTICO;1080;1080`,
           )
           .join("\n"),
     ),
@@ -833,7 +838,7 @@ test("the full import action reads 61 synthetic pieces, reuses unchanged sources
   assert.ok(
     (
       await s.db.run((ctx) => ctx.db.query("qaVisualSourceFiles").collect())
-    ).every((source) => source.parserVersion === "5"),
+    ).every((source) => source.parserVersion === String(PARSER_VERSION)),
   );
 });
 
@@ -1217,4 +1222,249 @@ test("pieces with findings can be analyzed again with the team's instructions", 
     rerun.map((row) => row.pieceVersionId),
     [withFindings],
   );
+});
+
+test("a new campaign stays locked until every piece is linked or excluded, and unlinked pieces are never analyzed", async (t) => {
+  const s = await setup(t);
+  const { readdir } = await import("node:fs/promises");
+  const root = new URL(
+    "../node_modules/@convex-dev/workpool/dist/component/",
+    import.meta.url,
+  );
+  s.db.registerComponent(
+    "qaVisualAnalysisPool",
+    (await import(new URL("schema.js", root).href)).default,
+    Object.fromEntries(
+      (await readdir(root, { recursive: true }))
+        .filter((name) => name.endsWith(".js"))
+        .map((name) => [
+          `./component/${name}`,
+          () => import(new URL(name, root).href),
+        ]),
+    ),
+  );
+  const missing = (base: ReturnType<typeof item>) => ({
+    ...base,
+    input: {
+      ...base.input,
+      issues: [
+        {
+          id: `csv_row_missing:${base.file.name}`,
+          code: "csv_row_missing",
+          severity: "warning" as const,
+          scope: "piece" as const,
+          affects: ["product"],
+          message: "La imagen no tiene una fila vinculada en el CSV.",
+          sources: [],
+        },
+      ],
+    },
+  });
+  const publishMapped = async (
+    items: ReturnType<typeof item>[],
+    unmapped: number,
+  ) => {
+    const request = await begin(s, items);
+    await s.db.run(async (ctx) => {
+      const row = (await ctx.db.get(request.importId))!;
+      await ctx.db.patch(request.importId, {
+        counts: { ...row.counts, unmapped },
+      });
+    });
+    await write(s, request, items);
+    await s.db.mutation(internal.qaVisual.imports.publish, request);
+  };
+  const card = async () =>
+    (
+      await s.user.query(api.qaVisual.campaigns.list, {
+        status: "active",
+        paginationOpts: { numItems: 5, cursor: null },
+      })
+    ).page[0];
+
+  await publishMapped([item("ok"), missing(item("lost"))], 1);
+  assert.deepEqual((await card()).mapping, {
+    unmapped: 1,
+    excluded: 0,
+    locked: true,
+  });
+  const visible = (await viewer(s))!;
+  assert.equal(visible.mapping.locked, true);
+
+  const lost = visible.pieces.find((p) => p.file.name === "lost.png")!;
+  const single = await s.user.mutation(api.qaVisual.runs.start, {
+    campaignId: s.campaignId,
+    snapshotId: visible.snapshotId!,
+    kind: "piece",
+    pieceIds: [lost.pieceId!],
+    requestId: crypto.randomUUID(),
+  });
+  assert.match((single as { error: string }).error, /no está vinculada/);
+  const batch = await s.user.mutation(api.qaVisual.runs.start, {
+    campaignId: s.campaignId,
+    snapshotId: visible.snapshotId!,
+    kind: "batch",
+    scope: "all",
+    requestId: crypto.randomUUID(),
+  });
+  assert.ok("runId" in batch);
+  assert.equal(batch.queued, 1, "only the linked piece is analyzed");
+  await s.db.run((ctx) => ctx.db.patch(batch.runId, { state: "finished" }));
+
+  // Excluding needs a reason and queues an update that marks the piece.
+  await assert.rejects(
+    s.user.mutation(api.qaVisual.overrides.excludePieces, {
+      campaignId: s.campaignId,
+      fileNames: ["lost.png"],
+      note: " ",
+    }),
+    /Indicá por qué/,
+  );
+  const excluded = await s.user.mutation(api.qaVisual.overrides.excludePieces, {
+    campaignId: s.campaignId,
+    fileNames: ["lost.png", "lost.png"],
+    note: "Es una prueba, no se revisa.",
+  });
+  assert.equal(excluded.excluded, 1);
+  const exclusions = await s.user.query(api.qaVisual.overrides.exclusions, {
+    campaignId: s.campaignId,
+  });
+  assert.deepEqual(
+    exclusions.map((e) => [e.name, e.note]),
+    [["lost.png", "Es una prueba, no se revisa."]],
+  );
+  const campaign = await s.db.run((ctx) => ctx.db.get(s.campaignId));
+  assert.ok(campaign!.activeImportId, "the exclusion re-imports the campaign");
+  await s.db.run(async (ctx) => {
+    await ctx.db.patch(campaign!.activeImportId!, { status: "failed" });
+    await ctx.db.patch(s.campaignId, { activeImportId: undefined });
+  });
+
+  // Once every piece is linked or excluded the editor unlocks for good.
+  await publishMapped([item("ok"), item("lost")], 0);
+  assert.equal((await card()).mapping.locked, false);
+  await publishMapped([item("ok"), missing(item("new"))], 1);
+  const later = await card();
+  assert.deepEqual(later.mapping, { unmapped: 1, excluded: 0, locked: false });
+
+  // Campaigns reviewed before the mapping check never lock.
+  await s.db.run((ctx) =>
+    ctx.db.patch(s.campaignId, {
+      mappingCheck: undefined,
+      mappingCompletedAt: undefined,
+    }),
+  );
+  await publishMapped([item("ok"), missing(item("other"))], 1);
+  assert.equal((await card()).mapping.locked, false);
+});
+
+test("equivalences apply to their campaign or to every campaign of the client and can be removed", async (t) => {
+  const s = await setup(t);
+  const settle = async (campaignId = s.campaignId) => {
+    const campaign = await s.db.run((ctx) => ctx.db.get(campaignId));
+    if (campaign?.activeImportId)
+      await s.db.run(async (ctx) => {
+        await ctx.db.patch(campaign.activeImportId!, { status: "failed" });
+        await ctx.db.patch(campaignId, { activeImportId: undefined });
+      });
+  };
+  const values = {
+    column: "FORMATO_TIPO",
+    csvValue: "BANNER HOR",
+    matrixValue: "Banner",
+  };
+  const forCampaign = (campaignId: typeof s.campaignId) =>
+    s.db.query(internal.qaVisual.equivalences.forCampaign, { campaignId });
+
+  assert.deepEqual(
+    await s.user.query(api.qaVisual.equivalences.list, {
+      campaignId: s.campaignId,
+    }),
+    { canShare: false, items: [] },
+  );
+  await assert.rejects(
+    s.user.mutation(internal.qaVisual.equivalences.record, {
+      campaignId: s.campaignId,
+      scope: "client",
+      piece: "banner.png",
+      items: [values],
+    }),
+    /no tiene un cliente asignado/,
+  );
+  await assert.rejects(
+    s.user.mutation(internal.qaVisual.equivalences.record, {
+      campaignId: s.campaignId,
+      scope: "campaign",
+      piece: "banner.png",
+      items: [{ ...values, column: "TXT_PRECIO" }],
+    }),
+    /no es válida/,
+  );
+
+  const { clientId, otherId } = await s.db.run(async (ctx) => {
+    const clientId = await ctx.db.insert("corClients", {
+      corClientId: 1,
+      name: "Cliente",
+      syncedAt: 1,
+    });
+    await ctx.db.patch(s.campaignId, { client: { clientId } });
+    const otherId = await ctx.db.insert("qaVisualCampaigns", {
+      name: "Otra",
+      driveFolderId: "other",
+      reviewKey: "other",
+      status: "active",
+      createdBy: s.userId,
+      client: { clientId },
+    });
+    return { clientId, otherId };
+  });
+  assert.ok(clientId);
+
+  // Only for this campaign: the import of the campaign uses it, the other campaign does not.
+  const own = await s.user.mutation(internal.qaVisual.equivalences.record, {
+    campaignId: s.campaignId,
+    scope: "campaign",
+    piece: "banner.png",
+    items: [values, values],
+  });
+  assert.equal(own.added, 1);
+  const campaign = await s.db.run((ctx) => ctx.db.get(s.campaignId));
+  assert.ok(campaign?.activeImportId, "the equivalence re-imports the campaign");
+  await settle();
+  assert.deepEqual(
+    (await forCampaign(s.campaignId)).map((e) => [e.kind, e.column, e.from, e.to]),
+    [["matrixEquivalence", "FORMATO_TIPO", "BANNER HOR", "Banner"]],
+  );
+  assert.deepEqual(await forCampaign(otherId), []);
+
+  // For every campaign of the client.
+  const shared = await s.user.mutation(internal.qaVisual.equivalences.record, {
+    campaignId: s.campaignId,
+    scope: "client",
+    piece: "banner.png",
+    items: [{ ...values, csvValue: "STORY", matrixValue: "Stories Estática" }],
+  });
+  assert.equal(shared.added, 1);
+  await settle();
+  assert.deepEqual(
+    (await forCampaign(otherId)).map((e) => e.from),
+    ["STORY"],
+  );
+  const listed = await s.user.query(api.qaVisual.equivalences.list, {
+    campaignId: otherId,
+  });
+  assert.equal(listed.canShare, true);
+  assert.deepEqual(
+    listed.items.map((e) => [e.scope, e.fromOtherCampaign]),
+    [["client", true]],
+  );
+
+  // Removing it takes it out of every campaign and imports again.
+  await s.user.mutation(api.qaVisual.equivalences.revoke, {
+    campaignId: otherId,
+    equivalenceId: listed.items[0].id,
+  });
+  await settle(otherId);
+  assert.deepEqual(await forCampaign(otherId), []);
+  assert.equal((await forCampaign(s.campaignId)).length, 1);
 });

@@ -22,7 +22,8 @@ const production: ProductionFields = {
   phase: "NOTORIEDAD",
   channel: "OFFLINE",
   platform: "META",
-  format: "POST",
+  // The CSV says what the matrix says («Post Estático»): there are no hidden equivalences.
+  format: "POST ESTÁTICO",
   width: 1080,
   height: 1080,
   csvLine: 17,

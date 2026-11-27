@@ -24,6 +24,8 @@ export type QaInventory = {
     openThreads?: number;
     threadCount?: number;
     humanStatus?: import("./review-model").PieceStatus;
+    /** §5.5: linked to the CSV and the matrix, excluded, or why it is not linked. */
+    mappingStatus?: import("../../../convex/qaVisual/model/mappingStatus").MappingStatus;
   })[];
   notices: string[];
   ignoredFiles?: { name: string; reason: string }[];

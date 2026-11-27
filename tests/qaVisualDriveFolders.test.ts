@@ -95,7 +95,11 @@ test("the generated CSV has one row per matrix order and links each unambiguous 
   }
   assert.equal(production[pieceKey(images[2].name)].product, "COMBO FAMILIAR");
   assert.equal(production[pieceKey(images[2].name)].price, "$12,50");
-  assert.equal(production[pieceKey(images[1].name)].format, "STORY");
+  // The generated CSV copies the matrix text, so it links without equivalences.
+  assert.equal(
+    production[pieceKey(images[1].name)].format,
+    "STORIES ESTÁTICAS",
+  );
 });
 
 test("two images that fit the same order are left for a person to resolve", () => {

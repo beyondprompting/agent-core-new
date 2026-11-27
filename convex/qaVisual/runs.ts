@@ -1,3 +1,4 @@
+import { pieceMappingStatus } from "./model/mappingStatus";
 import { importId } from "./model/importContracts";
 import {
   publishedId,
@@ -155,6 +156,26 @@ async function startRun(
         ? Boolean(piece.pieceId && pieceIds.has(piece.pieceId))
         : names.has(piece.input.name)),
   );
+  // §5.5: a piece without its CSV row or matrix order, or excluded, is never analyzed.
+  const blocked = requested.filter(
+    (piece) => pieceMappingStatus(piece.input.issues) !== "linked",
+  );
+  if (args.kind !== "batch" && blocked.length)
+    return {
+      error:
+        pieceMappingStatus(blocked[0].input.issues) === "excluded"
+          ? "La pieza está excluida del análisis. Volvé a incluirla desde «Mapeo de piezas»."
+          : "La pieza no está vinculada con el CSV o la matriz. Resolvelo desde «Mapeo de piezas» antes de analizarla.",
+    };
+  if (
+    args.kind === "batch" &&
+    requested.length &&
+    blocked.length === requested.length
+  )
+    return {
+      error:
+        "Ninguna pieza está vinculada con el CSV y la matriz. Resolvé el mapeo antes de analizar.",
+    };
   if (
     !requested.length ||
     requested.length > MAX_RUN_PIECES ||
@@ -165,12 +186,13 @@ async function startRun(
     return {
       error: `La selección no coincide con las piezas importadas o supera el límite de ${MAX_RUN_PIECES} piezas.`,
     };
+  const analyzable = requested.filter((piece) => !blocked.includes(piece));
   const selected =
     scope === "all"
-      ? requested
+      ? analyzable
       : (
           await Promise.all(
-            requested.map(async (piece) =>
+            analyzable.map(async (piece) =>
               scope === "findings"
                 ? (await currentResult(ctx, piece))?.verdict === "findings"
                   ? piece

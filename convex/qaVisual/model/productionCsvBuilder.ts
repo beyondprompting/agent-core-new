@@ -98,7 +98,8 @@ export function matrixOrders(matrix: Matrix): GeneratedOrder[] {
       phase: get("B"),
       channel: get("C"),
       platform: get("D"),
-      format: formatLabel(get("E")),
+      // Exact text of the matrix: the CSV must say the same as the order (§5.5).
+      format: get("E"),
       width: dimension(get("I")),
       height: dimension(get("J")),
     };
@@ -157,10 +158,11 @@ function matchScore(order: GeneratedOrder, image: CsvImage) {
   )
     return -1;
   const format = fileFormat(text);
+  const orderFormat = formatLabel(order.format);
   if (
     format &&
-    ["POST", "STORY", "CARRUSEL"].includes(order.format) &&
-    format !== order.format
+    ["POST", "STORY", "CARRUSEL"].includes(orderFormat) &&
+    format !== orderFormat
   )
     return -1;
   const channel = offerChannel(text);
@@ -194,7 +196,12 @@ export function assignImages(orders: GeneratedOrder[], images: CsvImage[]) {
     const slug = normalize(order.product).replaceAll(" ", "_").slice(0, 48);
     let id = order.image
       ? stem(order.image)
-      : [`F${order.row}`, order.ordinal.padStart(2, "0"), order.format, slug]
+      : [
+          `F${order.row}`,
+          order.ordinal.padStart(2, "0"),
+          normalize(formatLabel(order.format)).replaceAll(" ", "_"),
+          slug,
+        ]
           .filter(Boolean)
           .join("_");
     for (let n = 2; used.has(id.toLowerCase()); n++) id = `${id}_${n}`;

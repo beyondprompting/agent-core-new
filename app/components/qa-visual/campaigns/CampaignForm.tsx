@@ -20,6 +20,7 @@ import {
   type FolderInspection,
   type SourceSelection,
 } from "./FolderChecklist";
+import { MappingPanel } from "./MappingPanel";
 
 const selectionKey = (url: string, selection: SourceSelection) =>
   JSON.stringify([
@@ -69,6 +70,9 @@ export function CampaignForm({
   );
   const [csvNotice, setCsvNotice] = useState("");
   const [csvDownload, setCsvDownload] = useState<CsvDownload>();
+  const [mappingBusy, setMappingBusy] = useState(false);
+  // The CSV was corrected or pieces were excluded: the campaign is already updating.
+  const [updating, setUpdating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const ready = inspection?.ok && verified === selectionKey(url, selection);
@@ -165,8 +169,20 @@ export function CampaignForm({
     }
   }
 
+  function adoptInspection(next: FolderInspection) {
+    setInspection(next);
+    if ("folder" in next) {
+      setSelection(next.selection);
+      setVerified(next.ok ? selectionKey(url, next.selection) : "");
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (campaign && updating) {
+      onClose();
+      return;
+    }
     if (step === "link") {
       await verify();
       return;
@@ -238,10 +254,16 @@ export function CampaignForm({
         <div className="qc-dialog-header">
           <div>
             <h2 id="qa-campaign-form-title">
-              {campaign ? "Elegir fuentes" : "Agregar campaña"}
+              {campaign?.mapping.locked
+                ? "Resolver el mapeo de piezas"
+                : campaign
+                  ? "Elegir fuentes"
+                  : "Agregar campaña"}
             </h2>
             <p id="qa-campaign-form-description">
-              {campaign ? (
+              {campaign?.mapping.locked ? (
+                `Hay piezas de ${campaign.name} que no se pueden vincular con el CSV o la matriz. Corregilas o excluilas para abrir el editor.`
+              ) : campaign ? (
                 `Elegí las carpetas, la matriz y el CSV de ${campaign.name}.`
               ) : (
                 <>
@@ -374,6 +396,27 @@ export function CampaignForm({
                 <p>{inspection.error}</p>
               </div>
             ))}
+          {step === "check" &&
+            inspection &&
+            "folder" in inspection &&
+            inspection.mapping && (
+              <MappingPanel
+                mapping={inspection.mapping}
+                target={
+                  campaign
+                    ? { campaignId: campaign._id }
+                    : { folderUrl: url.trim() }
+                }
+                selection={selection}
+                disabled={Boolean(pending)}
+                onBusy={setMappingBusy}
+                onChanged={(next) => {
+                  if (campaign) setUpdating(true);
+                  if (next) adoptInspection(next);
+                  else void verify();
+                }}
+              />
+            )}
           {csvNotice && (
             <div className="qc-callout info" role="status">
               <Info size={16} aria-hidden />
@@ -439,7 +482,10 @@ export function CampaignForm({
               type="submit"
               className="qc-button primary"
               disabled={
-                Boolean(pending) || !url.trim() || (step === "check" && !ready)
+                Boolean(pending) ||
+                mappingBusy ||
+                !url.trim() ||
+                (step === "check" && !ready && !(campaign && updating))
               }
             >
               {pending && (
@@ -453,9 +499,11 @@ export function CampaignForm({
                     ? "Verificando…"
                     : step === "link"
                       ? "Verificar carpeta"
-                      : campaign
-                        ? "Guardar e importar"
-                        : "Agregar campaña"}
+                      : campaign && updating
+                        ? "Listo"
+                        : campaign
+                          ? "Guardar e importar"
+                          : "Agregar campaña"}
             </button>
           </div>
         </div>

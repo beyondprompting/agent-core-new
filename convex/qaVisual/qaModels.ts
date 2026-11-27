@@ -27,3 +27,16 @@ export const qaOpenAI: LLMConfig = {
 
 export const qaModel = (provider: LLMProvider) =>
   provider === "gemini" ? qaGemini : qaOpenAI;
+
+/**
+ * Model that proposes fixes of the production CSV (§5.5). Separate from the analysis models so
+ * changing one never affects the other. It only ever receives the CSV rows and the file names.
+ */
+const csvFixModelId =
+  process.env.QA_VISUAL_CSV_FIX_MODEL?.trim() || "gemini-4-neon";
+
+export const qaCsvFixer: LLMConfig = {
+  provider: "gemini",
+  model: google(csvFixModelId),
+  modelId: csvFixModelId,
+};

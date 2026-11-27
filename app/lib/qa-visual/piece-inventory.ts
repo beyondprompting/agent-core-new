@@ -86,6 +86,7 @@ export function toReviewPieces(
       cta: record?.ctaAsset || "—",
       clientRequirements: clientRequirements?.[file.name],
       productionLinked: Boolean(record),
+      mapping: file.mappingStatus,
     };
   });
 }

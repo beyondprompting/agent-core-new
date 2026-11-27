@@ -16,22 +16,37 @@ export type ProductionFields = {
   duplicates?: { csvLine: number; values: Record<string, string> }[];
 };
 
-/** csvLine points to the record's start, including records with multiline fields. */
-export function productionByPiece(
-  text: string,
-): Record<string, ProductionFields> {
-  const csv = text.replace(/^\uFEFF/, "");
+export type CsvField = {
+  value: string;
+  /** Offsets of the raw field (quotes included) in the text given to {@link csvTable}. */
+  start: number;
+  end: number;
+};
+export type CsvRecord = { fields: CsvField[]; line: number };
+
+/**
+ * Splits a CSV into records keeping where each field is, so a single cell can be replaced
+ * without touching any other byte of the file. A leading BOM is kept in the offsets.
+ */
+export function csvTable(text: string) {
+  const offset = text.startsWith("\uFEFF") ? 1 : 0;
+  const csv = text.slice(offset);
   const header = csv.split(/\r?\n/, 1)[0];
   const separator =
     (header.match(/;/g)?.length ?? 0) > (header.match(/,/g)?.length ?? 0)
       ? ";"
       : ",";
-  const table: { fields: string[]; line: number }[] = [];
-  let fields: string[] = [],
+  const records: CsvRecord[] = [];
+  let fields: CsvField[] = [],
     value = "",
     quoted = false,
     line = 1,
-    start = 1;
+    start = 1,
+    fieldStart = 0;
+  const close = (end: number) => {
+    fields.push({ value, start: fieldStart + offset, end: end + offset });
+    value = "";
+  };
   for (let i = 0; i < csv.length; i++) {
     const char = csv[i];
     if (char === '"') {
@@ -43,12 +58,15 @@ export function productionByPiece(
       !quoted &&
       (char === separator || char === "\n" || char === "\r")
     ) {
-      fields.push(value);
-      value = "";
+      close(i);
+      fieldStart = i + 1;
       if (char !== separator) {
-        table.push({ fields, line: start });
+        records.push({ fields, line: start });
         fields = [];
-        if (char === "\r" && csv[i + 1] === "\n") i++;
+        if (char === "\r" && csv[i + 1] === "\n") {
+          i++;
+          fieldStart = i + 1;
+        }
         line++;
         start = line;
       }
@@ -59,8 +77,21 @@ export function productionByPiece(
   }
   if (quoted)
     throw new Error("CSV inválido: hay un campo entre comillas sin cerrar.");
-  if (fields.length || value)
-    table.push({ fields: [...fields, value], line: start });
+  if (fields.length || value) {
+    close(csv.length);
+    records.push({ fields, line: start });
+  }
+  return { separator, records };
+}
+
+/** csvLine points to the record's start, including records with multiline fields. */
+export function productionByPiece(
+  text: string,
+): Record<string, ProductionFields> {
+  const table = csvTable(text).records.map((record) => ({
+    fields: record.fields.map((field) => field.value),
+    line: record.line,
+  }));
   const [first, ...rows] = table;
   const headers = first?.fields.map((s) => s.trim()) ?? [];
   if (!headers.includes("ID_PIEZA"))

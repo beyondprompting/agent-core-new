@@ -26,6 +26,11 @@ import {
   confirmedRulesConfig,
 } from "./analysisInput.node";
 import {
+  EXCLUDED_ISSUE,
+  isUnmapped,
+  pieceMappingStatus,
+} from "./model/mappingStatus";
+import {
   PARSER_VERSION,
   ANALYSIS_POLICY_VERSION,
   structuredRequirements,
@@ -331,6 +336,11 @@ export const run = internalAction({
           }))
         )
           return;
+        // §5.5: values of the CSV and the matrix the team declared equivalent.
+        const equivalences = await ctx.runQuery(
+          internal.qaVisual.equivalences.forCampaign,
+          { campaignId: begun.campaign._id },
+        );
         const fingerprint = hash({
           parser: PARSER_VERSION,
           template: TEMPLATE_VERSION,
@@ -341,6 +351,7 @@ export const run = internalAction({
             .map((f) => [f.driveId, f.contentHash, f.name])
             .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
           overrides: context.overrides.map((o) => [o._id, o._creationTime]),
+          equivalences: equivalences.map((e) => [e.column, e.from, e.to]),
           selection: begun.campaign.sourceSelection ?? {},
           rules: confirmedRulesConfig(begun.campaign.driveFolderId) ?? null,
         });
@@ -371,6 +382,7 @@ export const run = internalAction({
             author: String(o.createdBy),
             at: o._creationTime,
           }));
+        links.push(...equivalences);
         const prepared = prepareAnalysisInputs(
           begun.campaign.driveFolderId,
           { ...inventory, production },
@@ -400,12 +412,32 @@ export const run = internalAction({
             { file: f, input: prepared.inputs[i] },
           ]),
         );
+        const excludedKeys = new Map(
+          context.overrides
+            .filter((o) => o.kind === "excludeFromAnalysis" && o.pieceKey)
+            .map((o) => [o.pieceKey!, o.note]),
+        );
         const pieces: Plan["pieces"] = resolved.entries.map(
           ({ file: f, identity }) => {
             const { file, input: original } = byDrive.get(f.driveId)!;
-            const issues = identity.duplicate
-              ? [...original.issues, duplicateNameIssue(file.name)]
-              : original.issues;
+            const exclusion = excludedKeys.get(pieceKey(file.name));
+            const issues = [
+              ...original.issues,
+              ...(identity.duplicate ? [duplicateNameIssue(file.name)] : []),
+              ...(exclusion !== undefined
+                ? [
+                    {
+                      id: `${EXCLUDED_ISSUE}:${pieceKey(file.name)}`,
+                      code: EXCLUDED_ISSUE,
+                      severity: "info" as const,
+                      scope: "piece" as const,
+                      affects: [],
+                      message: `Excluida del análisis por el equipo: ${exclusion}`,
+                      sources: [{ file: "override" as const, text: exclusion }],
+                    },
+                  ]
+                : []),
+            ];
             const requirementsHash = hash({
               requirements: original.requirements,
               issues,
@@ -498,6 +530,12 @@ export const run = internalAction({
               ).length,
               csvRowsWithoutImage: missingImages.length,
               ignoredFiles: ignoredFiles.length,
+              unmapped: pieces.filter((p) =>
+                isUnmapped(pieceMappingStatus(p.input.issues)),
+              ).length,
+              excludedFromAnalysis: pieces.filter(
+                (p) => pieceMappingStatus(p.input.issues) === "excluded",
+              ).length,
             },
           },
         };

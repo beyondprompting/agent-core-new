@@ -41,6 +41,10 @@ export function CampaignCard({
   const failed = !importing && !archived && Boolean(campaign.syncError);
   const needsSources = failed && campaign.needsSources;
   const analyzing = campaign.analyzing && !archived;
+  // §5.5: a new campaign opens only when every piece is linked or excluded.
+  const mappingLocked =
+    !archived && !importing && !failed && campaign.mapping.locked;
+  const unlinked = campaign.mapping.unmapped;
   const stage = Math.max(
     0,
     importStages.indexOf(campaign.importStage ?? "listing"),
@@ -49,7 +53,7 @@ export function CampaignCard({
     ? "neutral"
     : importing
       ? "primary"
-      : needsSources
+      : needsSources || mappingLocked
         ? "warning"
         : failed
           ? "danger"
@@ -60,7 +64,7 @@ export function CampaignCard({
     ? "Archivada"
     : importing
       ? "Importando"
-      : needsSources
+      : needsSources || mappingLocked
         ? "Requiere acción"
         : failed
           ? "No se pudo actualizar"
@@ -77,7 +81,7 @@ export function CampaignCard({
     ? Archive
     : importing || analyzing
       ? LoaderCircle
-      : failed
+      : failed || mappingLocked
         ? AlertCircle
         : Check;
 
@@ -170,6 +174,23 @@ export function CampaignCard({
             )}
           </div>
         </div>
+      ) : mappingLocked ? (
+        <div className="qc-callout warning">
+          <FileSpreadsheet size={16} aria-hidden />
+          <div>
+            <strong>
+              {unlinked}{" "}
+              {unlinked === 1
+                ? "pieza no se puede vincular"
+                : "piezas no se pueden vincular"}{" "}
+              con el CSV o la matriz
+            </strong>
+            <p>
+              El editor se habilita cuando cada pieza tenga su fila en el CSV y
+              su pedido en la matriz, o cuando la excluyas del análisis.
+            </p>
+          </div>
+        </div>
       ) : summary ? (
         <>
           {/* Stages up to the client's final approval; AI validation is a separate line. */}
@@ -220,6 +241,20 @@ export function CampaignCard({
             <i>·</i>
             <b>{summary.stages.ready}</b> listas para enviar
           </p>
+          {unlinked > 0 && !archived && (
+            <p className="qc-mapping-line">
+              <AlertCircle size={12} aria-hidden />
+              {unlinked} {unlinked === 1 ? "pieza nueva" : "piezas nuevas"} sin
+              vincular: no se analizan hasta resolverlas.
+              <button
+                type="button"
+                className="qc-link-button"
+                onClick={() => onChooseSources(campaign)}
+              >
+                Resolver
+              </button>
+            </p>
+          )}
         </>
       ) : (
         <p className="qc-help" role="status">
@@ -243,12 +278,12 @@ export function CampaignCard({
                 ? `${summary.notices} ${summary.notices === 1 ? "aviso" : "avisos"} de fuente`
                 : ""}
         </span>
-        {needsSources ? (
+        {needsSources || mappingLocked ? (
           <button
             className="qc-button secondary small"
             onClick={() => onChooseSources(campaign)}
           >
-            Elegir fuentes
+            {mappingLocked ? "Resolver mapeo" : "Elegir fuentes"}
           </button>
         ) : failed ? (
           <button
@@ -259,7 +294,7 @@ export function CampaignCard({
             <RefreshCw size={14} aria-hidden />
             Reintentar
           </button>
-        ) : !archived && campaign.imported ? (
+        ) : !archived && campaign.imported && !campaign.mapping.locked ? (
           <Link
             className="qc-review-link"
             href={`/workspace/qa-visual/${campaign._id}`}
@@ -270,7 +305,7 @@ export function CampaignCard({
           </Link>
         ) : null}
       </div>
-      {failed && campaign.imported && (
+      {failed && campaign.imported && !campaign.mapping.locked && (
         <Link
           className="qc-review-link"
           href={`/workspace/qa-visual/${campaign._id}`}

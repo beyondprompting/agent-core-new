@@ -12,6 +12,7 @@ import { queueSync, syncIsRunning } from "./campaignSnapshots";
 import { requireCampaign, requireQaAdmin } from "./access";
 import { isCurrentReview } from "./model/verdict";
 import { pieceClientStatus } from "./clientReview";
+import { mappingLocked } from "./model/mappingStatus";
 
 const sourceSelection = v.object({
   excelFileId: v.optional(v.string()),
@@ -92,6 +93,11 @@ export const list = query({
               (message) => `campaign:${message}`,
             ),
             analyzing: activeRuns.some(Boolean),
+            mapping: {
+              unmapped: campaign.mappingCheck?.unmapped ?? 0,
+              excluded: campaign.mappingCheck?.excluded ?? 0,
+              locked: mappingLocked(campaign),
+            },
           };
         }),
       ),
