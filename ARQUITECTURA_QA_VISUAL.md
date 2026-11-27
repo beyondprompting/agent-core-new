@@ -577,8 +577,8 @@ Una aprobación humana **no se hereda** entre versiones. Si cambió el pedido de
 | Un `.xlsx` en RECURSOS, sin contar los que empiezan con `~$` | Se usa. |
 | Varios `.xlsx` | La importación queda como `needsSource`. La tarjeta y el editor muestran "Elegí la matriz", y la elección se guarda en `sourceSelection`. Si después el archivo elegido desaparece, se vuelve a preguntar. |
 | Ningún `.xlsx`, pero hay `.xls` o una hoja de cálculo de Google | Se informa "Formato no admitido: convertí a .xlsx" (§22: evaluar la exportación de lectura desde Google Sheets). |
-| CSV: un `_CONVERTED` o `_CONVERTED_vN` | Se usa. Si hay varios, se elige automáticamente la `vN` más alta **solo si** el resto del nombre coincide. Cualquier otro caso se trata como ambigüedad. |
-| Varios CSV candidatos | Elección explícita, como con el Excel. |
+| Un `.csv` en la carpeta del CSV, con cualquier nombre y sin contar los que empiezan con `~$` | Se usa. |
+| Varios `.csv` | Elección explícita, como con el Excel: ningún nombre (por ejemplo `_CONVERTED_vN`) se prefiere ni oculta a los demás. |
 | Ningún CSV | Error de campaña `csv_missing`. |
 
 ### 7.4 Contrato de plantilla (`model/template.ts`)

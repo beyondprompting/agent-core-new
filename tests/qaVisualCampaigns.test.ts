@@ -517,29 +517,59 @@ test("a failed import preserves the published snapshot and stale callbacks are i
   }
 });
 
-test("converted CSV auto-selection compares versions only within the same base name", async (t) => {
+test("every CSV of the production folder is a candidate and several ask for a choice", async (t) => {
   const d = drive(t);
+  // Any name is accepted when the CSV is alone; Office lock files are not CSVs to choose.
   d.listings.editables = [
-    csv,
-    { ...csv, id: "csv-2", name: "PEDIDO_CONVERTED_v2.csv" },
-    { ...csv, id: "csv-10", name: "PEDIDO_CONVERTED_v10.csv" },
+    { ...csv, id: "plain", name: "pedido final.csv" },
+    { ...csv, id: "lock", name: "~$pedido final.csv" },
   ];
   let inspected = await inspectDriveFolder(url);
   assert.ok("selection" in inspected);
-  assert.equal(inspected.selection.csvFileId, "csv-10");
-  inspected = await inspectDriveFolder(url, { csvFileId: "csv-2" });
-  assert.ok("selection" in inspected);
-  assert.equal(inspected.selection.csvFileId, "csv-2");
-  d.listings.editables.push({
-    ...csv,
-    id: "other",
-    name: "OTRO_CONVERTED_v20.csv",
-  });
+  assert.equal(inspected.selection.csvFileId, "plain");
+  assert.equal(
+    inspected.checks.find((c) => c.key === "EDITABLES")?.status,
+    "ok",
+  );
+
+  // A _CONVERTED name no longer hides the other CSVs nor is preferred over them.
+  d.listings.editables = [
+    csv,
+    { ...csv, id: "tests", name: "PEDIDO_CONVERTED_v1_PRUEBAS.csv" },
+    { ...csv, id: "v10", name: "PEDIDO_CONVERTED_v10.csv" },
+    {
+      id: "sheet",
+      name: "PEDIDO_CONVERTED_v1",
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      version: "1",
+    },
+  ];
   inspected = await inspectDriveFolder(url);
-  assert.ok("checks" in inspected);
+  assert.ok("csvs" in inspected);
+  assert.deepEqual(inspected.csvs.map((file) => file.id).sort(), [
+    "csv",
+    "tests",
+    "v10",
+  ]);
+  assert.equal(inspected.selection.csvFileId, undefined);
   assert.equal(
     inspected.checks.find((c) => c.key === "EDITABLES")?.status,
     "choose",
+  );
+
+  inspected = await inspectDriveFolder(url, { csvFileId: "tests" });
+  assert.ok("selection" in inspected);
+  assert.equal(inspected.selection.csvFileId, "tests");
+  assert.equal(
+    inspected.checks.find((c) => c.key === "EDITABLES")?.status,
+    "ok",
+  );
+
+  inspected = await inspectDriveFolder(url, { csvFileId: "gone" });
+  assert.ok("checks" in inspected);
+  assert.match(
+    inspected.checks.find((c) => c.key === "EDITABLES")!.title,
+    /ya no está disponible/,
   );
 });
 

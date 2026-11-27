@@ -105,39 +105,16 @@ function unsupportedMatrix(files: DriveFile[]) {
       f.mimeType === "application/vnd.google-apps.spreadsheet",
   );
 }
+/** Every CSV of the production folder is a candidate, whatever its name (like the matrices). */
 function csvCandidatesOf(files: DriveFile[]) {
-  const csvFiles = files.filter(
+  return files.filter(
     (file) => !file.name.startsWith("~$") && /\.csv$/i.test(file.name),
   );
-  const converted = csvFiles.filter((file) =>
-    /_CONVERTED(?:_v\d+)?\.csv$/i.test(file.name),
-  );
-  return converted.length
-    ? converted
-    : csvFiles.filter((file) => !/^_?BUILDER(?:_|\.)/i.test(file.name));
 }
 function pick(candidates: DriveFile[], chosen?: string) {
   if (chosen) return candidates.find((file) => file.id === chosen) ?? null;
   if (candidates.length === 1) return candidates[0];
   return null;
-}
-
-function pickCsv(candidates: DriveFile[], chosen?: string) {
-  if (chosen || candidates.length <= 1) return pick(candidates, chosen);
-  const versions = candidates.map((file) => ({
-    file,
-    match: file.name.match(/^(.*_CONVERTED)(?:_v(\d+))?\.csv$/i),
-  }));
-  if (
-    versions.some((v) => !v.match) ||
-    new Set(versions.map((v) => v.match![1].toLowerCase())).size !== 1
-  )
-    return null;
-  versions.sort((a, b) => Number(b.match![2] ?? 0) - Number(a.match![2] ?? 0));
-  return Number(versions[0].match![2] ?? 0) ===
-    Number(versions[1].match![2] ?? 0)
-    ? null
-    : versions[0].file;
 }
 
 export type FolderCheck = {
@@ -423,7 +400,7 @@ export async function readFolderState(url: string, selection: SourceSelection) {
     csvs,
     deployment,
     matrix: pick(matrices, selection.excelFileId),
-    csv: pickCsv(csvs, selection.csvFileId),
+    csv: pick(csvs, selection.csvFileId),
   };
 }
 
@@ -508,7 +485,7 @@ export async function inspectDriveFolder(
             title: `${named("EDITABLES")} · falta el CSV de producción`,
             detail: canCreateCsv
               ? "Podés crearlo a partir de la matriz: QA Visual arma una fila por pedido y lo guarda en esta carpeta."
-              : "Subí el CSV de producción (idealmente con sufijo _CONVERTED). También se puede crear desde la matriz cuando esté elegida.",
+              : "Subí el CSV de producción. También se puede crear desde la matriz cuando esté elegida.",
           }
         : csv
           ? {
@@ -520,7 +497,7 @@ export async function inspectDriveFolder(
               status: "choose" as const,
               title: selection.csvFileId
                 ? `${named("EDITABLES")} · el CSV elegido ya no está disponible`
-                : `${named("EDITABLES")} · ${csvs.length} CSV candidatos`,
+                : `${named("EDITABLES")} · ${csvs.length} CSV`,
               detail: "Elegí el CSV de producción de esta campaña.",
             }),
     });
@@ -685,7 +662,7 @@ export async function listDriveCampaign(
   const matrices = matrixCandidates(resources?.files ?? []);
   const csvCandidates = csvCandidatesOf(editables?.files ?? []);
   const matrix = pick(matrices, selection.excelFileId);
-  const csv = pickCsv(csvCandidates, selection.csvFileId);
+  const csv = pick(csvCandidates, selection.csvFileId);
   if (resources && !matrix)
     notices.push(
       matrices.length
@@ -701,7 +678,7 @@ export async function listDriveCampaign(
       csvCandidates.length
         ? selection.csvFileId
           ? `El CSV elegido ya no está en «${editables.name}». Elegí cuál usar desde «Elegir fuentes».`
-          : `Hay más de un CSV candidato en «${editables.name}». Elegí cuál usar desde «Elegir fuentes».`
+          : `Hay más de un CSV en «${editables.name}». Elegí cuál usar desde «Elegir fuentes».`
         : `No se encontró el CSV de producción en «${editables.name}». Podés crearlo a partir de la matriz desde «Elegir fuentes».`,
     );
 
