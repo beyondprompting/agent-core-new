@@ -50,15 +50,21 @@ function download(name: string, content: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Row and order values arrive as a list: Convex field names cannot be «CAMPAÑA». */
+const valueOf = (
+  values: { column: string; value: string }[] | undefined,
+  column: string,
+) => values?.find((item) => item.column === column)?.value ?? "";
+
 const rowLabel = (row: Ready["freeRows"][number]) =>
   [
     `Línea ${row.csvLine}`,
     row.id || "(sin ID)",
-    row.values.FORMATO_TIPO,
-    row.values.ANCHO_PX && row.values.ALTO_PX
-      ? `${row.values.ANCHO_PX}×${row.values.ALTO_PX}`
+    valueOf(row.values, "FORMATO_TIPO"),
+    valueOf(row.values, "ANCHO_PX") && valueOf(row.values, "ALTO_PX")
+      ? `${valueOf(row.values, "ANCHO_PX")}×${valueOf(row.values, "ALTO_PX")}`
       : "",
-    row.values.SLOT_FECHA,
+    valueOf(row.values, "SLOT_FECHA"),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -66,8 +72,8 @@ const rowLabel = (row: Ready["freeRows"][number]) =>
 const orderLabel = (order: Candidate) =>
   [
     `Fila ${order.row}`,
-    order.values.FORMATO_TIPO,
-    order.values.MEDIO_PLATAFORMA,
+    valueOf(order.values, "FORMATO_TIPO"),
+    valueOf(order.values, "MEDIO_PLATAFORMA"),
     order.width && order.height ? `${order.width}×${order.height}` : "",
     order.date,
     order.differences.length
@@ -468,12 +474,13 @@ export function MappingPanel({
               <p className="qc-mapping-explain">
                 Fila del CSV (línea {problem.csvLines?.[0]}):{" "}
                 {[
-                  problem.csv.CAMPAÑA,
-                  problem.csv.FASE,
-                  problem.csv.CANAL,
-                  problem.csv.MEDIO_PLATAFORMA,
-                  problem.csv.FORMATO_TIPO,
+                  "CAMPAÑA",
+                  "FASE",
+                  "CANAL",
+                  "MEDIO_PLATAFORMA",
+                  "FORMATO_TIPO",
                 ]
+                  .map((column) => valueOf(problem.csv, column))
                   .filter(Boolean)
                   .join(" · ")}
               </p>

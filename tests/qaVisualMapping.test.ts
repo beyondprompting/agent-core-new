@@ -22,9 +22,25 @@ import {
   mappingReport,
   pieceMappingStatus,
   verifyCsvEdits,
+  valueOf,
   verifyEquivalences,
   type EditRef,
 } from "../convex/qaVisual/model/mapping";
+
+/** Convex rejects non-ASCII field names, and the CSV columns are Spanish words («CAMPAÑA»). */
+function assertConvexKeys(value: unknown, path = "report") {
+  if (Array.isArray(value))
+    value.forEach((item, i) => assertConvexKeys(item, `${path}[${i}]`));
+  else if (value && typeof value === "object")
+    for (const [key, item] of Object.entries(value)) {
+      assert.match(
+        key,
+        /^[\x20-\x7e]+$/,
+        `${path}.${key} is not a Convex field name`,
+      );
+      assertConvexKeys(item, `${path}.${key}`);
+    }
+}
 import type { LinkOverride } from "../convex/qaVisual/model/contracts";
 import {
   csvTable,
@@ -226,7 +242,11 @@ test("names are compared exactly: there are no hidden rules for words or prefixe
     report.freeRows.map((r) => r.csvLine),
     [2, 3, 4, 5],
   );
-  assert.equal(report.freeRows[0].values.SLOT_FECHA, "FECHAS_MIERCOLES25.ai");
+  assert.equal(
+    valueOf(report.freeRows[0].values, "SLOT_FECHA"),
+    "FECHAS_MIERCOLES25.ai",
+  );
+  assertConvexKeys(report);
   assert.equal(report.orphanRows.length, 4);
   assert.equal("proposals" in report, false);
   assert.equal("hints" in report, false);
@@ -262,7 +282,12 @@ test("a value written differently in the CSV and the matrix is shown with the cl
   );
   const post = report.problems.find((p) => p.piece === images[0].name)!;
   assert.deepEqual(post.csvLines, [2]);
-  assert.equal(post.csv?.FORMATO_TIPO, "POST");
+  assert.equal(valueOf(post.csv, "FORMATO_TIPO"), "POST");
+  assert.equal(
+    valueOf(post.candidates?.[0].values, "CAMPAÑA"),
+    valueOf(post.csv, "CAMPAÑA"),
+  );
+  assertConvexKeys(report);
   assert.equal(post.candidates?.[0].row, "6");
   assert.deepEqual(post.candidates?.[0].differences, [postValues]);
   const story = report.problems.find((p) => p.piece === images[2].name)!;
@@ -755,6 +780,8 @@ test("Gemini Neon explains and proposes, code verifies and only the CSV is writt
   const checked = await checkCsvFix(context(), first.csv!.version, rowEdits);
   assert.equal(checked.errors, undefined);
   assert.equal(checked.next?.length, 4, "the matrix is the next step");
+  assertConvexKeys(first, "review");
+  assertConvexKeys(checked, "check");
   const applied = await applyCsvFix(context(), first.csv!.version, rowEdits);
   assert.equal(applied.error, undefined);
   assert.equal(applied.applied, 4);
@@ -770,6 +797,10 @@ test("Gemini Neon explains and proposes, code verifies and only the CSV is writt
     "the date of the candidates is read-only data",
   );
   assert.doesNotMatch(body, /\$5,99|\$9,99|OFERTA DE VALOR|MATRIZ\.xlsx/);
+  // The model still reads the row and the orders by column name.
+  assert.match(body, /FORMATO_TIPO\\?":\\?"POST/);
+  assert.match(body, /FORMATO_TIPO\\?":\\?"Post Estático/);
+  assertConvexKeys(second, "review");
   const formatEdits = second.suggestions.flatMap((s) => s.edits);
   assert.deepEqual(
     formatEdits

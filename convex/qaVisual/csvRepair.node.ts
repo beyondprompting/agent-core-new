@@ -17,12 +17,17 @@ import {
   mappingReport,
   verifyCsvEdits,
   verifyEquivalences,
+  type ColumnValue,
   type CsvEdit,
   type EditRef,
   type Equivalence,
   type MappingProblem,
 } from "./model/mapping";
 import { qaCsvFixer } from "./qaModels";
+
+/** The prompt is JSON for the model, not a Convex value: here columns may be keys again. */
+const asObject = (values: ColumnValue[] = []) =>
+  Object.fromEntries(values.map(({ column, value }) => [column, value]));
 
 /**
  * Mapping review and CSV fixes (§5.5). Code detects the differences between the pieces, the
@@ -191,7 +196,7 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
           filasLibres: rowProblems.length
             ? report.freeRows.map((row) => ({
                 csvLine: row.csvLine,
-                ...row.values,
+                ...asObject(row.values),
               }))
             : [],
           // Only the identity, size and date of the candidate orders: read-only data.
@@ -205,10 +210,10 @@ export async function reviewMapping(context: Context): Promise<MappingReview> {
                   ...(p.width && p.height
                     ? { medidas: `${p.width}x${p.height}` }
                     : {}),
-                  filaDelCsv: p.csv,
+                  filaDelCsv: asObject(p.csv),
                   pedidos: (p.candidates ?? []).map((c) => ({
                     order: c.row,
-                    ...c.values,
+                    ...asObject(c.values),
                     ...(c.width && c.height
                       ? { medidas: `${c.width}x${c.height}` }
                       : {}),

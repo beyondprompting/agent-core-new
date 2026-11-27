@@ -61,7 +61,18 @@ export type Equivalence = {
   csvValue: string;
   matrixValue: string;
 };
-export type OrderCandidate = MatrixOrder & { differences: Equivalence[] };
+/**
+ * Values of a CSV row or of a matrix order sent to the browser. They are a list and not an
+ * object keyed by column because Convex only accepts ASCII field names and the columns are
+ * Spanish words («CAMPAÑA»).
+ */
+export type ColumnValue = { column: string; value: string };
+export const valueOf = (values: ColumnValue[] | undefined, column: string) =>
+  values?.find((item) => item.column === column)?.value ?? "";
+export type OrderCandidate = Omit<MatrixOrder, "values"> & {
+  values: ColumnValue[];
+  differences: Equivalence[];
+};
 export type MappingProblem = {
   piece: string;
   status: Exclude<MappingStatus, "linked" | "excluded">;
@@ -69,14 +80,14 @@ export type MappingProblem = {
   height?: number;
   /** CSV row of the piece (matrix problems) or rows repeating its ID (duplicates). */
   csvLines?: number[];
-  csv?: Record<string, string>;
+  csv?: ColumnValue[];
   /** Most similar orders of the matrix (matrix problems). */
   candidates?: OrderCandidate[];
 };
 export type FreeRow = {
   csvLine: number;
   id: string;
-  values: Record<string, string>;
+  values: ColumnValue[];
 };
 export type MappingGroup = {
   code: MappingProblem["status"];
@@ -154,13 +165,22 @@ export function freeRows(rows: CsvRow[], imageKeys: Set<string>) {
   );
 }
 
-export const rowSummary = (values: Record<string, string>) =>
-  Object.fromEntries(
-    ROW_COLUMNS.filter((column) => values[column]).map((column) => [
-      column,
-      values[column],
-    ]),
-  );
+export const rowSummary = (values: Record<string, string>): ColumnValue[] =>
+  ROW_COLUMNS.filter((column) => values[column]).map((column) => ({
+    column,
+    value: values[column],
+  }));
+const candidateOf = (
+  order: MatrixOrder,
+  differences: Equivalence[],
+): OrderCandidate => ({
+  ...order,
+  values: IDENTITY_COLUMNS.map(([column]) => ({
+    column,
+    value: order.values[column],
+  })),
+  differences,
+});
 
 /** Mapping state of one piece and, when it is linked, the PRODUCCION row of its order. */
 function pieceLink(
@@ -215,7 +235,7 @@ export function orderCandidates(
         Number(a.order.row) - Number(b.order.row),
     )
     .slice(0, limit)
-    .map(({ order, differences }) => ({ ...order, differences }));
+    .map(({ order, differences }) => candidateOf(order, differences));
 }
 
 const groupText: Record<
@@ -288,7 +308,7 @@ export function mappingReport({
     ) {
       const row = rows.find((r) => r.csvLine === fields.csvLine);
       problem.csvLines = fields.csvLine ? [fields.csvLine] : [];
-      problem.csv = row ? rowSummary(row.values) : {};
+      problem.csv = row ? rowSummary(row.values) : [];
       if (status === "matrix_missing")
         problem.candidates = orderCandidates(matrix, fields, overrides);
       else {
@@ -298,7 +318,7 @@ export function mappingReport({
         problem.candidates = orders
           .filter((o) => linked.has(o.row))
           .slice(0, 5)
-          .map((o) => ({ ...o, differences: [] }));
+          .map((o) => candidateOf(o, []));
       }
     }
     problems.push(problem);
