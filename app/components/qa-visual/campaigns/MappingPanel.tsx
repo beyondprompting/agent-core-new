@@ -51,15 +51,17 @@ type View =
   | { kind: "piece"; piece: string }
   | { kind: "changes" | "orphans" | "equivalences" | "exclusions" };
 
-/** Rows shown before «Ver todas»: the most similar ones come first. */
-const TOP_ROWS = 6;
-const IDENTITY = [
-  "CAMPAÑA",
-  "FASE",
-  "CANAL",
-  "MEDIO_PLATAFORMA",
-  "FORMATO_TIPO",
-] as const;
+/** Names of the identity columns for people. */
+const columnName: Record<string, string> = {
+  CAMPAÑA: "Campaña",
+  FASE: "Fase",
+  CANAL: "Canal",
+  MEDIO_PLATAFORMA: "Plataforma",
+  FORMATO_TIPO: "Formato",
+};
+/** «FECHAS_HOY.ai» → «HOY»: the date slot as the team says it. */
+const shortDate = (slot: string) =>
+  slot.replace(/^FECHAS?_/i, "").replace(/\.ai$/i, "");
 const statusName: Record<Problem["status"], string> = {
   csv_missing: "Sin fila en el CSV",
   csv_duplicate: "ID repetido en el CSV",
@@ -388,10 +390,6 @@ export function MappingPanel({
       c.csvLine !== undefined ? [[c.csvLine, piece] as const] : [],
     ),
   );
-  const rowWords = useMemo(
-    () => new Map((ready?.freeRows ?? []).map((r) => [r.csvLine, words(r.id)])),
-    [ready],
-  );
 
   async function run<T>(
     kind: NonNullable<typeof pending>,
@@ -688,34 +686,66 @@ export function MappingPanel({
     return <CircleDashed size={12} aria-hidden />;
   }
 
-  function rowPicker(problem: Problem, choice: Choice, pieceWords: string[]) {
-    const own = picker.piece === problem.piece;
-    const text = own ? picker.text : "";
-    const all = own && picker.all;
-    const search = fold(text.trim());
-    // Same order as the rows sent to Gemini.
+  /** A free row of the CSV, as the team recognizes it: format, size and date. */
+  function rowFacts(problem: Problem, row: Row) {
+    const size = rowSize(row);
+    const format = valueOf(row.values, "FORMATO_TIPO");
+    const date = shortDate(valueOf(row.values, "SLOT_FECHA"));
+    const otherSize =
+      size &&
+      problem.width &&
+      (size.width !== problem.width || size.height !== problem.height);
+    return (
+      <span className="qc-tags">
+        {format && <span className="qc-tag">{format}</span>}
+        {size && (
+          <span className={`qc-tag${otherSize ? " warn" : ""}`}>
+            {size.width}×{size.height}
+            {otherSize ? " · otra medida" : ""}
+          </span>
+        )}
+        {date && <span className="qc-tag">{date}</span>}
+      </span>
+    );
+  }
+
+  function orderFacts(problem: Problem, order: Candidate) {
+    const otherSize =
+      order.width &&
+      problem.width &&
+      (order.width !== problem.width || order.height !== problem.height);
+    return (
+      <span className="qc-tags">
+        {valueOf(order.values, "FORMATO_TIPO") && (
+          <span className="qc-tag">
+            {valueOf(order.values, "FORMATO_TIPO")}
+          </span>
+        )}
+        {valueOf(order.values, "MEDIO_PLATAFORMA") && (
+          <span className="qc-tag">
+            {valueOf(order.values, "MEDIO_PLATAFORMA")}
+          </span>
+        )}
+        {order.width && order.height ? (
+          <span className={`qc-tag${otherSize ? " warn" : ""}`}>
+            {order.width}×{order.height}
+            {otherSize ? " · otra medida" : ""}
+          </span>
+        ) : null}
+        {order.date && <span className="qc-tag">{order.date}</span>}
+      </span>
+    );
+  }
+
+  /** «¿Cuál es la fila de esta pieza?»: one suggested row and the others on demand. */
+  function rowSection(problem: Problem, choice: Choice) {
+    const pieceSet = new Set(words(stem(problem.piece)));
     const ranked = rankRows(
       { name: problem.piece, width: problem.width, height: problem.height },
       ready!.freeRows,
       rowSize,
     );
-    const found = search
-      ? ranked.filter(({ row }) =>
-          fold(
-            [`${row.csvLine}`, row.id, ...row.values.map((v) => v.value)].join(
-              " ",
-            ),
-          ).includes(search),
-        )
-      : ranked;
-    let shown = search || all ? found : found.slice(0, TOP_ROWS);
-    const picked = found.find((r) => r.row.csvLine === choice.csvLine);
-    if (picked && !shown.includes(picked)) shown = [picked, ...shown];
-    const pieceSet = new Set(pieceWords);
-    const setText = (value: string) =>
-      setPicker({ piece: problem.piece, text: value, all });
-
-    if (!ready!.freeRows.length)
+    if (!ranked.length)
       return (
         <div className="qc-callout warning">
           <AlertCircle size={16} aria-hidden />
@@ -725,386 +755,378 @@ export function MappingPanel({
           </p>
         </div>
       );
-    return (
-      <section className="qc-detail-section">
-        <div className="qc-section-head">
-          <h4>Fila del CSV de esta pieza</h4>
-          <span>
-            {search
-              ? `${found.length} de ${ranked.length} filas libres`
-              : "Ordenadas por parecido con el nombre del archivo"}
-          </span>
-        </div>
-        <label className="qc-search">
-          <Search size={14} aria-hidden />
-          <input
-            type="search"
-            value={text}
-            placeholder="Buscar por ID, línea, formato o fecha"
-            aria-label="Buscar una fila del CSV"
-            onChange={(event) => setText(event.target.value)}
-          />
-        </label>
-        <div
-          className="qc-options"
-          role="radiogroup"
-          aria-label="Filas libres del CSV"
-        >
-          {shown.map(({ row, size, score, sized }, index) => {
-            const owner = takenLines.get(row.csvLine);
-            const taken = Boolean(owner && owner !== problem.piece);
-            const selected = choice.csvLine === row.csvLine;
-            const format = valueOf(row.values, "FORMATO_TIPO");
-            const date = valueOf(row.values, "SLOT_FECHA");
-            return (
-              <label
-                key={row.csvLine}
-                className={`qc-option${selected ? " selected" : ""}${taken ? " disabled" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name={`row-${problem.piece}`}
-                  checked={selected}
-                  disabled={busy || taken}
-                  onChange={() =>
-                    choose(problem.piece, { csvLine: row.csvLine })
-                  }
-                />
-                <span className="qc-option-body">
-                  <span className="qc-option-title">
-                    <b>Línea {row.csvLine}</b>
-                    {index === 0 && !search && score >= 0.5 && (
-                      <em className="qc-tag primary">Más parecida</em>
-                    )}
-                    {suggestions.get(problem.piece)?.csvLine ===
-                      row.csvLine && (
-                      <em className="qc-tag ai">
-                        <Sparkles size={11} aria-hidden /> Gemini
-                      </em>
-                    )}
-                    {taken && owner && (
-                      <em className="qc-tag">Elegida para otra pieza</em>
-                    )}
-                  </span>
-                  <code className="qc-option-id">
-                    {row.id ? (
-                      <Name text={row.id} other={pieceSet} />
-                    ) : (
-                      "(sin ID)"
-                    )}
-                  </code>
-                  <span className="qc-tags">
-                    {format && <span className="qc-tag">{format}</span>}
-                    {size && (
-                      <span
-                        className={`qc-tag ${problem.width ? (sized ? "ok" : "warn") : ""}`}
-                        title={
-                          problem.width && !sized
-                            ? `La pieza mide ${problem.width}×${problem.height}`
-                            : undefined
-                        }
-                      >
-                        {size.width}×{size.height}
-                      </span>
-                    )}
-                    {date && <span className="qc-tag">{date}</span>}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-          {!shown.length && (
-            <p className="qc-mapping-note">
-              Ninguna fila libre coincide con «{text}».
+    const picked = ranked.find(({ row }) => row.csvLine === choice.csvLine);
+    if (picked)
+      return (
+        <div className="qc-done">
+          <CircleCheck size={18} aria-hidden />
+          <div>
+            <strong>Elegiste la línea {picked.row.csvLine} del CSV</strong>
+            <p>
+              Al aplicar los cambios, el ID de esa fila pasa a ser el nombre de
+              esta pieza.
             </p>
-          )}
-        </div>
-        {!search && !all && found.length > TOP_ROWS && (
+            {rowFacts(problem, picked.row)}
+          </div>
           <button
             type="button"
             className="qc-link-button"
-            onClick={() =>
-              setPicker({ piece: problem.piece, text: "", all: true })
-            }
+            disabled={busy}
+            onClick={() => choose(problem.piece, undefined)}
           >
-            Ver las {found.length} filas libres
+            Cambiar
           </button>
+        </div>
+      );
+    const takenBy = (row: Row) => {
+      const owner = takenLines.get(row.csvLine);
+      return owner && owner !== problem.piece ? owner : undefined;
+    };
+    const best = ranked.find(({ row }) => !takenBy(row));
+    const own = picker.piece === problem.piece;
+    const open = own && picker.all;
+    const search = fold((own ? picker.text : "").trim());
+    const others = ranked
+      .filter((item) => item !== best)
+      .filter(
+        ({ row }) =>
+          !search ||
+          fold(
+            [`${row.csvLine}`, row.id, ...row.values.map((v) => v.value)].join(
+              " ",
+            ),
+          ).includes(search),
+      );
+    return (
+      <section className="qc-detail-section">
+        <h4 className="qc-question">
+          ¿Cuál es la fila de esta pieza en el CSV?
+        </h4>
+        {best && (
+          <div className="qc-suggest">
+            <div className="qc-suggest-head">
+              <span className="qc-tag primary">Sugerida</span>
+              <b>Línea {best.row.csvLine}</b>
+              {rowFacts(problem, best.row)}
+            </div>
+            <code className="qc-option-id" title="ID actual de la fila">
+              <Name text={best.row.id || "(sin ID)"} other={pieceSet} />
+            </code>
+            <div className="qc-suggest-actions">
+              <button
+                type="button"
+                className="qc-button primary small"
+                disabled={busy}
+                onClick={() =>
+                  choose(problem.piece, { csvLine: best.row.csvLine })
+                }
+              >
+                <Check size={14} aria-hidden />
+                Usar esta fila
+              </button>
+              {!open && ranked.length > 1 && (
+                <button
+                  type="button"
+                  className="qc-link-button"
+                  onClick={() =>
+                    setPicker({ piece: problem.piece, text: "", all: true })
+                  }
+                >
+                  No es esta: ver otras filas ({ranked.length - 1})
+                </button>
+              )}
+            </div>
+          </div>
         )}
-        <p className="qc-mapping-note">
-          <mark className="qc-diff-word">Resaltado</mark>: palabras que no están
-          en el otro nombre.
-        </p>
+        {(open || !best) && (
+          <div className="qc-more">
+            <label className="qc-search">
+              <Search size={14} aria-hidden />
+              <input
+                type="search"
+                value={own ? picker.text : ""}
+                placeholder="Buscar por nombre, línea o formato"
+                aria-label="Buscar una fila del CSV"
+                onChange={(event) =>
+                  setPicker({
+                    piece: problem.piece,
+                    text: event.target.value,
+                    all: true,
+                  })
+                }
+              />
+            </label>
+            <ul className="qc-picks">
+              {others.map(({ row }) => {
+                const owner = takenBy(row);
+                return (
+                  <li key={row.csvLine}>
+                    <div>
+                      <span className="qc-pick-title">
+                        <b>Línea {row.csvLine}</b>
+                        {rowFacts(problem, row)}
+                      </span>
+                      <code className="qc-option-id">
+                        <Name text={row.id || "(sin ID)"} other={pieceSet} />
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      className="qc-button secondary small"
+                      disabled={busy || Boolean(owner)}
+                      title={owner ? `Elegida para ${owner}` : undefined}
+                      onClick={() =>
+                        choose(problem.piece, { csvLine: row.csvLine })
+                      }
+                    >
+                      {owner ? "En uso" : "Usar"}
+                    </button>
+                  </li>
+                );
+              })}
+              {!others.length && (
+                <li className="qc-mapping-note">
+                  Ninguna fila coincide con la búsqueda.
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
       </section>
     );
   }
 
-  function orderPicker(problem: Problem, choice: Choice) {
-    const order = problem.candidates?.find((c) => c.row === choice.order);
-    const line = problem.csvLines?.[0];
-    const suggestion = suggestions.get(problem.piece);
+  /** The differences of an order with the CSV row, in plain words. */
+  function differenceList(order: Candidate) {
     return (
-      <>
-        <section className="qc-detail-section">
-          <div className="qc-section-head">
-            <h4>Pedido de la matriz que le corresponde</h4>
-            <span>Los más parecidos a la línea {line} del CSV</span>
-          </div>
-          {problem.candidates?.length ? (
-            <div
-              className="qc-options"
-              role="radiogroup"
-              aria-label="Pedidos de la matriz"
-            >
-              {problem.candidates.map((candidate) =>
-                orderOption(problem, candidate, {
-                  selected: candidate.row === choice.order,
-                  suggestedByGemini: suggestion?.order === candidate.row,
-                  onSelect: () =>
-                    choose(problem.piece, { order: candidate.row }),
-                }),
-              )}
-            </div>
-          ) : (
-            <div className="qc-callout warning">
-              <AlertCircle size={16} aria-hidden />
-              <p>
-                Ningún pedido de la matriz se parece a esta fila. Revisá sus
-                columnas en Drive y tocá «Actualizar», o excluí la pieza.
-              </p>
-            </div>
-          )}
-        </section>
-        <section className="qc-detail-section">
-          <div className="qc-section-head">
-            <h4>
-              Línea {line} del CSV
-              {order ? ` y fila ${order.row} de la matriz` : ""}
-            </h4>
-            {order && (
-              <span>
-                {order.differences.length}{" "}
-                {order.differences.length === 1 ? "diferencia" : "diferencias"}
-              </span>
-            )}
-          </div>
-          <table className="qc-compare">
-            <thead>
-              <tr>
-                <th scope="col">Columna</th>
-                <th scope="col">CSV</th>
-                {order && <th scope="col">Matriz</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {IDENTITY.map((column) => {
-                const differs = order?.differences.some(
-                  (d) => d.column === column,
-                );
-                return (
-                  <tr key={column} className={differs ? "diff" : undefined}>
-                    <th scope="row">{column}</th>
-                    <td>{valueOf(problem.csv, column) || "(vacío)"}</td>
-                    {order && <td>{valueOf(order.values, column)}</td>}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
-        {order && order.differences.length > 0 && (
-          <section className="qc-detail-section">
-            <div className="qc-section-head">
-              <h4>¿Cómo lo resolvés?</h4>
-              <button
-                type="button"
-                className="qc-link-button"
-                disabled={busy}
-                onClick={() => choose(problem.piece, undefined)}
-              >
-                Quitar la elección
-              </button>
-            </div>
-            <div
-              className="qc-options two"
-              role="radiogroup"
-              aria-label="Cómo resolver la diferencia"
-            >
-              <label
-                className={`qc-option${choice.mode === "csv" ? " selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name={`mode-${problem.piece}`}
-                  checked={choice.mode === "csv"}
-                  disabled={busy}
-                  onChange={() =>
-                    choose(problem.piece, { ...choice, mode: "csv" })
-                  }
-                />
-                <span className="qc-option-body">
-                  <b>Corregir el CSV</b>
-                  <span className="qc-option-desc">
-                    Se copian{" "}
-                    {order.differences.length === 1
-                      ? "el valor"
-                      : `los ${order.differences.length} valores`}{" "}
-                    de la matriz en la línea {line}. Se verifica antes de
-                    aplicarse.
-                  </span>
-                </span>
-              </label>
-              <label
-                className={`qc-option${choice.mode === "same" ? " selected" : ""}${campaignId ? "" : " disabled"}`}
-              >
-                <input
-                  type="radio"
-                  name={`mode-${problem.piece}`}
-                  checked={choice.mode === "same"}
-                  disabled={busy || !campaignId}
-                  onChange={() =>
-                    choose(problem.piece, {
-                      ...choice,
-                      mode: "same",
-                      scope: choice.scope ?? "campaign",
-                    })
-                  }
-                />
-                <span className="qc-option-body">
-                  <b>Dicen lo mismo</b>
-                  <span className="qc-option-desc">
-                    {campaignId
-                      ? "El CSV queda como está y QA Visual toma los valores como equivalentes."
-                      : "Disponible después de agregar la campaña."}
-                  </span>
-                </span>
-              </label>
-            </div>
-            {choice.mode === "same" && campaignId && (
-              <div className="qc-same">
-                <label>
-                  <span>Aprobar la equivalencia</span>
-                  <select
-                    className="qc-select"
-                    value={choice.scope ?? "campaign"}
-                    disabled={busy}
-                    onChange={(event) =>
-                      choose(problem.piece, {
-                        ...choice,
-                        scope: event.target.value as "campaign" | "client",
-                      })
-                    }
-                  >
-                    <option value="campaign">Solo para esta campaña</option>
-                    <option value="client" disabled={!equivalences?.canShare}>
-                      Para todas las campañas del cliente
-                      {equivalences?.canShare
-                        ? ""
-                        : " (la campaña no tiene cliente)"}
-                    </option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="qc-button primary small"
-                  disabled={locked}
-                  onClick={() => void approveSame(problem, choice)}
-                >
-                  {pending === "approve" ? (
-                    <LoaderCircle size={14} className="qc-spin" aria-hidden />
-                  ) : (
-                    <Check size={14} aria-hidden />
-                  )}
-                  Aprobar equivalencia
-                </button>
-              </div>
-            )}
-          </section>
-        )}
-      </>
+      <ul className="qc-diffs">
+        {order.differences.map((d) => (
+          <li key={d.column}>
+            <b>{columnName[d.column] ?? d.column}</b>
+            <span>
+              el CSV dice <del>{d.csvValue || "(vacío)"}</del> y la matriz dice{" "}
+              <ins>{d.matrixValue}</ins>
+            </span>
+          </li>
+        ))}
+      </ul>
     );
   }
 
-  function orderOption(
-    problem: Problem,
-    candidate: Candidate,
-    {
-      selected,
-      suggestedByGemini,
-      onSelect,
-    }: { selected?: boolean; suggestedByGemini?: boolean; onSelect?: () => void },
-  ) {
-    const sized =
-      candidate.width === problem.width && candidate.height === problem.height;
-    const body = (
-      <span className="qc-option-body">
-        <span className="qc-option-title">
-          <b>Fila {candidate.row} de la matriz</b>
-          {suggestedByGemini && (
-            <em className="qc-tag ai">
-              <Sparkles size={11} aria-hidden /> Gemini
-            </em>
-          )}
-        </span>
-        <span className="qc-tags">
-          {valueOf(candidate.values, "FORMATO_TIPO") && (
-            <span className="qc-tag">
-              {valueOf(candidate.values, "FORMATO_TIPO")}
-            </span>
-          )}
-          {valueOf(candidate.values, "MEDIO_PLATAFORMA") && (
-            <span className="qc-tag">
-              {valueOf(candidate.values, "MEDIO_PLATAFORMA")}
-            </span>
-          )}
-          {candidate.width && candidate.height ? (
-            <span
-              className={`qc-tag ${problem.width ? (sized ? "ok" : "warn") : ""}`}
-            >
-              {candidate.width}×{candidate.height}
-            </span>
-          ) : null}
-          {candidate.date && <span className="qc-tag">{candidate.date}</span>}
-        </span>
-        {candidate.differences.length > 0 && (
-          <span className="qc-option-desc">
-            Difiere en {candidate.differences.map((d) => d.column).join(", ")}
-          </span>
-        )}
-      </span>
-    );
-    if (!onSelect)
+  /** «¿Cómo lo corregimos?»: the suggested order, its differences and two buttons. */
+  function orderSection(problem: Problem, choice: Choice) {
+    const candidates = problem.candidates ?? [];
+    const suggestion = suggestions.get(problem.piece);
+    const line = problem.csvLines?.[0];
+    if (!candidates.length)
       return (
-        <div key={candidate.row} className="qc-option static">
-          {body}
+        <div className="qc-callout warning">
+          <AlertCircle size={16} aria-hidden />
+          <p>
+            Ningún pedido de la matriz se parece a esta fila. Revisala en Drive
+            y tocá «Actualizar», o excluí la pieza.
+          </p>
         </div>
       );
+    const order =
+      candidates.find((c) => c.row === choice.order) ??
+      candidates.find((c) => c.row === suggestion?.order) ??
+      candidates[0];
+    const own = picker.piece === problem.piece;
+    const open = own && picker.all;
+
+    if (choice.order === order.row && choice.mode === "csv")
+      return (
+        <div className="qc-done">
+          <CircleCheck size={18} aria-hidden />
+          <div>
+            <strong>Se va a corregir la línea {line} del CSV</strong>
+            <p>
+              Con los valores del pedido de la fila {order.row} de la matriz:
+            </p>
+            {differenceList(order)}
+          </div>
+          <button
+            type="button"
+            className="qc-link-button"
+            disabled={busy}
+            onClick={() => choose(problem.piece, { order: order.row })}
+          >
+            Cambiar
+          </button>
+        </div>
+      );
+
+    if (choice.order === order.row && choice.mode === "same" && campaignId)
+      return (
+        <section className="qc-detail-section">
+          <h4 className="qc-question">
+            ¿Para qué campañas valen como iguales?
+          </h4>
+          <div className="qc-suggest">
+            {differenceList(order)}
+            <select
+              className="qc-select"
+              value={choice.scope ?? "campaign"}
+              disabled={locked}
+              aria-label="Alcance de la equivalencia"
+              onChange={(event) =>
+                choose(problem.piece, {
+                  ...choice,
+                  scope: event.target.value as "campaign" | "client",
+                })
+              }
+            >
+              <option value="campaign">Solo para esta campaña</option>
+              <option value="client" disabled={!equivalences?.canShare}>
+                Para todas las campañas del cliente
+                {equivalences?.canShare ? "" : " (la campaña no tiene cliente)"}
+              </option>
+            </select>
+            <div className="qc-suggest-actions">
+              <button
+                type="button"
+                className="qc-button primary small"
+                disabled={locked}
+                onClick={() => void approveSame(problem, choice)}
+              >
+                {pending === "approve" ? (
+                  <LoaderCircle size={14} className="qc-spin" aria-hidden />
+                ) : (
+                  <Check size={14} aria-hidden />
+                )}
+                Aprobar
+              </button>
+              <button
+                type="button"
+                className="qc-button ghost small"
+                disabled={busy}
+                onClick={() => choose(problem.piece, { order: order.row })}
+              >
+                Cancelar
+              </button>
+            </div>
+            <p className="qc-mapping-note">El CSV no se modifica.</p>
+          </div>
+        </section>
+      );
+
     return (
-      <label
-        key={candidate.row}
-        className={`qc-option${selected ? " selected" : ""}`}
-      >
-        <input
-          type="radio"
-          name={`order-${problem.piece}`}
-          checked={Boolean(selected)}
-          disabled={busy}
-          onChange={onSelect}
-        />
-        {body}
-      </label>
+      <section className="qc-detail-section">
+        <h4 className="qc-question">¿Cómo lo corregimos?</h4>
+        <div className="qc-suggest">
+          <div className="qc-suggest-head">
+            <span className="qc-tag primary">
+              {order.row === suggestion?.order
+                ? "Sugerido por Gemini"
+                : choice.order === order.row
+                  ? "Elegido"
+                  : "Pedido más parecido"}
+            </span>
+            <b>Fila {order.row} de la matriz</b>
+            {orderFacts(problem, order)}
+          </div>
+          {differenceList(order)}
+          <div className="qc-suggest-actions">
+            <button
+              type="button"
+              className="qc-button primary small"
+              disabled={busy}
+              onClick={() =>
+                choose(problem.piece, { order: order.row, mode: "csv" })
+              }
+            >
+              Corregir el CSV
+            </button>
+            <button
+              type="button"
+              className="qc-button secondary small"
+              disabled={busy || !campaignId}
+              title={
+                campaignId
+                  ? "El CSV queda como está y los valores se toman como iguales"
+                  : "Disponible después de agregar la campaña"
+              }
+              onClick={() =>
+                choose(problem.piece, {
+                  order: order.row,
+                  mode: "same",
+                  scope: choice.scope ?? "campaign",
+                })
+              }
+            >
+              Son lo mismo
+            </button>
+          </div>
+          <p className="qc-mapping-note">
+            «Corregir el CSV» copia{" "}
+            {order.differences.length === 1 ? "el valor" : "los valores"} de la
+            matriz en la línea {line}. «Son lo mismo» deja el CSV como está
+            {campaignId ? "" : " (disponible después de agregar la campaña)"}.
+          </p>
+        </div>
+        {candidates.length > 1 &&
+          (open ? (
+            <ul className="qc-picks">
+              {candidates
+                .filter((c) => c !== order)
+                .map((candidate) => (
+                  <li key={candidate.row}>
+                    <div>
+                      <span className="qc-pick-title">
+                        <b>Fila {candidate.row}</b>
+                        {orderFacts(problem, candidate)}
+                      </span>
+                      <span className="qc-mapping-note">
+                        Distinto en{" "}
+                        {candidate.differences
+                          .map((d) => columnName[d.column] ?? d.column)
+                          .join(" y ")}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="qc-button secondary small"
+                      disabled={busy}
+                      onClick={() =>
+                        choose(problem.piece, { order: candidate.row })
+                      }
+                    >
+                      Elegir
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <button
+              type="button"
+              className="qc-link-button"
+              onClick={() =>
+                setPicker({ piece: problem.piece, text: "", all: true })
+              }
+            >
+              No es este pedido: ver otros ({candidates.length - 1})
+            </button>
+          ))}
+      </section>
     );
   }
 
   function pieceDetail(problem: Problem) {
     const suggestion = suggestions.get(problem.piece);
     const choice = choices[problem.piece] ?? {};
-    const group = ready!.groups.find((g) => g.code === problem.status);
-    const pieceWords = words(stem(problem.piece));
-    const row =
-      choice.csvLine !== undefined
-        ? ready!.freeRows.find((r) => r.csvLine === choice.csvLine)
-        : undefined;
     const state = stateOf(problem.piece);
+    const line = problem.csvLines?.[0];
+    const summary: Record<Problem["status"], string> = {
+      csv_missing: "No hay ninguna fila del CSV con este nombre.",
+      csv_duplicate: `Su nombre está repetido en las líneas ${problem.csvLines?.join(", ")} del CSV.`,
+      matrix_missing: `Su fila del CSV (línea ${line}) no coincide con ningún pedido de la matriz.`,
+      matrix_ambiguous: `Su fila del CSV (línea ${line}) coincide con más de un pedido de la matriz.`,
+    };
+    // The generic explanation of code repeats what the panel already says: only Gemini's is shown.
+    const showGeminiNote =
+      suggestion &&
+      (suggestion.source === "ai" || suggestion.failed || suggestion.rejected);
     return (
       <article className="qc-detail" key={problem.piece}>
         <header className="qc-detail-head">
@@ -1115,10 +1137,6 @@ export function MappingPanel({
                 {problem.width}×{problem.height}
               </span>
             ) : null}
-            <span className={`qc-piece-state ${state}`}>
-              {stateIcon(state)}
-              {stateName[state]}
-            </span>
             {campaignId && (
               <button
                 type="button"
@@ -1132,15 +1150,12 @@ export function MappingPanel({
             )}
           </div>
           <h3 className="qc-detail-name">
-            <Name
-              text={stem(problem.piece)}
-              other={row ? new Set(rowWords.get(row.csvLine)) : undefined}
-            />
+            <Name text={stem(problem.piece)} />
             <span className="qc-name-prefix">
               {problem.piece.slice(stem(problem.piece).length)}
             </span>
           </h3>
-          {group && <p className="qc-detail-why">{group.detail}</p>}
+          <p className="qc-detail-why">{summary[problem.status]}</p>
         </header>
 
         {reviewing?.queue.has(problem.piece) && !suggestion && (
@@ -1152,7 +1167,7 @@ export function MappingPanel({
             </div>
           </div>
         )}
-        {suggestion && (
+        {showGeminiNote && (
           <div
             className={`qc-neon${suggestion.source === "ai" ? "" : suggestion.failed ? " failed" : " code"}`}
           >
@@ -1175,73 +1190,62 @@ export function MappingPanel({
           </div>
         )}
 
-        {problem.status === "csv_missing" &&
-          rowPicker(problem, choice, pieceWords)}
-        {problem.status === "csv_missing" && row && (
-          <div className="qc-detail-result">
-            <ShieldCheck size={15} aria-hidden />
-            <p>
-              Al aplicar, el ID_PIEZA de la línea {row.csvLine} pasa a ser{" "}
-              <code>
-                <Name text={stem(problem.piece)} />
-              </code>
-              . Antes de aplicarlo se verifica y se pide tu autorización.{" "}
-              <button
-                type="button"
-                className="qc-link-button"
-                disabled={busy}
-                onClick={() => choose(problem.piece, undefined)}
-              >
-                Quitar la elección
-              </button>
-            </p>
+        {state === "exclude" ? (
+          <div className="qc-done muted">
+            <EyeOff size={18} aria-hidden />
+            <div>
+              <strong>Marcada para excluir del análisis</strong>
+              <p>Escribí el motivo en la barra de abajo y tocá «Excluir».</p>
+            </div>
           </div>
+        ) : (
+          <>
+            {problem.status === "csv_missing" && rowSection(problem, choice)}
+            {problem.status === "csv_duplicate" && (
+              <p className="qc-mapping-note">
+                Elegí estas filas desde las otras piezas de la lista, o borrá la
+                que sobra en Drive y tocá «Actualizar».
+              </p>
+            )}
+            {problem.status === "matrix_missing" &&
+              orderSection(problem, choice)}
+            {problem.status === "matrix_ambiguous" && (
+              <section className="qc-detail-section">
+                <p className="qc-mapping-note">
+                  Estos pedidos dicen lo mismo y tampoco se distinguen por
+                  medidas ni por fecha. Completá en Drive las medidas o la fecha
+                  de esta pieza en el CSV y tocá «Actualizar», o excluila.
+                </p>
+                <ul className="qc-picks">
+                  {(problem.candidates ?? []).map((candidate) => (
+                    <li key={candidate.row}>
+                      <span className="qc-pick-title">
+                        <b>Fila {candidate.row}</b>
+                        {orderFacts(problem, candidate)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
         )}
 
-        {problem.status === "csv_duplicate" && (
-          <section className="qc-detail-section">
-            <div className="qc-section-head">
-              <h4>Líneas con este ID</h4>
-              <span>{problem.csvLines?.join(", ")}</span>
-            </div>
-            <p className="qc-mapping-note">
-              Elegí estas filas para sus piezas desde las otras piezas de la
-              lista, o borrá la que sobra en Drive y tocá «Actualizar».
-            </p>
-          </section>
-        )}
-
-        {problem.status === "matrix_missing" && orderPicker(problem, choice)}
-
-        {problem.status === "matrix_ambiguous" && (
-          <section className="qc-detail-section">
-            <div className="qc-section-head">
-              <h4>Pedidos posibles</h4>
-              <span>No se distinguen por medidas ni por fecha</span>
-            </div>
-            <div className="qc-options">
-              {(problem.candidates ?? []).map((candidate) =>
-                orderOption(problem, candidate, {}),
-              )}
-            </div>
-          </section>
-        )}
-
-        <footer className="qc-detail-nav">
-          <span>
-            Pieza {ordered.indexOf(problem.piece) + 1} de {ordered.length}
-          </span>
-          {nextPending && (
+        {nextPending && (
+          <footer className="qc-detail-nav">
+            <span>
+              {pendingCount} {pendingCount === 1 ? "pendiente" : "pendientes"}
+            </span>
             <button
               type="button"
-              className="qc-button secondary small"
+              className={`qc-button small ${state === "pending" ? "secondary" : "primary"}`}
               onClick={() => setView({ kind: "piece", piece: nextPending })}
             >
-              Siguiente pendiente
+              {state === "pending" ? "Saltar" : "Siguiente pieza"}
               <ArrowRight size={14} aria-hidden />
             </button>
-          )}
-        </footer>
+          </footer>
+        )}
       </article>
     );
   }
@@ -1622,9 +1626,8 @@ export function MappingPanel({
       </header>
       {!complete && (
         <p className="qc-mapping-note">
-          Gemini explica cada diferencia y propone cómo corregirla, sin
-          cambiar nada. Si corregís el CSV en Drive, tocá «Actualizar». Solo se
-          modifica el CSV: la matriz del cliente nunca.
+          Gemini propone sin cambiar nada. Solo se modifica el CSV, nunca
+          la matriz del cliente.
           {!campaignId &&
             " Excluir piezas y aprobar equivalencias se habilita después de agregar la campaña."}
         </p>
