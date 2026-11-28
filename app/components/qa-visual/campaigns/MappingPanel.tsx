@@ -74,7 +74,7 @@ const stateName: Record<PieceState, string> = {
 };
 
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
-/** Pieces per request to Gemini Neon and requests at the same time (REVIEW_BATCH on the server). */
+/** Pieces per request to Gemini and requests at the same time (REVIEW_BATCH on the server). */
 const BATCH = 15;
 const PARALLEL = 3;
 
@@ -272,7 +272,7 @@ export function MappingSummary({
 /**
  * «Mapeo de piezas» (§5.5). Code compares the pieces, the CSV and the matrix and shows every
  * difference. For each one the team can choose the CSV row or the matrix order by hand, ask
- * Gemini Neon to explain it and propose a fix, fix the CSV in Drive and update, approve that
+ * Gemini to explain it and propose a fix, fix the CSV in Drive and update, approve that
  * two values say the same, or exclude the piece. Every change is verified by code and needs
  * an explicit authorization. Only the internal CSV can be modified; the client's matrix never.
  *
@@ -327,7 +327,7 @@ export function MappingPanel({
   const [pending, setPending] = useState<
     "check" | "apply" | "exclude" | "approve" | "refresh" | null
   >(null);
-  // Gemini Neon answers arrive by batches and are shown as they come.
+  // Gemini answers arrive by batches and are shown as they come.
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(
     () => new Map(),
   );
@@ -355,12 +355,12 @@ export function MappingPanel({
   // Search and «Ver todas» of the rows offered to one piece.
   const [picker, setPicker] = useState({ piece: "", text: "", all: false });
   const busy = disabled || Boolean(pending);
-  // While Neon reviews, pieces can be browsed and chosen, but nothing is verified or written.
+  // While Gemini reviews, pieces can be browsed and chosen, but nothing is verified or written.
   const locked = busy || Boolean(reviewing);
   const choicesRef = useRef(choices);
   choicesRef.current = choices;
-  // Pieces whose choice came from Neon: a new review may replace it, a manual one never.
-  const fromNeon = useRef(new Set<string>());
+  // Pieces whose choice came from Gemini: a new review may replace it, a manual one never.
+  const fromGemini = useRef(new Set<string>());
   const alive = useRef(true);
   useEffect(
     () => () => {
@@ -410,7 +410,7 @@ export function MappingPanel({
   }
 
   const choose = (piece: string, choice: Choice | undefined) => {
-    fromNeon.current.delete(piece);
+    fromGemini.current.delete(piece);
     setChoices((current) => {
       const next = { ...current };
       if (choice) next[piece] = choice;
@@ -422,13 +422,13 @@ export function MappingPanel({
 
   const reset = () => {
     setSuggestions(new Map());
-    fromNeon.current.clear();
+    fromGemini.current.clear();
     setChoices({});
     setChecked(undefined);
     setAuthorized(false);
   };
 
-  /** Adds the answers of one batch; Neon's verified proposals start chosen. */
+  /** Adds the answers of one batch; Gemini's verified proposals start chosen. */
   function mergeReview(batch: Suggestion[]) {
     const next = { ...choicesRef.current };
     const taken = new Map(
@@ -437,7 +437,7 @@ export function MappingPanel({
       ),
     );
     const added = batch.map((s) => {
-      const replaceable = !next[s.piece] || fromNeon.current.has(s.piece);
+      const replaceable = !next[s.piece] || fromGemini.current.has(s.piece);
       if (!replaceable) return s;
       if (s.edits.length && s.csvLine !== undefined) {
         const owner = taken.get(s.csvLine);
@@ -451,13 +451,13 @@ export function MappingPanel({
           };
         next[s.piece] = { csvLine: s.csvLine };
         taken.set(s.csvLine, s.piece);
-        fromNeon.current.add(s.piece);
+        fromGemini.current.add(s.piece);
       } else if (s.order) {
         next[s.piece] = {
           order: s.order,
           ...(s.edits.length ? { mode: "csv" as const } : {}),
         };
-        fromNeon.current.add(s.piece);
+        fromGemini.current.add(s.piece);
       }
       return s;
     });
@@ -473,7 +473,7 @@ export function MappingPanel({
   }
 
   /** Reviews the pieces in batches, several at a time, and shows each batch as it arrives. */
-  async function askNeon() {
+  async function askGemini() {
     if (!ready || reviewing) return;
     const pieces = ready.groups.flatMap((g) => g.pieces);
     if (!pieces.length) return;
@@ -693,7 +693,7 @@ export function MappingPanel({
     const text = own ? picker.text : "";
     const all = own && picker.all;
     const search = fold(text.trim());
-    // Same order as the rows sent to Gemini Neon.
+    // Same order as the rows sent to Gemini.
     const ranked = rankRows(
       { name: problem.piece, width: problem.width, height: problem.height },
       ready!.freeRows,
@@ -779,7 +779,7 @@ export function MappingPanel({
                     {suggestions.get(problem.piece)?.csvLine ===
                       row.csvLine && (
                       <em className="qc-tag ai">
-                        <Sparkles size={11} aria-hidden /> Gemini Neon
+                        <Sparkles size={11} aria-hidden /> Gemini
                       </em>
                     )}
                     {taken && owner && (
@@ -858,7 +858,7 @@ export function MappingPanel({
               {problem.candidates.map((candidate) =>
                 orderOption(problem, candidate, {
                   selected: candidate.row === choice.order,
-                  neon: suggestion?.order === candidate.row,
+                  suggestedByGemini: suggestion?.order === candidate.row,
                   onSelect: () =>
                     choose(problem.piece, { order: candidate.row }),
                 }),
@@ -1029,9 +1029,9 @@ export function MappingPanel({
     candidate: Candidate,
     {
       selected,
-      neon,
+      suggestedByGemini,
       onSelect,
-    }: { selected?: boolean; neon?: boolean; onSelect?: () => void },
+    }: { selected?: boolean; suggestedByGemini?: boolean; onSelect?: () => void },
   ) {
     const sized =
       candidate.width === problem.width && candidate.height === problem.height;
@@ -1039,9 +1039,9 @@ export function MappingPanel({
       <span className="qc-option-body">
         <span className="qc-option-title">
           <b>Fila {candidate.row} de la matriz</b>
-          {neon && (
+          {suggestedByGemini && (
             <em className="qc-tag ai">
-              <Sparkles size={11} aria-hidden /> Gemini Neon
+              <Sparkles size={11} aria-hidden /> Gemini
             </em>
           )}
         </span>
@@ -1147,7 +1147,7 @@ export function MappingPanel({
           <div className="qc-neon">
             <LoaderCircle size={15} className="qc-spin" aria-hidden />
             <div>
-              <strong>Gemini Neon</strong>
+              <strong>Gemini</strong>
               <p>Revisando esta pieza…</p>
             </div>
           </div>
@@ -1164,7 +1164,7 @@ export function MappingPanel({
             <div>
               <strong>
                 {suggestion.source === "ai"
-                  ? "Gemini Neon"
+                  ? "Gemini"
                   : "Revisión automática"}
               </strong>
               <p>{suggestion.explanation}</p>
@@ -1267,7 +1267,7 @@ export function MappingPanel({
                   <b>Línea {edit.csvLine}</b>
                   <span>{edit.column}</span>
                   <em className={`qc-tag ${edit.origin === "ai" ? "ai" : ""}`}>
-                    {edit.origin === "ai" ? "Gemini Neon" : "Elegido a mano"}
+                    {edit.origin === "ai" ? "Gemini" : "Elegido a mano"}
                   </em>
                   <button
                     type="button"
@@ -1589,7 +1589,7 @@ export function MappingPanel({
               type="button"
               className="qc-button secondary small"
               disabled={locked}
-              onClick={() => void askNeon()}
+              onClick={() => void askGemini()}
               title="Explica cada diferencia y propone cómo corregirla, sin cambiar nada"
             >
               {reviewing ? (
@@ -1600,8 +1600,8 @@ export function MappingPanel({
               {reviewing
                 ? `Revisando… ${reviewing.done} de ${reviewing.total}`
                 : suggestions.size
-                  ? "Volver a revisar con Gemini Neon"
-                  : "Revisar con Gemini Neon"}
+                  ? "Volver a revisar con Gemini"
+                  : "Revisar con Gemini"}
             </button>
           )}
           <button
@@ -1622,7 +1622,7 @@ export function MappingPanel({
       </header>
       {!complete && (
         <p className="qc-mapping-note">
-          Gemini Neon explica cada diferencia y propone cómo corregirla, sin
+          Gemini explica cada diferencia y propone cómo corregirla, sin
           cambiar nada. Si corregís el CSV en Drive, tocá «Actualizar». Solo se
           modifica el CSV: la matriz del cliente nunca.
           {!campaignId &&
@@ -1720,14 +1720,14 @@ export function MappingPanel({
                                   <LoaderCircle
                                     size={11}
                                     className="qc-spin qc-piece-ai"
-                                    aria-label="Gemini Neon la está revisando"
+                                    aria-label="Gemini la está revisando"
                                   />
                                 )}
                               {suggestions.get(piece)?.source === "ai" && (
                                 <Sparkles
                                   size={11}
                                   className="qc-piece-ai"
-                                  aria-label="Revisada por Gemini Neon"
+                                  aria-label="Revisada por Gemini"
                                 />
                               )}
                             </span>

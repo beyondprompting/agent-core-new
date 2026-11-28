@@ -22,7 +22,7 @@ import {
  * production CSV (ID_PIEZA equal to the file name) and that row to one order of the client's
  * matrix (same CAMPAÑA, FASE, CANAL, MEDIO_PLATAFORMA and FORMATO_TIPO). Code only compares:
  * there are no rules for particular names. Differences are shown to the team, who fixes the
- * CSV (by hand, choosing in the panel or with Gemini Neon), declares two values equivalent or
+ * CSV (by hand, choosing in the panel or with Gemini), declares two values equivalent or
  * excludes the piece. Fixes only ever change the internal CSV; the matrix is never written.
  */
 export {
@@ -245,7 +245,7 @@ const groupText: Record<
   csv_missing: (n) => ({
     title: `${n} ${n === 1 ? "pieza no tiene" : "piezas no tienen"} fila en el CSV`,
     detail:
-      "Ningún ID_PIEZA del CSV es igual al nombre del archivo (sin la extensión). Elegí su fila del CSV, corregí el ID en Drive, pedí una propuesta a Gemini Neon o excluí la pieza si no se revisa.",
+      "Ningún ID_PIEZA del CSV es igual al nombre del archivo (sin la extensión). Elegí su fila del CSV, corregí el ID en Drive, pedí una propuesta a Gemini o excluí la pieza si no se revisa.",
   }),
   csv_duplicate: (n) => ({
     title: `${n} ${n === 1 ? "pieza tiene" : "piezas tienen"} el ID repetido en el CSV`,

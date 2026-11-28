@@ -33,7 +33,7 @@ export const qaModel = (provider: LLMProvider) =>
  * changing one never affects the other. It only ever receives the CSV rows and the file names.
  */
 const csvFixModelId =
-  process.env.QA_VISUAL_CSV_FIX_MODEL?.trim() || "gemini-4-neon";
+  process.env.QA_VISUAL_CSV_FIX_MODEL?.trim() || "gemini-3.8-flash";
 
 export const qaCsvFixer: LLMConfig = {
   provider: "gemini",

@@ -616,7 +616,7 @@ async function workbook() {
   return zip.generateAsync({ type: "nodebuffer" });
 }
 
-/** A campaign folder with RECURSOS, EDITABLES and DESPLIEGUE, and a mocked Gemini Neon. */
+/** A campaign folder with RECURSOS, EDITABLES and DESPLIEGUE, and a mocked Gemini. */
 async function drive(t: TestContext, answers: unknown[] = []) {
   const previous = {
     account: process.env.QA_VISUAL_GOOGLE_SERVICE_ACCOUNT_JSON,
@@ -744,7 +744,7 @@ test("the folder check reports the mapping before the campaign is registered", a
   });
 });
 
-test("Gemini Neon explains and proposes, code verifies and only the CSV is written", async (t) => {
+test("Gemini explains and proposes, code verifies and only the CSV is written", async (t) => {
   const d = await drive(t, [
     {
       rows: [
@@ -786,9 +786,9 @@ test("Gemini Neon explains and proposes, code verifies and only the CSV is writt
   // Step 1: pieces without a row.
   const first = await reviewMapping(context());
   assert.equal(first.error, undefined);
-  assert.equal(first.model, "gemini-4-neon");
+  assert.equal(first.model, "gemini-3.8-flash");
   assert.equal(d.calls.model.length, 1);
-  assert.match(d.calls.model[0].url, /gemini-4-neon/);
+  assert.match(d.calls.model[0].url, /gemini-3.8-flash/);
   assert.match(d.calls.model[0].body, /8_PRESAS_1_PAPA/);
   // Nothing of the matrix is needed yet: it is not sent.
   assert.doesNotMatch(
@@ -907,7 +907,7 @@ test("an approved equivalence links the pieces in the folder check without writi
   assert.equal(d.calls.writes.length, 0);
 });
 
-test("Gemini Neon reviews one batch of pieces with their most similar rows and marks the pieces it could not review", async (t) => {
+test("Gemini reviews one batch of pieces with their most similar rows and marks the pieces it could not review", async (t) => {
   const d = await drive(t, [
     {
       rows: [
@@ -940,7 +940,7 @@ test("Gemini Neon reviews one batch of pieces with their most similar rows and m
     body.indexOf("_8_PRESAS_1_PAPA_") < body.indexOf("STORIES_ESTATICA"),
   );
 
-  // No answer (timeout or error): the pieces say Neon could not review them; nothing chosen.
+  // No answer (timeout or error): the pieces say Gemini could not review them; nothing chosen.
   const failed = await reviewMapping(context(), [
     images[0].name,
     "logo_96.png",

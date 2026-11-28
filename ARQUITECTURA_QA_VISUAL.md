@@ -1798,7 +1798,7 @@ Las casillas marcadas identifican funcionalidades implementadas dentro del alcan
 | `QA_VISUAL_ANALYSIS_CONCURRENCY` | Convex | Concurrencia global de análisis (1–100; por defecto 24). |
 | `QA_VISUAL_GEMINI_MODEL` | Convex | Modelo principal de QA (por defecto `gemini-3.7-flash`). |
 | `QA_VISUAL_OPENAI_MODEL` | Convex | Modelo de respaldo de QA (por defecto `gpt-6-luna`). |
-| `QA_VISUAL_CSV_FIX_MODEL` | Convex | Modelo que explica las diferencias del mapeo de piezas y propone cómo corregirlas, sin cambiar nada (por defecto `gemini-4-neon`, especificación §5.5). Recibe los nombres de las piezas, las filas del CSV y, de la matriz, solo la identidad, las medidas y la fecha de los pedidos candidatos. |
+| `QA_VISUAL_CSV_FIX_MODEL` | Convex | Modelo que explica las diferencias del mapeo de piezas y propone cómo corregirlas, sin cambiar nada (por defecto `gemini-3.8-flash`, especificación §5.5). Recibe los nombres de las piezas, las filas del CSV y, de la matriz, solo la identidad, las medidas y la fecha de los pedidos candidatos. |
 | `QA_VISUAL_ENABLED` | Next | `true` habilita QA fuera de desarrollo. |
 | `QA_VISUAL_ENABLED` | Convex | `false` desactiva todas las funciones de QA. |
 

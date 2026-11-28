@@ -42,7 +42,7 @@ export const REVIEW_BATCH = 15;
 
 /**
  * Mapping review and CSV fixes (§5.5). Code detects the differences between the pieces, the
- * CSV and the matrix; Gemini Neon explains them and proposes how to fix them, without changing
+ * CSV and the matrix; Gemini explains them and proposes how to fix them, without changing
  * anything. The model only chooses among what code offers (a free CSV row, a matrix order);
  * the new values are built by code and every change is verified before it is shown. The only
  * document that may be written is the internal production CSV; the client's matrix is read by
@@ -98,7 +98,7 @@ export type MappingSuggestion = {
   warnings: string[];
   /** The model proposed something that did not pass the verification. */
   rejected?: string;
-  /** Gemini Neon did not answer for this piece (timeout, error or too many differences). */
+  /** Gemini did not answer for this piece (timeout, error or too many differences). */
   failed?: boolean;
 };
 export type MappingReview = {
@@ -145,7 +145,7 @@ function codeExplanation(problem: MappingProblem) {
 }
 
 /**
- * «Revisar con Gemini Neon»: an explanation and a verified proposal for every difference, or
+ * «Revisar con Gemini»: an explanation and a verified proposal for every difference, or
  * only for `pieces` (the panel reviews in batches of REVIEW_BATCH). Nothing is written.
  */
 export async function reviewMapping(
@@ -264,9 +264,9 @@ export async function reviewMapping(
       });
       output = result.output;
     } catch (error) {
-      console.warn("QA Visual: Gemini Neon no pudo revisar el mapeo", error);
+      console.warn("QA Visual: Gemini no pudo revisar el mapeo", error);
       notice =
-        "Gemini Neon no pudo revisar las diferencias. Podés resolverlas eligiendo en el panel o intentar de nuevo.";
+        "Gemini no pudo revisar las diferencias. Podés resolverlas eligiendo en el panel o intentar de nuevo.";
     }
 
   const suggestions: MappingSuggestion[] = [];

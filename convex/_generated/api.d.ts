@@ -82,6 +82,7 @@ import type * as lib_corRetry from "../lib/corRetry.js";
 import type * as lib_deliverableAnalytics from "../lib/deliverableAnalytics.js";
 import type * as lib_directExternalComments from "../lib/directExternalComments.js";
 import type * as lib_excludedUsers from "../lib/excludedUsers.js";
+import type * as lib_externalPieceRoles from "../lib/externalPieceRoles.js";
 import type * as lib_externalRequestsAccess from "../lib/externalRequestsAccess.js";
 import type * as lib_externalUserPreapproval from "../lib/externalUserPreapproval.js";
 import type * as lib_internalUserAdminAccess from "../lib/internalUserAdminAccess.js";
@@ -112,6 +113,7 @@ import type * as qaVisual_campaignSnapshots from "../qaVisual/campaignSnapshots.
 import type * as qaVisual_campaignSync from "../qaVisual/campaignSync.js";
 import type * as qaVisual_campaigns from "../qaVisual/campaigns.js";
 import type * as qaVisual_clientAccess from "../qaVisual/clientAccess.js";
+import type * as qaVisual_clientChanges from "../qaVisual/clientChanges.js";
 import type * as qaVisual_clientPortal from "../qaVisual/clientPortal.js";
 import type * as qaVisual_clientReview from "../qaVisual/clientReview.js";
 import type * as qaVisual_commentLocalization from "../qaVisual/commentLocalization.js";
@@ -145,9 +147,11 @@ import type * as qaVisual_model_mappingStatus from "../qaVisual/model/mappingSta
 import type * as qaVisual_model_normalize from "../qaVisual/model/normalize.js";
 import type * as qaVisual_model_offers from "../qaVisual/model/offers.js";
 import type * as qaVisual_model_productionCsv from "../qaVisual/model/productionCsv.js";
+import type * as qaVisual_model_productionCsvBuilder from "../qaVisual/model/productionCsvBuilder.js";
 import type * as qaVisual_model_prompt from "../qaVisual/model/prompt.js";
 import type * as qaVisual_model_requirements from "../qaVisual/model/requirements.js";
 import type * as qaVisual_model_retryPolicy from "../qaVisual/model/retryPolicy.js";
+import type * as qaVisual_model_similarity from "../qaVisual/model/similarity.js";
 import type * as qaVisual_model_verdict from "../qaVisual/model/verdict.js";
 import type * as qaVisual_model_visibleDate from "../qaVisual/model/visibleDate.js";
 import type * as qaVisual_overrides from "../qaVisual/overrides.js";
@@ -275,6 +279,7 @@ declare const fullApi: ApiFromModules<{
   "lib/deliverableAnalytics": typeof lib_deliverableAnalytics;
   "lib/directExternalComments": typeof lib_directExternalComments;
   "lib/excludedUsers": typeof lib_excludedUsers;
+  "lib/externalPieceRoles": typeof lib_externalPieceRoles;
   "lib/externalRequestsAccess": typeof lib_externalRequestsAccess;
   "lib/externalUserPreapproval": typeof lib_externalUserPreapproval;
   "lib/internalUserAdminAccess": typeof lib_internalUserAdminAccess;
@@ -305,6 +310,7 @@ declare const fullApi: ApiFromModules<{
   "qaVisual/campaignSync": typeof qaVisual_campaignSync;
   "qaVisual/campaigns": typeof qaVisual_campaigns;
   "qaVisual/clientAccess": typeof qaVisual_clientAccess;
+  "qaVisual/clientChanges": typeof qaVisual_clientChanges;
   "qaVisual/clientPortal": typeof qaVisual_clientPortal;
   "qaVisual/clientReview": typeof qaVisual_clientReview;
   "qaVisual/commentLocalization": typeof qaVisual_commentLocalization;
@@ -338,9 +344,11 @@ declare const fullApi: ApiFromModules<{
   "qaVisual/model/normalize": typeof qaVisual_model_normalize;
   "qaVisual/model/offers": typeof qaVisual_model_offers;
   "qaVisual/model/productionCsv": typeof qaVisual_model_productionCsv;
+  "qaVisual/model/productionCsvBuilder": typeof qaVisual_model_productionCsvBuilder;
   "qaVisual/model/prompt": typeof qaVisual_model_prompt;
   "qaVisual/model/requirements": typeof qaVisual_model_requirements;
   "qaVisual/model/retryPolicy": typeof qaVisual_model_retryPolicy;
+  "qaVisual/model/similarity": typeof qaVisual_model_similarity;
   "qaVisual/model/verdict": typeof qaVisual_model_verdict;
   "qaVisual/model/visibleDate": typeof qaVisual_model_visibleDate;
   "qaVisual/overrides": typeof qaVisual_overrides;

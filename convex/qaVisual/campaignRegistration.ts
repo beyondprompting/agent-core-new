@@ -267,7 +267,7 @@ const connectionError =
   "No se pudo leer la carpeta. Revisá la conexión con Google Drive e intentá de nuevo.";
 
 /**
- * §5.5 «Revisar con Gemini Neon»: explains every difference of the mapping and proposes how to
+ * §5.5 «Revisar con Gemini»: explains every difference of the mapping and proposes how to
  * fix it, verified by code. Nothing is written. The model gets the pieces, the CSV rows and the
  * identity, size and date of the candidate orders of the matrix, read-only.
  */
