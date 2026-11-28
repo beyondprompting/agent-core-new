@@ -29,15 +29,15 @@ Las diez decisiones que más cambian el sistema:
 
 ## 1 Principios
 
-| Principio | Consecuencia concreta |
-| --- | --- |
-| Separar capas de verdad | Fuente original (Storage) → dato interpretado (importación inmutable) → vínculo confirmado (equivalencias humanas) → resultado de IA (revisión) → decisión humana. Ninguna capa sobrescribe a otra. |
-| Analizar con lo que haya | Cada requisito se evalúa por separado. Una ambigüedad bloquea solo los controles que afecta. |
-| Diferenciar omisión e incertidumbre | Si se puede comprobar que falta algo pedido, es `fail`. `unverifiable` exige información o evidencia realmente insuficiente; no se usa por una sintaxis no reconocida por el código. |
-| Trazabilidad total | Todo valor esperado lleva sus `sources[]`. Todo hallazgo informa qué método lo produjo (código o modelo) y en qué corrida. |
-| Idempotencia en cada paso | Las importaciones, corridas, intentos, imágenes y decisiones toleran reintentos y callbacks repetidos sin duplicar resultados. |
-| Simplicidad | Hay un solo mecanismo de cola (workpool), una sola fuente de identidad (pieza y versión) y lógica de dominio en TypeScript puro y testeable. No se usan workflows anidados ni leases manuales. |
-| Drive en solo lectura | Alcance `drive.readonly`. Solo se usan `GET` de metadatos, listados y descargas. Una prueba automatizada lo verifica. |
+| Principio                           | Consecuencia concreta                                                                                                                                                                               |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Separar capas de verdad             | Fuente original (Storage) → dato interpretado (importación inmutable) → vínculo confirmado (equivalencias humanas) → resultado de IA (revisión) → decisión humana. Ninguna capa sobrescribe a otra. |
+| Analizar con lo que haya            | Cada requisito se evalúa por separado. Una ambigüedad bloquea solo los controles que afecta.                                                                                                        |
+| Diferenciar omisión e incertidumbre | Si se puede comprobar que falta algo pedido, es `fail`. `unverifiable` exige información o evidencia realmente insuficiente; no se usa por una sintaxis no reconocida por el código.                |
+| Trazabilidad total                  | Todo valor esperado lleva sus `sources[]`. Todo hallazgo informa qué método lo produjo (código o modelo) y en qué corrida.                                                                          |
+| Idempotencia en cada paso           | Las importaciones, corridas, intentos, imágenes y decisiones toleran reintentos y callbacks repetidos sin duplicar resultados.                                                                      |
+| Simplicidad                         | Hay un solo mecanismo de cola (workpool), una sola fuente de identidad (pieza y versión) y lógica de dominio en TypeScript puro y testeable. No se usan workflows anidados ni leases manuales.      |
+| Drive en solo lectura               | Alcance `drive.readonly`. Solo se usan `GET` de metadatos, listados y descargas. Una prueba automatizada lo verifica.                                                                               |
 
 ---
 
@@ -47,89 +47,89 @@ Severidad: **Crítico** (produce resultados incorrectos o pérdida de datos), **
 
 ### 2.1 Vinculación e interpretación
 
-| ID | Sev. | Dónde | Problema | Consecuencia | Corrección |
-| --- | --- | --- | --- | --- | --- |
-| A1 | Crítico | `convex/qaVisual/clientMatrix.node.ts:205` | El producto del CSV se busca como subcadena literal dentro de la oferta normalizada (`includes(" PRODUCTO ")`). | `FESTIN DE LOCURA` no coincide con `FESTIN LOCURA`, así que la pieza 16 no tiene oferta. | Coincidencia por niveles con normalización controlada (§8.3). |
-| A2 | Crítico | `clientMatrix.node.ts:265-273` | Si no hay oferta única, se copia toda la celda K como valor esperado de `product`, `price` y `date`, y los tres se marcan como pendientes. | Detalles repite trece ofertas, el precio cita K6 en lugar de L6 y aparecen tres comentarios con el mismo texto. | Requisitos con estado `unresolved`, sin valor inventado, con un solo aviso estructurado que lista los controles afectados. |
-| A3 | Crítico | `convex/qaVisual/worker.ts:96-109` | Sin controles visuales, el worker devuelve `success` con código `skipped_no_visual_rules` y duración cero. | La pieza parece revisada aunque no pasó por el modelo y el progreso la cuenta como terminada. | La cobertura (§9.5) indica "solo controles técnicos". Además, con la nueva vinculación casi siempre habrá controles visuales para enviar. |
-| A4 | Alto | `analysisInput.node.ts` (`matrixLinked`), `worker.ts:55` | `matrixLinked` significa "se extrajo algún requisito" y el worker lo usa para decidir entre `notApplicable` y `unverifiable`. | Un CTA no detectado por el parser se informa como "no solicitado", aunque el pedido sí lo exija. | Estado explícito por requisito, con la diferencia entre `notRequested` y `unresolved`. |
-| A5 | Alto | `app/lib/qa-visual/production-csv.ts:42,51` | El CSV no quita el BOM, no detecta `;` como separador, sobrescribe IDs duplicados con `Object.fromEntries` y no conserva el número de línea. | Un CSV exportado desde Excel en español falla con "Falta la columna ID_PIEZA", y un duplicado se pierde sin aviso. | Parser con detección de BOM, codificación y separador, validación de columnas obligatorias, filas con número de línea y aviso `csv_duplicate_id`. |
-| A6 | Alto | `clientMatrix.node.ts:61` | Se lee `<v>` en crudo. Las fechas quedan como número serial (`45952`), las celdas combinadas no se propagan y una fórmula sin valor en caché queda vacía. | Si la columna A o B está combinada, la fila no coincide. Una vigencia escrita como fecha de Excel no se reconoce. | Lector de libro con estilos de fecha, `mergeCells` y aviso `formula_without_value` (§7.4). |
-| A7 | Medio | `clientMatrix.node.ts:170` y similares | Depende de posiciones fijas como `LEYENDA!C11`, `B9`, `B12`, `C15` y de textos como `Post Estático:`. | Otra plantilla falla sin avisar o produce requisitos incompletos. | Contrato de plantilla versionado que, si no reconoce el libro, lo informa (§7.4). |
-| A8 | Medio | `clientMatrix.node.ts:193-200` | Canal y fecha se extraen del nombre del archivo con listas fijas de canales y meses. | Se rompe ante otro canal, otro idioma o abreviaturas. | Tomar canal y temporalidad de CSV y Excel, y usar el nombre del archivo solo para corroborar. Si difieren, se emite un aviso. |
-| A9 | Medio | `app/lib/qa-visual/analysis-feed.ts:8` | Los avisos son cadenas de texto. El frontend los agrupa comparando una frase exacta. | Cualquier cambio de redacción vuelve a duplicar avisos. | Avisos con `code` y `affects[]`, agrupados en backend (§8.6). |
-| A10 | Medio | `driveClient.ts:130`, `driveSource.node.ts:89`, `campaignSync.ts:51` | Las subcarpetas se buscan por nombre exacto. Un nombre de imagen duplicado aborta toda la importación, y cualquier aviso de inventario también. | `Recursos` o `RECURSOS ` no se reconocen. Una sola imagen duplicada bloquea 60 piezas válidas. | Comparación sin distinguir mayúsculas, tildes ni espacios. Los problemas de una pieza se marcan en esa pieza y la importación continúa (§7.6). |
-| A11 | Medio | `driveClient.ts:10` | El límite del Excel es de 500 KB y no se controla el tamaño descomprimido del ZIP. | Rechaza matrices con logos o imágenes incrustadas y no protege contra un ZIP malicioso que se expande sin control. | Límite de 15 MB comprimido y 60 MB descomprimido, comprobado antes de leer las entradas del ZIP. |
+| ID  | Sev.    | Dónde                                                                | Problema                                                                                                                                                  | Consecuencia                                                                                                       | Corrección                                                                                                                                        |
+| --- | ------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | Crítico | `convex/qaVisual/clientMatrix.node.ts:205`                           | El producto del CSV se busca como subcadena literal dentro de la oferta normalizada (`includes(" PRODUCTO ")`).                                           | `FESTIN DE LOCURA` no coincide con `FESTIN LOCURA`, así que la pieza 16 no tiene oferta.                           | Coincidencia por niveles con normalización controlada (§8.3).                                                                                     |
+| A2  | Crítico | `clientMatrix.node.ts:265-273`                                       | Si no hay oferta única, se copia toda la celda K como valor esperado de `product`, `price` y `date`, y los tres se marcan como pendientes.                | Detalles repite trece ofertas, el precio cita K6 en lugar de L6 y aparecen tres comentarios con el mismo texto.    | Requisitos con estado `unresolved`, sin valor inventado, con un solo aviso estructurado que lista los controles afectados.                        |
+| A3  | Crítico | `convex/qaVisual/worker.ts:96-109`                                   | Sin controles visuales, el worker devuelve `success` con código `skipped_no_visual_rules` y duración cero.                                                | La pieza parece revisada aunque no pasó por el modelo y el progreso la cuenta como terminada.                      | La cobertura (§9.5) indica "solo controles técnicos". Además, con la nueva vinculación casi siempre habrá controles visuales para enviar.         |
+| A4  | Alto    | `analysisInput.node.ts` (`matrixLinked`), `worker.ts:55`             | `matrixLinked` significa "se extrajo algún requisito" y el worker lo usa para decidir entre `notApplicable` y `unverifiable`.                             | Un CTA no detectado por el parser se informa como "no solicitado", aunque el pedido sí lo exija.                   | Estado explícito por requisito, con la diferencia entre `notRequested` y `unresolved`.                                                            |
+| A5  | Alto    | `app/lib/qa-visual/production-csv.ts:42,51`                          | El CSV no quita el BOM, no detecta `;` como separador, sobrescribe IDs duplicados con `Object.fromEntries` y no conserva el número de línea.              | Un CSV exportado desde Excel en español falla con "Falta la columna ID_PIEZA", y un duplicado se pierde sin aviso. | Parser con detección de BOM, codificación y separador, validación de columnas obligatorias, filas con número de línea y aviso `csv_duplicate_id`. |
+| A6  | Alto    | `clientMatrix.node.ts:61`                                            | Se lee `<v>` en crudo. Las fechas quedan como número serial (`45952`), las celdas combinadas no se propagan y una fórmula sin valor en caché queda vacía. | Si la columna A o B está combinada, la fila no coincide. Una vigencia escrita como fecha de Excel no se reconoce.  | Lector de libro con estilos de fecha, `mergeCells` y aviso `formula_without_value` (§7.4).                                                        |
+| A7  | Medio   | `clientMatrix.node.ts:170` y similares                               | Depende de posiciones fijas como `LEYENDA!C11`, `B9`, `B12`, `C15` y de textos como `Post Estático:`.                                                     | Otra plantilla falla sin avisar o produce requisitos incompletos.                                                  | Contrato de plantilla versionado que, si no reconoce el libro, lo informa (§7.4).                                                                 |
+| A8  | Medio   | `clientMatrix.node.ts:193-200`                                       | Canal y fecha se extraen del nombre del archivo con listas fijas de canales y meses.                                                                      | Se rompe ante otro canal, otro idioma o abreviaturas.                                                              | Tomar canal y temporalidad de CSV y Excel, y usar el nombre del archivo solo para corroborar. Si difieren, se emite un aviso.                     |
+| A9  | Medio   | `app/lib/qa-visual/analysis-feed.ts:8`                               | Los avisos son cadenas de texto. El frontend los agrupa comparando una frase exacta.                                                                      | Cualquier cambio de redacción vuelve a duplicar avisos.                                                            | Avisos con `code` y `affects[]`, agrupados en backend (§8.6).                                                                                     |
+| A10 | Medio   | `driveClient.ts:130`, `driveSource.node.ts:89`, `campaignSync.ts:51` | Las subcarpetas se buscan por nombre exacto. Un nombre de imagen duplicado aborta toda la importación, y cualquier aviso de inventario también.           | `Recursos` o `RECURSOS ` no se reconocen. Una sola imagen duplicada bloquea 60 piezas válidas.                     | Comparación sin distinguir mayúsculas, tildes ni espacios. Los problemas de una pieza se marcan en esa pieza y la importación continúa (§7.6).    |
+| A11 | Medio   | `driveClient.ts:10`                                                  | El límite del Excel es de 500 KB y no se controla el tamaño descomprimido del ZIP.                                                                        | Rechaza matrices con logos o imágenes incrustadas y no protege contra un ZIP malicioso que se expande sin control. | Límite de 15 MB comprimido y 60 MB descomprimido, comprobado antes de leer las entradas del ZIP.                                                  |
 
 ### 2.2 Identidad, versiones y modelo de datos
 
-| ID | Sev. | Dónde | Problema | Consecuencia | Corrección |
-| --- | --- | --- | --- | --- | --- |
-| B1 | Crítico | `analysisInput.node.ts:107-108` | `ruleVersion` incluye la producción de **toda** la campaña y los nombres de **todas** las piezas, y entra en el `contextKey` de cada pieza. | Agregar una imagen o corregir una fila del CSV deja desactualizados los análisis de las 61 piezas, y la reutilización deja de funcionar. | `inputHash` por pieza, calculado con la imagen, los requisitos de esa pieza y la versión de política (§6). |
-| B2 | Alto | `analysisInput.node.ts:146-155`, índices `by_piece` | `contextKey` incluye `name` y `updatedAt` (que es `modifiedTime`). Los resultados se buscan por `input.name`. | Renombrar un archivo o cambiar sus metadatos invalida el análisis y pierde el historial. | Identidad por `pieceId` y `pieceVersionId`, y versión por contenido (`md5Checksum`). |
-| B3 | Alto | `tables.ts` | Algunas tablas usan `campaign` como string (`reviewKey`) y otras `campaignId` como ID. | Se mezclan referencias, hacen falta joins por hash y la integridad es débil. | Usar `campaignId: v.id("qaVisualCampaigns")` en todas las tablas. Eliminar `reviewKey`. |
-| B4 | Alto | `documents.ts:48` | Cada celda del Excel es un documento y todas se insertan en una sola mutación. La tabla se llama `qaVisualClientRequirements`, pero guarda celdas. | Una matriz grande supera los límites de escritura por transacción. El nombre confunde celdas con requisitos. | Guardar el libro interpretado como JSON en Storage. La procedencia que necesita la UI se copia en cada requisito. |
-| B5 | Medio | `campaignSnapshots.ts:89` | `publish` recibe todas las piezas como argumento y las inserta en una sola mutación. | Con cientos de piezas se acerca a los límites de tamaño de argumentos y de escrituras. | Escritura por lotes en una importación en estado `building` y luego un cambio de puntero atómico (§7.2). |
-| B6 | Medio | `tables.ts` (`qaVisualReviews.input`) | Cada revisión copia el `input` completo. | Hay datos duplicados y documentos grandes. | Referenciar `importPieceId`, que es inmutable. |
-| B7 | Medio | Varias | Hay código heredado: `qaVisualAssetVersions`, `qaVisualRuleSets` (redundante con `snapshot.rules`), `activeBatch`, `rollingQueue`, `finishRun`, `hasStorage`, los campos opcionales `piece` y `requirement`, y `clearFullCampaignTest` con el número 61 fijo (`documents.ts:105`). | Aumenta la superficie que hay que mantener y crea caminos que no se prueban. | Eliminarlo en la migración (§17). |
-| B8 | Medio | `app/lib/qa-visual/piece-inventory.ts:61` | `versions: 1` está fijo. | No existe la versión creativa. Una nueva entrega heredaría comentarios y decisiones. | `qaVisualPieceVersions` (§5, §6). |
+| ID  | Sev.    | Dónde                                               | Problema                                                                                                                                                                                                                                                                           | Consecuencia                                                                                                                             | Corrección                                                                                                        |
+| --- | ------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| B1  | Crítico | `analysisInput.node.ts:107-108`                     | `ruleVersion` incluye la producción de **toda** la campaña y los nombres de **todas** las piezas, y entra en el `contextKey` de cada pieza.                                                                                                                                        | Agregar una imagen o corregir una fila del CSV deja desactualizados los análisis de las 61 piezas, y la reutilización deja de funcionar. | `inputHash` por pieza, calculado con la imagen, los requisitos de esa pieza y la versión de política (§6).        |
+| B2  | Alto    | `analysisInput.node.ts:146-155`, índices `by_piece` | `contextKey` incluye `name` y `updatedAt` (que es `modifiedTime`). Los resultados se buscan por `input.name`.                                                                                                                                                                      | Renombrar un archivo o cambiar sus metadatos invalida el análisis y pierde el historial.                                                 | Identidad por `pieceId` y `pieceVersionId`, y versión por contenido (`md5Checksum`).                              |
+| B3  | Alto    | `tables.ts`                                         | Algunas tablas usan `campaign` como string (`reviewKey`) y otras `campaignId` como ID.                                                                                                                                                                                             | Se mezclan referencias, hacen falta joins por hash y la integridad es débil.                                                             | Usar `campaignId: v.id("qaVisualCampaigns")` en todas las tablas. Eliminar `reviewKey`.                           |
+| B4  | Alto    | `documents.ts:48`                                   | Cada celda del Excel es un documento y todas se insertan en una sola mutación. La tabla se llama `qaVisualClientRequirements`, pero guarda celdas.                                                                                                                                 | Una matriz grande supera los límites de escritura por transacción. El nombre confunde celdas con requisitos.                             | Guardar el libro interpretado como JSON en Storage. La procedencia que necesita la UI se copia en cada requisito. |
+| B5  | Medio   | `campaignSnapshots.ts:89`                           | `publish` recibe todas las piezas como argumento y las inserta en una sola mutación.                                                                                                                                                                                               | Con cientos de piezas se acerca a los límites de tamaño de argumentos y de escrituras.                                                   | Escritura por lotes en una importación en estado `building` y luego un cambio de puntero atómico (§7.2).          |
+| B6  | Medio   | `tables.ts` (`qaVisualReviews.input`)               | Cada revisión copia el `input` completo.                                                                                                                                                                                                                                           | Hay datos duplicados y documentos grandes.                                                                                               | Referenciar `importPieceId`, que es inmutable.                                                                    |
+| B7  | Medio   | Varias                                              | Hay código heredado: `qaVisualAssetVersions`, `qaVisualRuleSets` (redundante con `snapshot.rules`), `activeBatch`, `rollingQueue`, `finishRun`, `hasStorage`, los campos opcionales `piece` y `requirement`, y `clearFullCampaignTest` con el número 61 fijo (`documents.ts:105`). | Aumenta la superficie que hay que mantener y crea caminos que no se prueban.                                                             | Eliminarlo en la migración (§17).                                                                                 |
+| B8  | Medio   | `app/lib/qa-visual/piece-inventory.ts:61`           | `versions: 1` está fijo.                                                                                                                                                                                                                                                           | No existe la versión creativa. Una nueva entrega heredaría comentarios y decisiones.                                                     | `qaVisualPieceVersions` (§5, §6).                                                                                 |
 
 ### 2.3 Orquestación
 
-| ID | Sev. | Dónde | Problema | Consecuencia | Corrección |
-| --- | --- | --- | --- | --- | --- |
-| C1 | Alto | `runDispatch.ts`, `pipeline.ts`, `convex/workflows/index.ts:23` | La cola propia usa un arreglo `activeBatch` en la corrida, lanza un workflow por pieza y comparte el `WorkflowManager` de toda la app (`maxParallelism: 10`). | QA compite con otras funcionalidades y otras funcionalidades compiten con QA. No hay límite global de QA. Conviven dos modelos de cola. | Workpools propios de QA (§10.1). |
-| C2 | Alto | `imagePreparation.node.ts:22` | Mientras otra acción tiene la reserva, se espera activamente con `setTimeout(800)`. | Se paga tiempo de acción sin hacer trabajo y el código es frágil. | Un trabajo por versión de imagen, encolado una sola vez y con estado en la base de datos (§13). |
-| C3 | Medio | `worker.ts:179`, `commentLocations.ts:61,72` | Si la localización falla o devuelve `uncertain`, se descarta toda la respuesta y se reintenta la pieza. | Se pierden conclusiones válidas, sube el costo y la pieza puede terminar en error. | La localización deja de bloquear: el comentario queda como `unlocated` y se muestra como general (§9.4). |
-| C4 | Medio | `runs.ts` (`expirePreparation`) | Un vencimiento programado a diez minutos hace de parche de recuperación. | Puede marcar como fallida una pieza lenta pero sana. | Workpool garantiza el `onComplete`. Se agrega un cron de vigilancia como red de seguridad. |
-| C5 | Medio | `runs.ts:59` | Si hay una corrida activa, `start` devuelve esa corrida sin avisar. | Pedir el análisis de una sola pieza no hace nada y la UI no lo explica. | La pieza se agrega al frente de la cola activa (§10.4). |
-| C6 | Medio | `campaignSync.ts` | La importación no reintenta los errores transitorios de Drive y su mensaje es genérico. | Un error 503 momentáneo obliga a reintentar a mano. | Reintento con espera exponencial en el pool de importación y códigos de error claros. |
-| C7 | Bajo | — | No hay forma de detener una corrida. | No se puede frenar un análisis costoso que se lanzó por error. | `runs.cancel` (§10.5). |
-| C8 | Medio | `runs.start` | **Analizar piezas** reanaliza todo siempre. | Gasto innecesario y espera más larga. | Por defecto se analizan las pendientes, las desactualizadas y las fallidas. "Reanalizar todas" queda como acción explícita (§19). |
+| ID  | Sev.  | Dónde                                                           | Problema                                                                                                                                                      | Consecuencia                                                                                                                            | Corrección                                                                                                                        |
+| --- | ----- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Alto  | `runDispatch.ts`, `pipeline.ts`, `convex/workflows/index.ts:23` | La cola propia usa un arreglo `activeBatch` en la corrida, lanza un workflow por pieza y comparte el `WorkflowManager` de toda la app (`maxParallelism: 10`). | QA compite con otras funcionalidades y otras funcionalidades compiten con QA. No hay límite global de QA. Conviven dos modelos de cola. | Workpools propios de QA (§10.1).                                                                                                  |
+| C2  | Alto  | `imagePreparation.node.ts:22`                                   | Mientras otra acción tiene la reserva, se espera activamente con `setTimeout(800)`.                                                                           | Se paga tiempo de acción sin hacer trabajo y el código es frágil.                                                                       | Un trabajo por versión de imagen, encolado una sola vez y con estado en la base de datos (§13).                                   |
+| C3  | Medio | `worker.ts:179`, `commentLocations.ts:61,72`                    | Si la localización falla o devuelve `uncertain`, se descarta toda la respuesta y se reintenta la pieza.                                                       | Se pierden conclusiones válidas, sube el costo y la pieza puede terminar en error.                                                      | La localización deja de bloquear: el comentario queda como `unlocated` y se muestra como general (§9.4).                          |
+| C4  | Medio | `runs.ts` (`expirePreparation`)                                 | Un vencimiento programado a diez minutos hace de parche de recuperación.                                                                                      | Puede marcar como fallida una pieza lenta pero sana.                                                                                    | Workpool garantiza el `onComplete`. Se agrega un cron de vigilancia como red de seguridad.                                        |
+| C5  | Medio | `runs.ts:59`                                                    | Si hay una corrida activa, `start` devuelve esa corrida sin avisar.                                                                                           | Pedir el análisis de una sola pieza no hace nada y la UI no lo explica.                                                                 | La pieza se agrega al frente de la cola activa (§10.4).                                                                           |
+| C6  | Medio | `campaignSync.ts`                                               | La importación no reintenta los errores transitorios de Drive y su mensaje es genérico.                                                                       | Un error 503 momentáneo obliga a reintentar a mano.                                                                                     | Reintento con espera exponencial en el pool de importación y códigos de error claros.                                             |
+| C7  | Bajo  | —                                                               | No hay forma de detener una corrida.                                                                                                                          | No se puede frenar un análisis costoso que se lanzó por error.                                                                          | `runs.cancel` (§10.5).                                                                                                            |
+| C8  | Medio | `runs.start`                                                    | **Analizar piezas** reanaliza todo siempre.                                                                                                                   | Gasto innecesario y espera más larga.                                                                                                   | Por defecto se analizan las pendientes, las desactualizadas y las fallidas. "Reanalizar todas" queda como acción explícita (§19). |
 
 ### 2.4 Consultas y rendimiento
 
-| ID | Sev. | Dónde | Problema | Corrección |
-| --- | --- | --- | --- | --- |
-| D1 | Alto | `runs.ts:319,354` | `dashboard` recibe hasta 1000 entradas desde el cliente y hace hasta tres consultas por pieza. Se vuelve a ejecutar cada vez que cambia **cualquier** revisión. | Proyección de tarjeta en `qaVisualPieces` y consulta de detalle solo para la pieza seleccionada (§11). |
-| D2 | Medio | `campaignSnapshots.ts:144` | `viewer` devuelve los requisitos de todas las piezas y busca su imagen una por una. Se invalida cada vez que una imagen queda lista. | Los requisitos se cargan solo en el detalle. El estado de imagen va en la tarjeta. |
-| D3 | Medio | `mediaHttp.ts:7`, `media/route.ts:18,24` | Las imágenes se sirven con `Cache-Control: private, no-store` aunque son inmutables por versión. | `private, max-age=31536000, immutable` y `ETag` por hash (§13.3). |
-| D4 | Bajo | `CampaignSnapshotViewer.tsx:19` | Abrir el editor dispara una mutación de preparación de imágenes. | La preparación la encola la publicación de la importación. Abrir el editor solo lee. |
+| ID  | Sev.  | Dónde                                    | Problema                                                                                                                                                        | Corrección                                                                                             |
+| --- | ----- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| D1  | Alto  | `runs.ts:319,354`                        | `dashboard` recibe hasta 1000 entradas desde el cliente y hace hasta tres consultas por pieza. Se vuelve a ejecutar cada vez que cambia **cualquier** revisión. | Proyección de tarjeta en `qaVisualPieces` y consulta de detalle solo para la pieza seleccionada (§11). |
+| D2  | Medio | `campaignSnapshots.ts:144`               | `viewer` devuelve los requisitos de todas las piezas y busca su imagen una por una. Se invalida cada vez que una imagen queda lista.                            | Los requisitos se cargan solo en el detalle. El estado de imagen va en la tarjeta.                     |
+| D3  | Medio | `mediaHttp.ts:7`, `media/route.ts:18,24` | Las imágenes se sirven con `Cache-Control: private, no-store` aunque son inmutables por versión.                                                                | `private, max-age=31536000, immutable` y `ETag` por hash (§13.3).                                      |
+| D4  | Bajo  | `CampaignSnapshotViewer.tsx:19`          | Abrir el editor dispara una mutación de preparación de imágenes.                                                                                                | La preparación la encola la publicación de la importación. Abrir el editor solo lee.                   |
 
 ### 2.5 Dictamen y presentación
 
-| ID | Sev. | Dónde | Problema | Corrección |
-| --- | --- | --- | --- | --- |
-| E1 | Alto | `runs.ts:269` | `findings` oculta la cobertura. Una pieza con cero controles visuales puede quedar como `validated`. | Dictamen y cobertura separados (§9.5). |
-| E2 | Alto | `QaViewer.tsx` | El 100 % de progreso no distingue aprobadas, con hallazgos, parciales y con error. | Barra segmentada con el desglose (§19). |
-| E3 | Medio | `analysis-feed.ts:64` | Los marcadores se numeran con el índice de `findings`, que incluye los `pass`. | Numeración estable por hilo visible. |
-| E4 | Medio | `analysis-feed.ts` | La UI solo diferencia `warning`. Un hallazgo `blocking` se ve igual que uno menor. | La severidad viaja como dato y la UI la distingue. |
+| ID  | Sev.  | Dónde                 | Problema                                                                                             | Corrección                                         |
+| --- | ----- | --------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| E1  | Alto  | `runs.ts:269`         | `findings` oculta la cobertura. Una pieza con cero controles visuales puede quedar como `validated`. | Dictamen y cobertura separados (§9.5).             |
+| E2  | Alto  | `QaViewer.tsx`        | El 100 % de progreso no distingue aprobadas, con hallazgos, parciales y con error.                   | Barra segmentada con el desglose (§19).            |
+| E3  | Medio | `analysis-feed.ts:64` | Los marcadores se numeran con el índice de `findings`, que incluye los `pass`.                       | Numeración estable por hilo visible.               |
+| E4  | Medio | `analysis-feed.ts`    | La UI solo diferencia `warning`. Un hallazgo `blocking` se ve igual que uno menor.                   | La severidad viaja como dato y la UI la distingue. |
 
 ### 2.6 Colaboración humana
 
-| ID | Sev. | Dónde | Problema | Corrección |
-| --- | --- | --- | --- | --- |
-| F1 | Crítico (producto) | `use-review-session.ts:25`, `use-review-decisions.ts`, `use-canvas-annotations.ts` | Comentarios, respuestas, resoluciones, decisiones y anotaciones viven en `useState`. | Tablas `qaVisualThreads`, `qaVisualComments` y `qaVisualDecisions` (§12). |
-| F2 | Alto | `PieceHistory` | El historial se arma con la actividad de la sesión. | Historial derivado de datos guardados (§12.6). |
-| F3 | Medio | `ReviewDialogs` (Compartir) | Compartir copia la URL, pero esa URL no abre la pieza ni el comentario. | Enlace profundo `?pieza=…&v=…&hilo=…` (§19). |
+| ID  | Sev.               | Dónde                                                                              | Problema                                                                             | Corrección                                                                |
+| --- | ------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| F1  | Crítico (producto) | `use-review-session.ts:25`, `use-review-decisions.ts`, `use-canvas-annotations.ts` | Comentarios, respuestas, resoluciones, decisiones y anotaciones viven en `useState`. | Tablas `qaVisualThreads`, `qaVisualComments` y `qaVisualDecisions` (§12). |
+| F2  | Alto               | `PieceHistory`                                                                     | El historial se arma con la actividad de la sesión.                                  | Historial derivado de datos guardados (§12.6).                            |
+| F3  | Medio              | `ReviewDialogs` (Compartir)                                                        | Compartir copia la URL, pero esa URL no abre la pieza ni el comentario.              | Enlace profundo `?pieza=…&v=…&hilo=…` (§19).                              |
 
 ### 2.7 Estructura del frontend
 
-| ID | Sev. | Dónde | Problema | Corrección |
-| --- | --- | --- | --- | --- |
-| G1 | Medio | `use-review-session.ts` | Son 324 líneas que devuelven unos 75 campos, y todo se pasa como `session` a cada componente. | Hooks por responsabilidad. Cada componente se suscribe a lo que necesita (§11.4). |
-| G2 | Medio | `driveSource.node.ts`, `clientMatrix.node.ts` | El backend importa de `app/lib`, lo que invierte la dependencia. | La lógica de dominio vive en `convex/qaVisual/model/`. El frontend usa tipos derivados de las funciones (`FunctionReturnType`). |
-| G3 | Medio | `piece-inventory.ts` | El cliente vuelve a calcular dimensiones, formato y etiquetas con expresiones regulares sobre el nombre del archivo. | El backend entrega los datos de presentación ya resueltos. |
-| G4 | Medio | `CampaignCard.tsx`, `campaigns.list` | La tarjeta de campaña solo muestra el nombre, sin estado de importación ni de análisis. | `campaigns.list` devuelve estado y resumen (§19.1). |
+| ID  | Sev.  | Dónde                                         | Problema                                                                                                             | Corrección                                                                                                                      |
+| --- | ----- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | Medio | `use-review-session.ts`                       | Son 324 líneas que devuelven unos 75 campos, y todo se pasa como `session` a cada componente.                        | Hooks por responsabilidad. Cada componente se suscribe a lo que necesita (§11.4).                                               |
+| G2  | Medio | `driveSource.node.ts`, `clientMatrix.node.ts` | El backend importa de `app/lib`, lo que invierte la dependencia.                                                     | La lógica de dominio vive en `convex/qaVisual/model/`. El frontend usa tipos derivados de las funciones (`FunctionReturnType`). |
+| G3  | Medio | `piece-inventory.ts`                          | El cliente vuelve a calcular dimensiones, formato y etiquetas con expresiones regulares sobre el nombre del archivo. | El backend entrega los datos de presentación ya resueltos.                                                                      |
+| G4  | Medio | `CampaignCard.tsx`, `campaigns.list`          | La tarjeta de campaña solo muestra el nombre, sin estado de importación ni de análisis.                              | `campaigns.list` devuelve estado y resumen (§19.1).                                                                             |
 
 ### 2.8 Seguridad y operación
 
-| ID | Sev. | Dónde | Problema | Corrección |
-| --- | --- | --- | --- | --- |
-| H1 | Alto | `app/lib/qa-visual/server/access.ts`, `media/route.ts:4` | El acceso se habilita con `NODE_ENV === "development"`. | Usar una bandera explícita `QA_VISUAL_ENABLED` en Next y en Convex, sin quitar los controles de rol (§14). |
-| H2 | Medio | `convex/lib/llmFallback.ts` | QA usa la configuración de modelos compartida. | Configuración propia en `model/llm.ts` que reutiliza solo las fábricas de proveedor. |
-| H3 | Medio | `worker.ts` | No se guardan el prompt ni la respuesta cruda. | Versión de política más JSON de la respuesta en Storage por intento (§9.6). |
-| H4 | Bajo | `campaignRegistration.ts` | La UI no muestra el correo de la cuenta de servicio. | Mostrarlo, con botón de copiar, en el diálogo de alta (§19.2). |
+| ID  | Sev.  | Dónde                                                    | Problema                                                | Corrección                                                                                                 |
+| --- | ----- | -------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| H1  | Alto  | `app/lib/qa-visual/server/access.ts`, `media/route.ts:4` | El acceso se habilita con `NODE_ENV === "development"`. | Usar una bandera explícita `QA_VISUAL_ENABLED` en Next y en Convex, sin quitar los controles de rol (§14). |
+| H2  | Medio | `convex/lib/llmFallback.ts`                              | QA usa la configuración de modelos compartida.          | Configuración propia en `model/llm.ts` que reutiliza solo las fábricas de proveedor.                       |
+| H3  | Medio | `worker.ts`                                              | No se guardan el prompt ni la respuesta cruda.          | Versión de política más JSON de la respuesta en Storage por intento (§9.6).                                |
+| H4  | Bajo  | `campaignRegistration.ts`                                | La UI no muestra el correo de la cuenta de servicio.    | Mostrarlo, con botón de copiar, en el diálogo de alta (§19.2).                                             |
 
 ### 2.9 Qué se conserva
 
@@ -240,8 +240,8 @@ app/lib/qa-visual/
 Se registran en `convex/convex.config.ts` con nombre propio. Así QA no comparte su cola con el resto de la aplicación:
 
 ```ts
-app.use(workpool, { name: "qaVisualImportPool" });   // maxParallelism: 2
-app.use(workpool, { name: "qaVisualImagePool" });    // maxParallelism: 4
+app.use(workpool, { name: "qaVisualImportPool" }); // maxParallelism: 2
+app.use(workpool, { name: "qaVisualImagePool" }); // maxParallelism: 4
 app.use(workpool, { name: "qaVisualAnalysisPool" }); // maxParallelism: configurable según capacidad medida (§10.1)
 ```
 
@@ -251,22 +251,22 @@ app.use(workpool, { name: "qaVisualAnalysisPool" }); // maxParallelism: configur
 
 ## 4 Buenas prácticas de Convex aplicadas
 
-| Práctica | Aplicación en QA Visual |
-| --- | --- |
-| Validadores en `args` y `returns` | Todas las funciones públicas y todas las internas con argumentos. Los enums se definen como uniones de literales en `validators.ts`. |
-| Control de acceso al inicio de cada función pública | `requireCampaign(ctx, campaignId)` devuelve el usuario y la campaña, o lanza `ConvexError` con un código. |
-| Funciones internas para trabajos | Los trabajos y callbacks de Workpool son `internalAction` o `internalMutation`. El cliente nunca los llama. |
-| Solo consultas con índice | Nunca `.filter()` sobre tablas sin límite. Listas acotadas con `.take(n)` y paginación (`paginationOptsValidator`) para historial, campañas y corridas. |
-| Arreglos acotados dentro de documentos | `findings` ≤ 20, `attempts` ≤ 6, `issues` por pieza ≤ 30, `ignoredFiles` ≤ 200. Lo que puede crecer va en su propia tabla o en Storage. |
-| Documentos chicos | Los originales y el JSON interpretado del libro van en Storage. Las tablas guardan referencias. |
-| Acciones solo para E/S externa | Las acciones son las únicas que hablan con Drive, Sharp y los LLM. Escriben mediante mutaciones internas con pocas llamadas y por lotes. |
-| Encolar desde mutaciones | Las corridas, importaciones e imágenes se encolan dentro de la misma transacción que crea el estado. Si la transacción falla, no queda trabajo huérfano. |
-| Sin espera activa | Ningún `setTimeout` ni bucle de sondeo dentro de las acciones. Las esperas se hacen con `runAfter` de Workpool. |
-| Mutaciones idempotentes | Cada mutación verifica el estado esperado (por ejemplo, `status === "running"` y `workId` coincidente) antes de escribir. |
-| Consultas deterministas | Ninguna consulta usa `Date.now()`. Los vencimientos los decide una mutación o un cron. |
-| Puntos calientes controlados | Los contadores de corrida se actualizan en la misma mutación que cierra cada pieza. Con cuatro escrituras concurrentes, los reintentos automáticos de concurrencia optimista de Convex son suficientes. |
-| Consultas reactivas pequeñas | Hay tres consultas: la cabecera de campaña, las tarjetas (proyección liviana) y el detalle de la pieza seleccionada. |
-| Limpieza de Storage | Toda subida que no termina asociada se borra en el mismo flujo. Un cron diario elimina huérfanos. |
+| Práctica                                            | Aplicación en QA Visual                                                                                                                                                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Validadores en `args` y `returns`                   | Todas las funciones públicas y todas las internas con argumentos. Los enums se definen como uniones de literales en `validators.ts`.                                                                    |
+| Control de acceso al inicio de cada función pública | `requireCampaign(ctx, campaignId)` devuelve el usuario y la campaña, o lanza `ConvexError` con un código.                                                                                               |
+| Funciones internas para trabajos                    | Los trabajos y callbacks de Workpool son `internalAction` o `internalMutation`. El cliente nunca los llama.                                                                                             |
+| Solo consultas con índice                           | Nunca `.filter()` sobre tablas sin límite. Listas acotadas con `.take(n)` y paginación (`paginationOptsValidator`) para historial, campañas y corridas.                                                 |
+| Arreglos acotados dentro de documentos              | `findings` ≤ 20, `attempts` ≤ 6, `issues` por pieza ≤ 30, `ignoredFiles` ≤ 200. Lo que puede crecer va en su propia tabla o en Storage.                                                                 |
+| Documentos chicos                                   | Los originales y el JSON interpretado del libro van en Storage. Las tablas guardan referencias.                                                                                                         |
+| Acciones solo para E/S externa                      | Las acciones son las únicas que hablan con Drive, Sharp y los LLM. Escriben mediante mutaciones internas con pocas llamadas y por lotes.                                                                |
+| Encolar desde mutaciones                            | Las corridas, importaciones e imágenes se encolan dentro de la misma transacción que crea el estado. Si la transacción falla, no queda trabajo huérfano.                                                |
+| Sin espera activa                                   | Ningún `setTimeout` ni bucle de sondeo dentro de las acciones. Las esperas se hacen con `runAfter` de Workpool.                                                                                         |
+| Mutaciones idempotentes                             | Cada mutación verifica el estado esperado (por ejemplo, `status === "running"` y `workId` coincidente) antes de escribir.                                                                               |
+| Consultas deterministas                             | Ninguna consulta usa `Date.now()`. Los vencimientos los decide una mutación o un cron.                                                                                                                  |
+| Puntos calientes controlados                        | Los contadores de corrida se actualizan en la misma mutación que cierra cada pieza. Con cuatro escrituras concurrentes, los reintentos automáticos de concurrencia optimista de Convex son suficientes. |
+| Consultas reactivas pequeñas                        | Hay tres consultas: la cabecera de campaña, las tarjetas (proyección liviana) y el detalle de la pieza seleccionada.                                                                                    |
+| Limpieza de Storage                                 | Toda subida que no termina asociada se borra en el mismo flujo. Un cron diario elimina huérfanos.                                                                                                       |
 
 ---
 
@@ -274,91 +274,91 @@ app.use(workpool, { name: "qaVisualAnalysisPool" }); // maxParallelism: configur
 
 Hay doce tablas. Cada una corresponde a una capa de verdad:
 
-| Capa | Tablas |
-| --- | --- |
-| Registro | `qaVisualCampaigns` |
-| Original | `qaVisualSourceFiles` (Excel y CSV en Storage) |
-| Interpretado (inmutable) | `qaVisualImports`, `qaVisualImportPieces` |
-| Identidad | `qaVisualPieces`, `qaVisualPieceVersions` |
-| Confirmado por personas | `qaVisualLinkOverrides` |
-| Revisión de IA | `qaVisualRuns`, `qaVisualReviews` |
-| Revisión humana | `qaVisualThreads`, `qaVisualComments`, `qaVisualDecisions` |
+| Capa                     | Tablas                                                     |
+| ------------------------ | ---------------------------------------------------------- |
+| Registro                 | `qaVisualCampaigns`                                        |
+| Original                 | `qaVisualSourceFiles` (Excel y CSV en Storage)             |
+| Interpretado (inmutable) | `qaVisualImports`, `qaVisualImportPieces`                  |
+| Identidad                | `qaVisualPieces`, `qaVisualPieceVersions`                  |
+| Confirmado por personas  | `qaVisualLinkOverrides`                                    |
+| Revisión de IA           | `qaVisualRuns`, `qaVisualReviews`                          |
+| Revisión humana          | `qaVisualThreads`, `qaVisualComments`, `qaVisualDecisions` |
 
 ### 5.1 `qaVisualCampaigns`
 
-| Campo | Tipo | Nota |
-| --- | --- | --- |
-| `name` | string | Nombre visible. Puede editarse en la app y nunca cambia nada en Drive. |
-| `driveFolderId`, `driveFolderName` | string | Carpeta raíz y nombre que tiene en Drive. |
-| `status` | `active` \| `archived` | |
-| `createdBy` | `Id<"users">` | |
-| `sourceSelection?` | `{ excelFileId?, csvFileId? }` | Elección explícita cuando hay más de un candidato (§7.3). |
-| `currentImportId?` | `Id<"qaVisualImports">` | Última importación lista. Es la que lee el editor. |
-| `activeImportId?` | `Id<"qaVisualImports">` | Importación en curso. Si está presente, no se lanza otra. |
-| `activeRunId?` | `Id<"qaVisualRuns">` | Corrida en curso. |
-| `summary` | objeto | `{ pieces, aiValidated, aiFindings, aiPartial, aiFailed, aiPending, aiStale, approved, changesRequested }` para la tarjeta de campaña. |
+| Campo                              | Tipo                           | Nota                                                                                                                                   |
+| ---------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                             | string                         | Nombre visible. Puede editarse en la app y nunca cambia nada en Drive.                                                                 |
+| `driveFolderId`, `driveFolderName` | string                         | Carpeta raíz y nombre que tiene en Drive.                                                                                              |
+| `status`                           | `active` \| `archived`         |                                                                                                                                        |
+| `createdBy`                        | `Id<"users">`                  |                                                                                                                                        |
+| `sourceSelection?`                 | `{ excelFileId?, csvFileId? }` | Elección explícita cuando hay más de un candidato (§7.3).                                                                              |
+| `currentImportId?`                 | `Id<"qaVisualImports">`        | Última importación lista. Es la que lee el editor.                                                                                     |
+| `activeImportId?`                  | `Id<"qaVisualImports">`        | Importación en curso. Si está presente, no se lanza otra.                                                                              |
+| `activeRunId?`                     | `Id<"qaVisualRuns">`           | Corrida en curso.                                                                                                                      |
+| `summary`                          | objeto                         | `{ pieces, aiValidated, aiFindings, aiPartial, aiFailed, aiPending, aiStale, approved, changesRequested }` para la tarjeta de campaña. |
 
 Índices: `by_drive_folder [driveFolderId]` (único por lógica) y `by_status [status]`.
 
 ### 5.2 `qaVisualSourceFiles`
 
-| Campo | Nota |
-| --- | --- |
-| `campaignId`, `kind: excel \| csv` | |
-| `driveFileId`, `driveVersion`, `md5?`, `sha256` | El `sha256` se calcula al descargar. |
-| `name`, `mimeType`, `bytes`, `modifiedAt` | |
-| `storageId` | Original sin cambios. |
-| `parsedId?` | JSON en Storage con las celdas del libro (incluidas las fechas convertidas y las celdas combinadas expandidas) o las filas del CSV con su número de línea. Se usa para reprocesar sin Drive y para auditar. |
-| `parserVersion` | Versión con la que se generó `parsedId`. |
+| Campo                                           | Nota                                                                                                                                                                                                        |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaignId`, `kind: excel \| csv`              |                                                                                                                                                                                                             |
+| `driveFileId`, `driveVersion`, `md5?`, `sha256` | El `sha256` se calcula al descargar.                                                                                                                                                                        |
+| `name`, `mimeType`, `bytes`, `modifiedAt`       |                                                                                                                                                                                                             |
+| `storageId`                                     | Original sin cambios.                                                                                                                                                                                       |
+| `parsedId?`                                     | JSON en Storage con las celdas del libro (incluidas las fechas convertidas y las celdas combinadas expandidas) o las filas del CSV con su número de línea. Se usa para reprocesar sin Drive y para auditar. |
+| `parserVersion`                                 | Versión con la que se generó `parsedId`.                                                                                                                                                                    |
 
 Índices: `by_campaign_drive [campaignId, driveFileId, driveVersion]` y `by_campaign_sha [campaignId, kind, sha256]`.
 
 ### 5.3 `qaVisualImports` (antes snapshot)
 
-| Campo | Nota |
-| --- | --- |
-| `campaignId`, `requestedBy?`, `trigger` | `register` \| `manual` \| `reprocess` \| `parserUpgrade`. |
-| `status` | `queued` → `running` → `building` → `ready` \| `failed` \| `superseded`. Una importación reutilizada no crea una fila nueva: solo actualiza el puntero y la fecha. |
-| `stage?` | `listing` \| `downloading` \| `parsing` \| `linking` \| `writing`. Se usa en el banner de progreso. |
-| `fingerprint?`, `parserVersion`, `templateVersion` | |
-| `excelFileId?`, `csvFileId?`, `deploymentFolderId?` | |
-| `rules` | Catálogo de controles de esta importación (≤ 20). Reemplaza a `qaVisualRuleSets`. |
-| `issues` | Avisos de nivel campaña (≤ 50). |
-| `counts` | `{ images, linked, linkedWithNotices, blocked, csvRowsWithoutImage, ignoredFiles }`. |
-| `manifest` | `[{ pieceId, versionId, importPieceId, order, display }]` (≤ 1000). Lo completa `writeChunk` y lo consume `publish` (§7.2.1). |
-| `ignoredFiles` | `[{ name, reason }]` (≤ 200). |
-| `error?` | `{ code, message, retryable }`. |
-| `workId?`, `startedAt`, `finishedAt?` | |
+| Campo                                               | Nota                                                                                                                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `campaignId`, `requestedBy?`, `trigger`             | `register` \| `manual` \| `reprocess` \| `parserUpgrade`.                                                                                                          |
+| `status`                                            | `queued` → `running` → `building` → `ready` \| `failed` \| `superseded`. Una importación reutilizada no crea una fila nueva: solo actualiza el puntero y la fecha. |
+| `stage?`                                            | `listing` \| `downloading` \| `parsing` \| `linking` \| `writing`. Se usa en el banner de progreso.                                                                |
+| `fingerprint?`, `parserVersion`, `templateVersion`  |                                                                                                                                                                    |
+| `excelFileId?`, `csvFileId?`, `deploymentFolderId?` |                                                                                                                                                                    |
+| `rules`                                             | Catálogo de controles de esta importación (≤ 20). Reemplaza a `qaVisualRuleSets`.                                                                                  |
+| `issues`                                            | Avisos de nivel campaña (≤ 50).                                                                                                                                    |
+| `counts`                                            | `{ images, linked, linkedWithNotices, blocked, csvRowsWithoutImage, ignoredFiles }`.                                                                               |
+| `manifest`                                          | `[{ pieceId, versionId, importPieceId, order, display }]` (≤ 1000). Lo completa `writeChunk` y lo consume `publish` (§7.2.1).                                      |
+| `ignoredFiles`                                      | `[{ name, reason }]` (≤ 200).                                                                                                                                      |
+| `error?`                                            | `{ code, message, retryable }`.                                                                                                                                    |
+| `workId?`, `startedAt`, `finishedAt?`               |                                                                                                                                                                    |
 
 Índices: `by_campaign [campaignId]` y `by_campaign_fingerprint [campaignId, fingerprint]`.
 
 ### 5.4 `qaVisualImportPieces` (inmutable)
 
-| Campo | Nota |
-| --- | --- |
-| `importId`, `pieceId`, `pieceVersionId`, `order` | |
-| `file` | `{ name, path, driveFileId, driveVersion, md5, bytes, modifiedAt, mimeType }`. |
-| `production?` | Campos del CSV más `csvLine`. |
-| `link` | `{ csv: LinkStep, excelRow: LinkStep & { row? }, offer: LinkStep & { ordinal?, method?, originalText?, candidates[] } }`, con `LinkStep = { status: "linked" \| "missing" \| "ambiguous" \| "manual", note? }`. |
-| `requirements` | `Requirement[]` (§8.5). |
-| `issues` | `Issue[]` de la pieza (§8.6). |
-| `requirementsHash`, `inputHash` | §6. |
-| `display` | `{ title, subtitle, format, width, height, channel, phase }` ya calculado para la UI. |
+| Campo                                            | Nota                                                                                                                                                                                                            |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `importId`, `pieceId`, `pieceVersionId`, `order` |                                                                                                                                                                                                                 |
+| `file`                                           | `{ name, path, driveFileId, driveVersion, md5, bytes, modifiedAt, mimeType }`.                                                                                                                                  |
+| `production?`                                    | Campos del CSV más `csvLine`.                                                                                                                                                                                   |
+| `link`                                           | `{ csv: LinkStep, excelRow: LinkStep & { row? }, offer: LinkStep & { ordinal?, method?, originalText?, candidates[] } }`, con `LinkStep = { status: "linked" \| "missing" \| "ambiguous" \| "manual", note? }`. |
+| `requirements`                                   | `Requirement[]` (§8.5).                                                                                                                                                                                         |
+| `issues`                                         | `Issue[]` de la pieza (§8.6).                                                                                                                                                                                   |
+| `requirementsHash`, `inputHash`                  | §6.                                                                                                                                                                                                             |
+| `display`                                        | `{ title, subtitle, format, width, height, channel, phase }` ya calculado para la UI.                                                                                                                           |
 
 Índices: `by_import_order [importId, order]` y `by_import_piece [importId, pieceId]`.
 
 ### 5.5 `qaVisualPieces` (identidad estable más proyección de tarjeta)
 
-| Campo | Nota |
-| --- | --- |
-| `campaignId`, `baseKey`, `key` | `baseKey` es el nombre del archivo normalizado, sin extensión. `key` es único por campaña: es igual a `baseKey`, salvo en duplicados simultáneos, donde vale `baseKey#<driveFileId abreviado>` (§6.1). |
-| `duplicateOf?` | `pieceId` de la pieza con la clave base cuando esta es un duplicado simultáneo. |
-| `status` | `staged` (creada por una importación todavía no publicada, invisible) \| `active` \| `removed` (ya no está en DESPLIEGUE; se conserva para el historial) \| `excluded` (una persona la descartó como duplicado). |
-| `stagedImportId?` | Importación que la creó mientras está en `staged`. |
-| `order` | Orden de la lista. |
-| `currentVersionId`, `currentImportPieceId` | Se modifican **solo** en `imports.publish` (§7.2). |
-| `display` | `{ title, fileName, format, width, height, issues: { warning, blocking }, inputHash }`. Depende de la importación y lo escribe `publish`, tomándolo del manifiesto. |
-| `card` | `{ thumbnailReady, ai: { state, verdict, fails, unverifiable, coverage, inputHash }, human: { decision, by, at }, client: { state, clientVersion, at }, openThreads, openClientThreads }`. Depende de revisiones, hilos y decisiones, y lo escribe `refreshPieceCard`. |
+| Campo                                      | Nota                                                                                                                                                                                                                                                                   |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaignId`, `baseKey`, `key`             | `baseKey` es el nombre del archivo normalizado, sin extensión. `key` es único por campaña: es igual a `baseKey`, salvo en duplicados simultáneos, donde vale `baseKey#<driveFileId abreviado>` (§6.1).                                                                 |
+| `duplicateOf?`                             | `pieceId` de la pieza con la clave base cuando esta es un duplicado simultáneo.                                                                                                                                                                                        |
+| `status`                                   | `staged` (creada por una importación todavía no publicada, invisible) \| `active` \| `removed` (ya no está en DESPLIEGUE; se conserva para el historial) \| `excluded` (una persona la descartó como duplicado).                                                       |
+| `stagedImportId?`                          | Importación que la creó mientras está en `staged`.                                                                                                                                                                                                                     |
+| `order`                                    | Orden de la lista.                                                                                                                                                                                                                                                     |
+| `currentVersionId`, `currentImportPieceId` | Se modifican **solo** en `imports.publish` (§7.2).                                                                                                                                                                                                                     |
+| `display`                                  | `{ title, fileName, format, width, height, issues: { warning, blocking }, inputHash }`. Depende de la importación y lo escribe `publish`, tomándolo del manifiesto.                                                                                                    |
+| `card`                                     | `{ thumbnailReady, ai: { state, verdict, fails, unverifiable, coverage, inputHash }, human: { decision, by, at }, client: { state, clientVersion, at }, openThreads, openClientThreads }`. Depende de revisiones, hilos y decisiones, y lo escribe `refreshPieceCard`. |
 
 Índices: `by_campaign_order [campaignId, status, order]` y `by_campaign_key [campaignId, key]`.
 
@@ -366,58 +366,58 @@ Hay doce tablas. Cada una corresponde a una capa de verdad:
 
 ### 5.6 `qaVisualPieceVersions`
 
-| Campo | Nota |
-| --- | --- |
-| `pieceId`, `campaignId`, `number` | Número interno: v1, v2… El cliente ve su propia numeración (§23.4). |
-| `status` | `staged` \| `active`. Una versión `staged` pertenece a una importación no publicada y es invisible. |
-| `stagedImportId?` | |
-| `driveFileId`, `contentHash`, `driveCreatedAt` | `contentHash` es `md5Checksum` de Drive o el `sha256` calculado. `driveCreatedAt` se usa para desempatar duplicados. |
-| `driveVersion`, `fileName` | Último valor visto. Un renombrado lo actualiza sin crear una versión nueva. |
-| `bytes`, `width?`, `height?`, `format?`, `hasAlpha?` | Del original decodificado. |
-| `image` | `{ status: pending \| processing \| ready \| failed, thumbnailId?, analysisId?, analysisWidth?, analysisHeight?, error?, workId?, attempts }`. Reemplaza a `qaVisualImageCopies` y `qaVisualAssetVersions`. |
-| `currentDecisionId?` | Decisión humana vigente. |
+| Campo                                                | Nota                                                                                                                                                                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pieceId`, `campaignId`, `number`                    | Número interno: v1, v2… El cliente ve su propia numeración (§23.4).                                                                                                                                         |
+| `status`                                             | `staged` \| `active`. Una versión `staged` pertenece a una importación no publicada y es invisible.                                                                                                         |
+| `stagedImportId?`                                    |                                                                                                                                                                                                             |
+| `driveFileId`, `contentHash`, `driveCreatedAt`       | `contentHash` es `md5Checksum` de Drive o el `sha256` calculado. `driveCreatedAt` se usa para desempatar duplicados.                                                                                        |
+| `driveVersion`, `fileName`                           | Último valor visto. Un renombrado lo actualiza sin crear una versión nueva.                                                                                                                                 |
+| `bytes`, `width?`, `height?`, `format?`, `hasAlpha?` | Del original decodificado.                                                                                                                                                                                  |
+| `image`                                              | `{ status: pending \| processing \| ready \| failed, thumbnailId?, analysisId?, analysisWidth?, analysisHeight?, error?, workId?, attempts }`. Reemplaza a `qaVisualImageCopies` y `qaVisualAssetVersions`. |
+| `currentDecisionId?`                                 | Decisión humana vigente.                                                                                                                                                                                    |
 
 Índices: `by_piece [pieceId, number]`, `by_campaign_drive_file [campaignId, driveFileId]`, `by_campaign_content [campaignId, contentHash]`, `by_campaign_image_status [campaignId, image.status]` y `by_staged_import [stagedImportId]`.
 
 ### 5.7 `qaVisualLinkOverrides` (confirmaciones humanas)
 
-| Campo | Nota |
-| --- | --- |
-| `campaignId`, `kind` | `productAlias` \| `offerLink` \| `ignoreIssue` \| `keepDuplicate` \| `mergeAsVersion`. |
-| `scope` | `campaign` o `{ pieceKey }`. |
-| `data` | `productAlias`: `{ from, to }` normalizados. `offerLink`: `{ excelRow, ordinal }`. `ignoreIssue`: `{ code }`. `keepDuplicate`: `{ baseKey, keepDriveFileId }` (marcar como definitiva). `mergeAsVersion`: `{ baseKey, olderDriveFileId, newerDriveFileId }`. |
-| `note`, `createdBy`, `revokedAt?`, `revokedBy?` | Nunca se borra; se revoca. |
+| Campo                                           | Nota                                                                                                                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `campaignId`, `kind`                            | `productAlias` \| `offerLink` \| `ignoreIssue` \| `keepDuplicate` \| `mergeAsVersion`.                                                                                                                                                                       |
+| `scope`                                         | `campaign` o `{ pieceKey }`.                                                                                                                                                                                                                                 |
+| `data`                                          | `productAlias`: `{ from, to }` normalizados. `offerLink`: `{ excelRow, ordinal }`. `ignoreIssue`: `{ code }`. `keepDuplicate`: `{ baseKey, keepDriveFileId }` (marcar como definitiva). `mergeAsVersion`: `{ baseKey, olderDriveFileId, newerDriveFileId }`. |
+| `note`, `createdBy`, `revokedAt?`, `revokedBy?` | Nunca se borra; se revoca.                                                                                                                                                                                                                                   |
 
 Índice: `by_campaign [campaignId, kind]`. Las confirmaciones vigentes entran en el `fingerprint`, de modo que crear o revocar una dispara un reprocesamiento sin Drive (§7.7).
 
 ### 5.8 `qaVisualRuns`
 
-| Campo | Nota |
-| --- | --- |
-| `campaignId`, `importId`, `requestedBy`, `requestId` | |
-| `kind` | `batch` \| `piece` \| `retry`. |
-| `scope` | `pending` \| `all` \| `selected`. |
-| `status` | `running` \| `completed` \| `cancelled`. |
-| `counts` | `{ total, queued, running, completed, failed, cancelled, validated, findings, partial }`. |
-| `startedAt`, `finishedAt?`, `firstResultAt?` | |
+| Campo                                                | Nota                                                                                      |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `campaignId`, `importId`, `requestedBy`, `requestId` |                                                                                           |
+| `kind`                                               | `batch` \| `piece` \| `retry`.                                                            |
+| `scope`                                              | `pending` \| `all` \| `selected`.                                                         |
+| `status`                                             | `running` \| `completed` \| `cancelled`.                                                  |
+| `counts`                                             | `{ total, queued, running, completed, failed, cancelled, validated, findings, partial }`. |
+| `startedAt`, `finishedAt?`, `firstResultAt?`         |                                                                                           |
 
 Índices: `by_campaign [campaignId]` y `by_request [requestedBy, requestId]`.
 
 ### 5.9 `qaVisualReviews`
 
-| Campo | Nota |
-| --- | --- |
-| `runId`, `campaignId`, `pieceId`, `pieceVersionId`, `importPieceId` | Referencia al input inmutable, sin copiarlo. |
-| `inputHash`, `requirementsHash`, `policyVersion` | Sirven para explicar por qué un resultado quedó desactualizado. |
-| `order` | Un valor negativo coloca la pieza al frente de la cola (§10.4). |
-| `status` | `queued` \| `running` \| `completed` \| `failed` \| `cancelled`. |
-| `phase?` | `image` \| `model` \| `locating` \| `waitingRetry`. |
-| `workId?` | ID del trabajo en Workpool. |
-| `attempts` | `[{ n, provider, model, code, queuedMs, elapsedMs, inputTokens?, outputTokens?, rawId? }]` (≤ 6). |
-| `findings?` | `Finding[]` (≤ 20). |
-| `result?` | `{ verdict, coverage }` (§9.5). |
-| `error?` | `{ code, message }`. |
-| `finishedAt?` | |
+| Campo                                                               | Nota                                                                                              |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `runId`, `campaignId`, `pieceId`, `pieceVersionId`, `importPieceId` | Referencia al input inmutable, sin copiarlo.                                                      |
+| `inputHash`, `requirementsHash`, `policyVersion`                    | Sirven para explicar por qué un resultado quedó desactualizado.                                   |
+| `order`                                                             | Un valor negativo coloca la pieza al frente de la cola (§10.4).                                   |
+| `status`                                                            | `queued` \| `running` \| `completed` \| `failed` \| `cancelled`.                                  |
+| `phase?`                                                            | `image` \| `model` \| `locating` \| `waitingRetry`.                                               |
+| `workId?`                                                           | ID del trabajo en Workpool.                                                                       |
+| `attempts`                                                          | `[{ n, provider, model, code, queuedMs, elapsedMs, inputTokens?, outputTokens?, rawId? }]` (≤ 6). |
+| `findings?`                                                         | `Finding[]` (≤ 20).                                                                               |
+| `result?`                                                           | `{ verdict, coverage }` (§9.5).                                                                   |
+| `error?`                                                            | `{ code, message }`.                                                                              |
+| `finishedAt?`                                                       |                                                                                                   |
 
 Índices: `by_run_status_order [runId, status, order]`, `by_piece [pieceId]` (el orden por `_creationTime` es implícito) y `by_version_input [pieceVersionId, inputHash, status]`.
 
@@ -464,15 +464,15 @@ Los hilos de un hallazgo de IA se crean **solo cuando alguien responde o lo resu
 
 ## 6 Identidad y versiones
 
-| Concepto | Identidad | Cambia cuando |
-| --- | --- | --- |
-| Campaña | `driveFolderId` | Nunca. Si cambia el nombre en Drive, se actualiza `driveFolderName`. |
-| Fuente | `(driveFileId, driveVersion)` y `sha256` | Cambia el contenido del Excel o del CSV. |
-| Importación | `fingerprint` = hash de `PARSER_VERSION`, `TEMPLATE_VERSION`, `sha256` del Excel y del CSV, `[(driveFileId, contentHash, nombre)]` de las imágenes, `overridesVersion` y `sourceSelection` | Cambia cualquier fuente, el código de interpretación o una confirmación humana. |
-| Pieza | `(campaignId, key)`, donde `key` es único por campaña (§6.1) | Nunca. Un nombre nuevo sin coincidencias crea una pieza nueva. |
-| Versión creativa | `(pieceId, contentHash)` | Cambia el contenido de la imagen. Un renombrado o un cambio de metadatos no cuenta. |
-| Requisitos de la pieza | `requirementsHash` = hash de los requisitos y avisos de **esa** pieza y de las definiciones de reglas que usa | Cambia el pedido aplicable a esa pieza. |
-| Entrada de análisis | `inputHash` = hash de `contentHash`, `requirementsHash` y `ANALYSIS_POLICY_VERSION` | Cambia la imagen, su pedido o la política de análisis (prompt y criterios). |
+| Concepto               | Identidad                                                                                                                                                                                  | Cambia cuando                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Campaña                | `driveFolderId`                                                                                                                                                                            | Nunca. Si cambia el nombre en Drive, se actualiza `driveFolderName`.                |
+| Fuente                 | `(driveFileId, driveVersion)` y `sha256`                                                                                                                                                   | Cambia el contenido del Excel o del CSV.                                            |
+| Importación            | `fingerprint` = hash de `PARSER_VERSION`, `TEMPLATE_VERSION`, `sha256` del Excel y del CSV, `[(driveFileId, contentHash, nombre)]` de las imágenes, `overridesVersion` y `sourceSelection` | Cambia cualquier fuente, el código de interpretación o una confirmación humana.     |
+| Pieza                  | `(campaignId, key)`, donde `key` es único por campaña (§6.1)                                                                                                                               | Nunca. Un nombre nuevo sin coincidencias crea una pieza nueva.                      |
+| Versión creativa       | `(pieceId, contentHash)`                                                                                                                                                                   | Cambia el contenido de la imagen. Un renombrado o un cambio de metadatos no cuenta. |
+| Requisitos de la pieza | `requirementsHash` = hash de los requisitos y avisos de **esa** pieza y de las definiciones de reglas que usa                                                                              | Cambia el pedido aplicable a esa pieza.                                             |
+| Entrada de análisis    | `inputHash` = hash de `contentHash`, `requirementsHash` y `ANALYSIS_POLICY_VERSION`                                                                                                        | Cambia la imagen, su pedido o la política de análisis (prompt y criterios).         |
 
 ### 6.1 Resolución de identidad al importar
 
@@ -545,6 +545,7 @@ Una aprobación humana **no se hereda** entre versiones. Si cambió el pedido de
 **Regla:** antes de `publish`, ninguna fila que el editor o el portal del cliente puedan leer se crea ni se modifica.
 
 **Qué puede escribir `writeChunk`:**
+
 - Inserta `qaVisualImportPieces` con `importId`. Es invisible, porque las consultas solo leen la importación a la que apunta `currentImportId`.
 - Crea **solo filas nuevas** de identidad: piezas nuevas con `status: "staged"` y versiones nuevas con `status: "staged"`, ambas con `stagedImportId`.
 - Agrega al manifiesto de la importación las entradas de su lote (`qaVisualImports.manifest`, ≤ 1000 entradas compactas): `{ pieceId, versionId, importPieceId, order, display }`.
@@ -554,6 +555,7 @@ Una aprobación humana **no se hereda** entre versiones. Si cambió el pedido de
 **Las consultas del editor y del cliente** filtran por `status: "active"` mediante el índice `by_campaign_order`. Las versiones se leen a partir de `currentVersionId` o de la lista `by_piece` filtrada por `active`.
 
 **Qué hace `publish`, todo en una transacción:**
+
 1. Verifica que `campaign.activeImportId === importId` y que el manifiesto esté completo: `manifest.length === counts.images`.
 2. Para cada entrada del manifiesto:
    - Pasa la pieza `staged` a `active` o, si ya existía, actualiza `currentVersionId`, `currentImportPieceId`, `order` y `display`.
@@ -572,14 +574,14 @@ Una aprobación humana **no se hereda** entre versiones. Si cambió el pedido de
 
 ### 7.3 Selección de fuentes
 
-| Situación | Comportamiento |
-| --- | --- |
-| Un `.xlsx` en RECURSOS, sin contar los que empiezan con `~$` | Se usa. |
-| Varios `.xlsx` | La importación queda como `needsSource`. La tarjeta y el editor muestran "Elegí la matriz", y la elección se guarda en `sourceSelection`. Si después el archivo elegido desaparece, se vuelve a preguntar. |
-| Ningún `.xlsx`, pero hay `.xls` o una hoja de cálculo de Google | Se informa "Formato no admitido: convertí a .xlsx" (§22: evaluar la exportación de lectura desde Google Sheets). |
-| Un `.csv` en la carpeta del CSV, con cualquier nombre y sin contar los que empiezan con `~$` | Se usa. |
-| Varios `.csv` | Elección explícita, como con el Excel: ningún nombre (por ejemplo `_CONVERTED_vN`) se prefiere ni oculta a los demás. |
-| Ningún CSV | Error de campaña `csv_missing`. |
+| Situación                                                                                    | Comportamiento                                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Un `.xlsx` en RECURSOS, sin contar los que empiezan con `~$`                                 | Se usa.                                                                                                                                                                                                    |
+| Varios `.xlsx`                                                                               | La importación queda como `needsSource`. La tarjeta y el editor muestran "Elegí la matriz", y la elección se guarda en `sourceSelection`. Si después el archivo elegido desaparece, se vuelve a preguntar. |
+| Ningún `.xlsx`, pero hay `.xls` o una hoja de cálculo de Google                              | Se informa "Formato no admitido: convertí a .xlsx" (§22: evaluar la exportación de lectura desde Google Sheets).                                                                                           |
+| Un `.csv` en la carpeta del CSV, con cualquier nombre y sin contar los que empiezan con `~$` | Se usa.                                                                                                                                                                                                    |
+| Varios `.csv`                                                                                | Elección explícita, como con el Excel: ningún nombre (por ejemplo `_CONVERTED_vN`) se prefiere ni oculta a los demás.                                                                                      |
+| Ningún CSV                                                                                   | Error de campaña `csv_missing`.                                                                                                                                                                            |
 
 ### 7.4 Contrato de plantilla (`model/template.ts`)
 
@@ -588,10 +590,25 @@ Se declara como datos y no como código disperso:
 ```ts
 export const templateV1 = {
   id: "matriz-kfc-v1",
-  sheets: { production: ["PRODUCCION"], legend: ["LEYENDA"], rules: ["REGLAS"] },
+  sheets: {
+    production: ["PRODUCCION"],
+    legend: ["LEYENDA"],
+    rules: ["REGLAS"],
+  },
   header: { sheet: "production", column: "A", text: "CAMPAÑA" },
-  columns: { campaign: "A", phase: "B", channel: "C", platform: "D", pieceType: "E",
-             fileFormat: "G", width: "I", height: "J", offers: "K", prices: "L", notes: "P" },
+  columns: {
+    campaign: "A",
+    phase: "B",
+    channel: "C",
+    platform: "D",
+    pieceType: "E",
+    fileFormat: "G",
+    width: "I",
+    height: "J",
+    offers: "K",
+    prices: "L",
+    notes: "P",
+  },
   legendRefs: { dimensions: "C11", format: "B9", stories: "B12", cta: "C15" },
   rulesRefs: { storiesWithoutOffer: "B6:D6" },
 };
@@ -616,37 +633,37 @@ export const templateV1 = {
 
 ### 7.6 Qué pasa si la carpeta no contiene lo esperado
 
-| Caso | Dónde se detecta | Resultado | Lo que ve la persona |
-| --- | --- | --- | --- |
-| URL que no es de una carpeta de Drive | `inspectFolder` | No se registra. | "Pegá el enlace de una carpeta de Google Drive." |
-| La URL apunta a un archivo | `inspectFolder` | No se registra. | "El enlace es de un archivo; pegá el de la carpeta de la campaña." |
-| Carpeta sin compartir (403 o 404) | `inspectFolder` | No se registra. | "No tenemos acceso. Compartila como Lector con `qa-visual@…`", con botón de copiar. |
-| Carpeta en la papelera | `inspectFolder` | No se registra. | "La carpeta está en la papelera de Drive." |
-| Acceso directo (shortcut) como carpeta raíz o subcarpeta | `inspectFolder` y listado | Se resuelve `shortcutDetails.targetId` si apunta a una carpeta. | Transparente. |
-| Falta RECURSOS, EDITABLES o DESPLIEGUE | `inspectFolder` | No se registra. | La lista de verificación marca la que falta. |
-| Subcarpeta con otro uso de mayúsculas, tildes o espacios | Normalización | Se acepta. | Transparente. |
-| Dos subcarpetas que normalizan al mismo nombre | `inspectFolder` | No se registra. | "Hay dos carpetas DESPLIEGUE; dejá una sola." |
-| Carpeta ya registrada y activa | `register` | No se duplica. | "Esta carpeta ya está registrada", con enlace a la campaña. |
-| Carpeta registrada en una campaña archivada | `register` | No se duplica. | "Pertenece a una campaña archivada", con opción de restaurarla. |
-| Dos personas registran la misma carpeta a la vez | `register` (concurrencia optimista) | Una sola campaña. | La segunda recibe "ya está registrada". |
-| Se perdió el permiso después del alta | Importación | `failed: access_lost`. Se conserva la última importación. | Banner: "Se perdió el acceso a la carpeta en Drive", con la indicación de compartirla y un botón para reintentar. |
-| Error 429 o 5xx de Drive | Importación | Reintento automático (3 veces). Si persiste, `failed: drive_unavailable` reintentable. | "Google Drive no respondió", con botón para reintentar. |
-| Un archivo cambia durante la descarga (MD5 distinto) | Importación | Reintento. | Transparente o error reintentable. |
-| Varias matrices o varios CSV | Importación | `needsSource`. | "Elegí la matriz", con un selector. |
-| Excel corrupto o con contraseña | Importación | `failed: workbook_unreadable`. | "No se pudo abrir el Excel: está dañado o protegido." |
-| Excel con otra plantilla | Importación | `failed: template_unrecognized`. | Indica qué hoja o encabezado faltó. |
-| Excel más grande que el límite | Importación | `failed: file_too_large`. | Muestra el tamaño y el límite. |
-| CSV sin `ID_PIEZA` | Importación | `failed: csv_missing_columns`. | Lista las columnas faltantes. |
-| DESPLIEGUE sin imágenes | Importación | `ready` con cero piezas. | "No hay imágenes PNG o JPEG en DESPLIEGUE", más la lista de archivos ignorados. |
-| Archivos que no son imagen (PDF, MP4, AI, PSD) | Importación | Se ignoran. | Recursos, en "Archivos no analizados", con el motivo. |
-| Subcarpetas dentro de DESPLIEGUE | Importación | No se recorren en v1. | "La subcarpeta X tiene N archivos que no se analizan." Ver §22. |
-| Dos imágenes con el mismo nombre presentes a la vez | Importación (§6.1) | Ambas se importan como piezas distintas: la que ya existía conserva la clave base y la otra recibe `baseKey#id`. | Aviso `file_duplicate_name` en ambas. Se analizan contra la misma fila y se ofrecen "Marcar como definitiva" y "Es una versión nueva de…". |
-| Extensión que no coincide con el contenido (un PNG llamado `.jpg`) | Preparación de la imagen | Manda el formato decodificado. | El aviso `format_extension_mismatch` es documental. El control de formato usa el formato real. |
-| Imagen de más de 20 MB o 32 MP | Preparación de la imagen | La versión queda en `image.failed`. | La tarjeta muestra "Imagen no admitida (supera 20 MB)". Esa pieza no se analiza y el resto sigue. |
-| Imagen con transparencia | Preparación de la imagen | Se aplana sobre blanco para el análisis. | Aviso `has_transparency` para confirmar la legibilidad sobre otros fondos. |
-| Más de 1000 imágenes | Importación | `failed: too_many_pieces`. | Muestra el límite y la cantidad encontrada. |
-| Imagen sin fila en el CSV | Vinculación | La pieza se importa igual. | Aviso `csv_row_missing`. Solo hay controles técnicos y se ofrece "Vincular manualmente". |
-| La fila del CSV no encuentra una fila en el Excel | Vinculación | Se analiza contra la producción (§8.2). | Aviso `excel_row_missing`. |
+| Caso                                                               | Dónde se detecta                    | Resultado                                                                                                        | Lo que ve la persona                                                                                                                       |
+| ------------------------------------------------------------------ | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| URL que no es de una carpeta de Drive                              | `inspectFolder`                     | No se registra.                                                                                                  | "Pegá el enlace de una carpeta de Google Drive."                                                                                           |
+| La URL apunta a un archivo                                         | `inspectFolder`                     | No se registra.                                                                                                  | "El enlace es de un archivo; pegá el de la carpeta de la campaña."                                                                         |
+| Carpeta sin compartir (403 o 404)                                  | `inspectFolder`                     | No se registra.                                                                                                  | "No tenemos acceso. Compartila como Lector con `qa-visual@…`", con botón de copiar.                                                        |
+| Carpeta en la papelera                                             | `inspectFolder`                     | No se registra.                                                                                                  | "La carpeta está en la papelera de Drive."                                                                                                 |
+| Acceso directo (shortcut) como carpeta raíz o subcarpeta           | `inspectFolder` y listado           | Se resuelve `shortcutDetails.targetId` si apunta a una carpeta.                                                  | Transparente.                                                                                                                              |
+| Falta RECURSOS, EDITABLES o DESPLIEGUE                             | `inspectFolder`                     | No se registra.                                                                                                  | La lista de verificación marca la que falta.                                                                                               |
+| Subcarpeta con otro uso de mayúsculas, tildes o espacios           | Normalización                       | Se acepta.                                                                                                       | Transparente.                                                                                                                              |
+| Dos subcarpetas que normalizan al mismo nombre                     | `inspectFolder`                     | No se registra.                                                                                                  | "Hay dos carpetas DESPLIEGUE; dejá una sola."                                                                                              |
+| Carpeta ya registrada y activa                                     | `register`                          | No se duplica.                                                                                                   | "Esta carpeta ya está registrada", con enlace a la campaña.                                                                                |
+| Carpeta registrada en una campaña archivada                        | `register`                          | No se duplica.                                                                                                   | "Pertenece a una campaña archivada", con opción de restaurarla.                                                                            |
+| Dos personas registran la misma carpeta a la vez                   | `register` (concurrencia optimista) | Una sola campaña.                                                                                                | La segunda recibe "ya está registrada".                                                                                                    |
+| Se perdió el permiso después del alta                              | Importación                         | `failed: access_lost`. Se conserva la última importación.                                                        | Banner: "Se perdió el acceso a la carpeta en Drive", con la indicación de compartirla y un botón para reintentar.                          |
+| Error 429 o 5xx de Drive                                           | Importación                         | Reintento automático (3 veces). Si persiste, `failed: drive_unavailable` reintentable.                           | "Google Drive no respondió", con botón para reintentar.                                                                                    |
+| Un archivo cambia durante la descarga (MD5 distinto)               | Importación                         | Reintento.                                                                                                       | Transparente o error reintentable.                                                                                                         |
+| Varias matrices o varios CSV                                       | Importación                         | `needsSource`.                                                                                                   | "Elegí la matriz", con un selector.                                                                                                        |
+| Excel corrupto o con contraseña                                    | Importación                         | `failed: workbook_unreadable`.                                                                                   | "No se pudo abrir el Excel: está dañado o protegido."                                                                                      |
+| Excel con otra plantilla                                           | Importación                         | `failed: template_unrecognized`.                                                                                 | Indica qué hoja o encabezado faltó.                                                                                                        |
+| Excel más grande que el límite                                     | Importación                         | `failed: file_too_large`.                                                                                        | Muestra el tamaño y el límite.                                                                                                             |
+| CSV sin `ID_PIEZA`                                                 | Importación                         | `failed: csv_missing_columns`.                                                                                   | Lista las columnas faltantes.                                                                                                              |
+| DESPLIEGUE sin imágenes                                            | Importación                         | `ready` con cero piezas.                                                                                         | "No hay imágenes PNG o JPEG en DESPLIEGUE", más la lista de archivos ignorados.                                                            |
+| Archivos que no son imagen (PDF, MP4, AI, PSD)                     | Importación                         | Se ignoran.                                                                                                      | Recursos, en "Archivos no analizados", con el motivo.                                                                                      |
+| Subcarpetas dentro de DESPLIEGUE                                   | Importación                         | No se recorren en v1.                                                                                            | "La subcarpeta X tiene N archivos que no se analizan." Ver §22.                                                                            |
+| Dos imágenes con el mismo nombre presentes a la vez                | Importación (§6.1)                  | Ambas se importan como piezas distintas: la que ya existía conserva la clave base y la otra recibe `baseKey#id`. | Aviso `file_duplicate_name` en ambas. Se analizan contra la misma fila y se ofrecen "Marcar como definitiva" y "Es una versión nueva de…". |
+| Extensión que no coincide con el contenido (un PNG llamado `.jpg`) | Preparación de la imagen            | Manda el formato decodificado.                                                                                   | El aviso `format_extension_mismatch` es documental. El control de formato usa el formato real.                                             |
+| Imagen de más de 20 MB o 32 MP                                     | Preparación de la imagen            | La versión queda en `image.failed`.                                                                              | La tarjeta muestra "Imagen no admitida (supera 20 MB)". Esa pieza no se analiza y el resto sigue.                                          |
+| Imagen con transparencia                                           | Preparación de la imagen            | Se aplana sobre blanco para el análisis.                                                                         | Aviso `has_transparency` para confirmar la legibilidad sobre otros fondos.                                                                 |
+| Más de 1000 imágenes                                               | Importación                         | `failed: too_many_pieces`.                                                                                       | Muestra el límite y la cantidad encontrada.                                                                                                |
+| Imagen sin fila en el CSV                                          | Vinculación                         | La pieza se importa igual.                                                                                       | Aviso `csv_row_missing`. Solo hay controles técnicos y se ofrece "Vincular manualmente".                                                   |
+| La fila del CSV no encuentra una fila en el Excel                  | Vinculación                         | Se analiza contra la producción (§8.2).                                                                          | Aviso `excel_row_missing`.                                                                                                                 |
 
 ### 7.7 Actualizar desde Drive y reprocesar
 
@@ -670,12 +687,12 @@ Imagen (key) ─► fila CSV (ID_PIEZA) ─► fila Excel (campaña, fase, canal
 
 Cada paso produce un `LinkStep` con estado (`linked`, `missing`, `ambiguous` o `manual`). **Un paso fallido afecta solo a los requisitos que dependen de él.**
 
-| Paso fallido | Controles afectados | Controles que se analizan igual |
-| --- | --- | --- |
-| Fila del CSV | Todos los que dependen del pedido | Formato y dimensiones contra el nombre del archivo, solo como corroboración. Con `basis: production` y aviso, nunca "Validada". |
-| Fila del Excel | Producto, precio, fecha, formato, dimensiones y CTA según el cliente | Los mismos controles contra los valores del CSV (`basis: production`), con aviso `excel_row_missing`. |
-| Oferta (ambigua o no encontrada) | Producto, precio y fecha según el cliente | Formato, dimensiones y CTA según el cliente. Producto y precio contra el CSV (`basis: production`). |
-| Precio (falta o está duplicado) | Precio según el cliente | Todo lo demás, más el precio contra el CSV si existe. |
+| Paso fallido                     | Controles afectados                                                  | Controles que se analizan igual                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Fila del CSV                     | Todos los que dependen del pedido                                    | Formato y dimensiones contra el nombre del archivo, solo como corroboración. Con `basis: production` y aviso, nunca "Validada". |
+| Fila del Excel                   | Producto, precio, fecha, formato, dimensiones y CTA según el cliente | Los mismos controles contra los valores del CSV (`basis: production`), con aviso `excel_row_missing`.                           |
+| Oferta (ambigua o no encontrada) | Producto, precio y fecha según el cliente                            | Formato, dimensiones y CTA según el cliente. Producto y precio contra el CSV (`basis: production`).                             |
+| Precio (falta o está duplicado)  | Precio según el cliente                                              | Todo lo demás, más el precio contra el CSV si existe.                                                                           |
 
 Así se cumple el pedido de la usuaria: **siempre se analiza la pieza**. Cuando el pedido del cliente no puede vincularse, se compara con lo declarado por producción y se indica claramente que la referencia es el CSV y no el cliente. El CSV nunca reemplaza en silencio al pedido (regla 3 de la especificación): `basis` queda visible en cada control y el dictamen no puede ser "Validada por IA" mientras haya controles con `basis: production`.
 
@@ -693,13 +710,13 @@ Así se cumple el pedido de la usuaria: **siempre se analiza la pieza**. Cuando 
 2. Se filtran los candidatos por canal (de la fila del CSV o, si falta, de un token del nombre de archivo) y por temporalidad (de `SLOT_FECHA` o del token del archivo). Si el canal del CSV y el del archivo difieren, se emite el aviso `channel_mismatch` y se usa el del CSV.
 3. Se compara el producto del CSV contra los candidatos, nivel por nivel. **Se queda con el primer nivel que produce resultados**:
 
-| Nivel | Regla | Aviso |
-| --- | --- | --- |
-| 1 `exact` | Tokens idénticos. | Ninguno. |
+| Nivel          | Regla                                                                                    | Aviso                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 `exact`      | Tokens idénticos.                                                                        | Ninguno.                                                                                                                                     |
 | 2 `connectors` | Tokens idénticos sin contar los de conexión, en el mismo orden y con los mismos números. | `offer_name_equivalence` (informativo): "El CSV dice FESTIN DE LOCURA y el Excel FESTIN LOCURA (oferta 7). Se tomaron como la misma oferta." |
-| 3 `contained` | Los tokens del CSV aparecen como subsecuencia contigua dentro de la oferta. | `offer_name_partial` (advertencia), con los textos de ambos lados. |
-| 4 `alias` | Equivalencia confirmada en `qaVisualLinkOverrides`. | `offer_alias_applied` (informativo), con autor y fecha. |
-| — | Fuzzy (distancia de edición o similitud) | **Nunca se aplica automáticamente.** Solo aparece como sugerencia, con el botón "Confirmar equivalencia". |
+| 3 `contained`  | Los tokens del CSV aparecen como subsecuencia contigua dentro de la oferta.              | `offer_name_partial` (advertencia), con los textos de ambos lados.                                                                           |
+| 4 `alias`      | Equivalencia confirmada en `qaVisualLinkOverrides`.                                      | `offer_alias_applied` (informativo), con autor y fecha.                                                                                      |
+| —              | Fuzzy (distancia de edición o similitud)                                                 | **Nunca se aplica automáticamente.** Solo aparece como sugerencia, con el botón "Confirmar equivalencia".                                    |
 
 4. **Unicidad:** si el nivel ganador produce un solo candidato, la oferta queda vinculada. Si produce dos o más, el resultado es `offer_ambiguous`, con la lista de candidatos (numeral y texto) y sin elección inventada. Si ningún nivel produce resultados, es `offer_not_found`, con las sugerencias fuzzy cuando las hay.
 5. Un vínculo manual (`offerLink`) tiene prioridad sobre todo lo anterior y se informa como `manual`.
@@ -722,40 +739,62 @@ Así se cumple el pedido de la usuaria: **siempre se analiza la pieza**. Cuando 
 
 ```ts
 type Requirement = {
-  ruleId: "format" | "dimensions" | "product" | "price" | "date" | "cta" | string;
-  status: "ready" | "notRequested" | "conflict" | "unresolved" | "missing" | "invalid";
+  ruleId:
+    | "format"
+    | "dimensions"
+    | "product"
+    | "price"
+    | "date"
+    | "cta"
+    | string;
+  status:
+    | "ready"
+    | "notRequested"
+    | "conflict"
+    | "unresolved"
+    | "missing"
+    | "invalid";
   basis: "client" | "production";
-  expected?: string;                 // valor normalizado para comparar
-  display?: string;                  // texto original, para mostrar
-  expectedAlternatives?: string[];   // conflicto
-  sources: { file: "excel" | "csv" | "filename" | "override";
-             sheet?: string; cell?: string; ordinal?: string; csvLine?: number; column?: string;
-             text: string }[];
-  issueIds: string[];                // avisos que explican el estado
+  expected?: string; // valor normalizado para comparar
+  display?: string; // texto original, para mostrar
+  expectedAlternatives?: string[]; // conflicto
+  sources: {
+    file: "excel" | "csv" | "filename" | "override";
+    sheet?: string;
+    cell?: string;
+    ordinal?: string;
+    csvLine?: number;
+    column?: string;
+    text: string;
+  }[];
+  issueIds: string[]; // avisos que explican el estado
 };
 ```
 
-| Estado | Qué se hace al analizar |
-| --- | --- |
-| `ready` | Se evalúa con código o con el modelo. |
-| `notRequested` | `notApplicable`, sin llamar al modelo. |
-| `conflict` | El modelo lee el valor visible y el código lo compara con ambas alternativas. Si coincide con el valor del cliente, `pass`, con el conflicto informado. Si coincide solo con el del CSV, `fail` frente al cliente. Si no coincide con ninguno, `fail`. |
-| `unresolved` o `missing` con alternativa del CSV | Se evalúa con `basis: production`. |
-| `unresolved` o `missing` sin alternativa | `unverifiable`, con `causeIssueId`. **No se envía al modelo y no se repite el mismo texto en tres comentarios.** |
-| `invalid` | Igual que el caso anterior, con el aviso del dato inválido. |
+| Estado                                           | Qué se hace al analizar                                                                                                                                                                                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ready`                                          | Se evalúa con código o con el modelo.                                                                                                                                                                                                                  |
+| `notRequested`                                   | `notApplicable`, sin llamar al modelo.                                                                                                                                                                                                                 |
+| `conflict`                                       | El modelo lee el valor visible y el código lo compara con ambas alternativas. Si coincide con el valor del cliente, `pass`, con el conflicto informado. Si coincide solo con el del CSV, `fail` frente al cliente. Si no coincide con ninguno, `fail`. |
+| `unresolved` o `missing` con alternativa del CSV | Se evalúa con `basis: production`.                                                                                                                                                                                                                     |
+| `unresolved` o `missing` sin alternativa         | `unverifiable`, con `causeIssueId`. **No se envía al modelo y no se repite el mismo texto en tres comentarios.**                                                                                                                                       |
+| `invalid`                                        | Igual que el caso anterior, con el aviso del dato inválido.                                                                                                                                                                                            |
 
 ### 8.6 Avisos de fuente (`model/issues.ts`)
 
 ```ts
 type Issue = {
-  id: string;                         // hash estable de code + alcance + datos
+  id: string; // hash estable de code + alcance + datos
   code: IssueCode;
   severity: "info" | "warning" | "blocking";
   scope: "campaign" | "piece";
-  affects: string[];                  // ruleIds afectados ([] = informativo)
-  message: string;                    // en español, ya interpolado
+  affects: string[]; // ruleIds afectados ([] = informativo)
+  message: string; // en español, ya interpolado
   sources: Source[];
-  suggestion?: { kind: "confirmAlias" | "chooseOffer" | "chooseSource"; data: unknown };
+  suggestion?: {
+    kind: "confirmAlias" | "chooseOffer" | "chooseSource";
+    data: unknown;
+  };
 };
 ```
 
@@ -789,14 +828,14 @@ Pieza 16 (equivalencia por conectores). Primer precio vacío y `$5,99` en el num
 
 ### 9.1 Qué se resuelve con código y qué con el modelo
 
-| Control | Método | Detalle |
-| --- | --- | --- |
-| Formato | Código | Formato decodificado del original contra G, con las equivalencias JPG/JPEG. |
-| Dimensiones | Código | Ancho y alto del original contra I y J. |
-| Precio | Lectura y evaluación semántica, con comparación exacta cuando aplica | El código compara importes simples (`$8,99` = `8.99`) contra la referencia. Para otras expresiones legibles conserva el resultado semántico; no convierte un formato desconocido en `unverifiable`. La alternativa de producción nunca reemplaza el pedido del cliente. |
+| Control          | Método                                                                     | Detalle                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Formato          | Código                                                                     | Formato decodificado del original contra G, con las equivalencias JPG/JPEG.                                                                                                                                                                                                                                              |
+| Dimensiones      | Código                                                                     | Ancho y alto del original contra I y J.                                                                                                                                                                                                                                                                                  |
+| Precio           | Lectura y evaluación semántica, con comparación exacta cuando aplica       | El código compara importes simples (`$8,99` = `8.99`) contra la referencia. Para otras expresiones legibles conserva el resultado semántico; no convierte un formato desconocido en `unverifiable`. La alternativa de producción nunca reemplaza el pedido del cliente.                                                  |
 | Fecha y vigencia | Lectura y evaluación semántica, con comparación estructurada cuando aplica | Se compara la expresión completa y cada componente requerido. `JUEVES 15` frente a `15 DE OCTUBRE` es `fail` por faltar el mes. Se aceptan escrituras equivalentes que conservan los datos, como `15/10`. Rangos y condiciones que el código no interpreta se evalúan semánticamente, sin truncarlos a la primera fecha. |
-| Producto | El modelo juzga | Hace falta interpretar la semántica: el nombre comercial visible frente a la oferta. |
-| CTA | El modelo juzga | Criterio del cliente frente al texto visible. Por ejemplo, `A DOMICILIO POR KFC APP` no es una invitación a descargar la app. |
+| Producto         | El modelo juzga                                                            | Hace falta interpretar la semántica: el nombre comercial visible frente a la oferta.                                                                                                                                                                                                                                     |
+| CTA              | El modelo juzga                                                            | Criterio del cliente frente al texto visible. Por ejemplo, `A DOMICILIO POR KFC APP` no es una invitación a descargar la app.                                                                                                                                                                                            |
 
 El modelo responde un objeto por control: `{ ruleId, visibleText, evidenceStatus, missingElements, outcome, observed, visibleAnchor, box_2d }`. El código aplica las reglas de §9.2.1. `method` indica cómo se obtuvo el resultado final: `deterministic` para una comparación soportada o `model` para la evaluación semántica. Una comparación no soportada devuelve internamente "sin comparación determinista"; eso no es un dictamen ni un `unverifiable`. La evaluación semántica ya viene en la misma respuesta: no requiere otra llamada por cada formato desconocido.
 
@@ -812,15 +851,15 @@ El modelo responde un objeto por control: `{ ruleId, visibleText, evidenceStatus
 
 **Regla central:** una pieza con texto legible que incumple u omite algo exigido por el cliente tiene un hallazgo. "Revisión incompleta" describe la imposibilidad real de concluir la evaluación; no describe un texto incompleto respecto del pedido.
 
-| Evidencia y referencia | Resultado del control | Explicación requerida |
-| --- | --- | --- |
-| Contenido legible y equivalente, con todos los componentes solicitados | `pass` | Qué coincide con la referencia. No se exige copia literal salvo que el criterio lo indique. |
-| Contenido legible diferente, o parte requerida ausente | `fail` | Qué se pidió, qué se ve y qué falta o difiere. Incluye producto, cantidad, precio, fecha, CTA y otros controles configurados. |
-| Se inspeccionó la imagen y se confirmó que el elemento requerido no aparece (`absent`) | `fail` | Identificar el elemento ausente. No se necesita inventar un marcador donde no hay nada visible. |
-| Elemento presente pero ilegible (`unreadable`), o evidencia realmente ambigua (`ambiguous`) | `unverifiable` | Indicar qué información concreta impide decidir. Una zona borrosa o recortada no demuestra ausencia. |
-| Falta una referencia suficiente del cliente o su vinculación es incierta | `unverifiable` para el control afectado, o evaluación parcial contra producción según §8.5 | Explicar el problema de fuente y conservar su `causeIssueId`. No atribuirlo a un error del diseño. |
-| Texto legible con sintaxis no soportada por el comparador | Evaluación semántica: `pass` o `fail` | La limitación del código no autoriza `unverifiable`. Si existe una ambigüedad real, se identifica como tal y se explica. |
-| El cliente no solicitó el control (`notRequested`) | `notApplicable` | No participa en los controles solicitados. El modelo no puede descartar por su cuenta un requisito recibido. |
+| Evidencia y referencia                                                                      | Resultado del control                                                                      | Explicación requerida                                                                                                         |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Contenido legible y equivalente, con todos los componentes solicitados                      | `pass`                                                                                     | Qué coincide con la referencia. No se exige copia literal salvo que el criterio lo indique.                                   |
+| Contenido legible diferente, o parte requerida ausente                                      | `fail`                                                                                     | Qué se pidió, qué se ve y qué falta o difiere. Incluye producto, cantidad, precio, fecha, CTA y otros controles configurados. |
+| Se inspeccionó la imagen y se confirmó que el elemento requerido no aparece (`absent`)      | `fail`                                                                                     | Identificar el elemento ausente. No se necesita inventar un marcador donde no hay nada visible.                               |
+| Elemento presente pero ilegible (`unreadable`), o evidencia realmente ambigua (`ambiguous`) | `unverifiable`                                                                             | Indicar qué información concreta impide decidir. Una zona borrosa o recortada no demuestra ausencia.                          |
+| Falta una referencia suficiente del cliente o su vinculación es incierta                    | `unverifiable` para el control afectado, o evaluación parcial contra producción según §8.5 | Explicar el problema de fuente y conservar su `causeIssueId`. No atribuirlo a un error del diseño.                            |
+| Texto legible con sintaxis no soportada por el comparador                                   | Evaluación semántica: `pass` o `fail`                                                      | La limitación del código no autoriza `unverifiable`. Si existe una ambigüedad real, se identifica como tal y se explica.      |
+| El cliente no solicitó el control (`notRequested`)                                          | `notApplicable`                                                                            | No participa en los controles solicitados. El modelo no puede descartar por su cuenta un requisito recibido.                  |
 
 Orden de resolución por control:
 
@@ -832,18 +871,18 @@ Orden de resolución por control:
 
 Ejemplos obligatorios:
 
-| Pedido | Visible / evidencia | Resultado |
-| --- | --- | --- |
-| `15 DE OCTUBRE` | `JUEVES 15` legible | `fail`: falta el mes. No se infiere octubre del pedido, del calendario ni de la campaña. |
-| `15 DE OCTUBRE` | `15/10`, `15 OCT.`, `OCTUBRE 15` | `pass`: conservan día y mes. Fechas numéricas en orden día/mes[/año]; también se reconoce ISO año-mes-día. |
-| `15 DE OCTUBRE DE 2026` | `15/10` | `fail`: falta el año requerido. Si el pedido no exige año, no se agrega esa exigencia. |
-| `15 DE OCTUBRE` | `16 DE OCTUBRE` o `HOY` | `fail`: la vigencia no coincide. |
-| `DEL 15 AL 20 DE OCTUBRE` | Rango legible | Evaluación semántica de ambos extremos y sus condiciones, sin aprobar por reconocer solo el primer día. |
-| `$8,99` | `8.99` | `pass`. Un precio diferente es `fail`, incluso si coincide con el CSV. |
-| `FESTIN LOCURA 12 PRESAS` | `FESTIN LOCURA` sin cantidad | `fail`: falta la cantidad solicitada. |
-| Invitación a descargar la app | `A DOMICILIO POR KFC APP` | `fail`: mencionar la app no cumple la acción requerida. |
-| Precio solicitado | No aparece en la imagen completa | `fail`: ausencia confirmada. |
-| Precio solicitado | Zona borrosa, no se distingue el importe | `unverifiable`: falta evidencia legible. |
+| Pedido                        | Visible / evidencia                      | Resultado                                                                                                  |
+| ----------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `15 DE OCTUBRE`               | `JUEVES 15` legible                      | `fail`: falta el mes. No se infiere octubre del pedido, del calendario ni de la campaña.                   |
+| `15 DE OCTUBRE`               | `15/10`, `15 OCT.`, `OCTUBRE 15`         | `pass`: conservan día y mes. Fechas numéricas en orden día/mes[/año]; también se reconoce ISO año-mes-día. |
+| `15 DE OCTUBRE DE 2026`       | `15/10`                                  | `fail`: falta el año requerido. Si el pedido no exige año, no se agrega esa exigencia.                     |
+| `15 DE OCTUBRE`               | `16 DE OCTUBRE` o `HOY`                  | `fail`: la vigencia no coincide.                                                                           |
+| `DEL 15 AL 20 DE OCTUBRE`     | Rango legible                            | Evaluación semántica de ambos extremos y sus condiciones, sin aprobar por reconocer solo el primer día.    |
+| `$8,99`                       | `8.99`                                   | `pass`. Un precio diferente es `fail`, incluso si coincide con el CSV.                                     |
+| `FESTIN LOCURA 12 PRESAS`     | `FESTIN LOCURA` sin cantidad             | `fail`: falta la cantidad solicitada.                                                                      |
+| Invitación a descargar la app | `A DOMICILIO POR KFC APP`                | `fail`: mencionar la app no cumple la acción requerida.                                                    |
+| Precio solicitado             | No aparece en la imagen completa         | `fail`: ausencia confirmada.                                                                               |
+| Precio solicitado             | Zona borrosa, no se distingue el importe | `unverifiable`: falta evidencia legible.                                                                   |
 
 `evidenceStatus` y `missingElements` se guardan en el hallazgo para auditar la conclusión; son opcionales en datos históricos. `observedValue` conserva el texto literal. `locationStatus` solo describe la ubicación del comentario y nunca rebaja un incumplimiento a `unverifiable`.
 
@@ -862,29 +901,32 @@ Se mantiene `box_2d` en el rango de 0 a 1000, en el orden `[y_min, x_min, y_max,
 
 ```ts
 coverage = {
-  requested,          // controles cuyo requisito no es notRequested
-  executed,           // con outcome pass o fail
-  pass, fail, unverifiable, notApplicable,
-  visualRequested,    // controles visuales solicitados (product, price, date, cta…)
-  modelControls,      // controles visuales que efectivamente pasaron por el modelo
-  productionBasis,    // controles comparados contra el CSV en lugar del cliente
-  unresolvedInputs,   // requisitos solicitados en conflict, unresolved, missing o invalid
-  blockingNotices,    // avisos warning o blocking que afectan a un control solicitado
+  requested, // controles cuyo requisito no es notRequested
+  executed, // con outcome pass o fail
+  pass,
+  fail,
+  unverifiable,
+  notApplicable,
+  visualRequested, // controles visuales solicitados (product, price, date, cta…)
+  modelControls, // controles visuales que efectivamente pasaron por el modelo
+  productionBasis, // controles comparados contra el CSV en lugar del cliente
+  unresolvedInputs, // requisitos solicitados en conflict, unresolved, missing o invalid
+  blockingNotices, // avisos warning o blocking que afectan a un control solicitado
 };
 ```
 
 **Validada por IA (verde).** Se muestra **solo si se cumplen todas estas condiciones**. Si falla cualquiera, la pieza no queda en verde:
 
-| # | Condición | Si no se cumple |
-| --- | --- | --- |
-| V1 | El trabajo técnico terminó (`completed`). | "Error de análisis" o el estado en curso. |
-| V2 | El resultado está vigente: su `inputHash` coincide con `display.inputHash`. | "Desactualizada", en tono neutro. |
-| V3 | `requested ≥ 1`. | "Revisión incompleta · Pedido sin vincular". |
-| V4 | `pass === requested`: ningún `fail`, `unverifiable` ni control sin ejecutar. | "Con hallazgos" si hay algún `fail`. Si no, "Revisión incompleta". |
-| V5 | `productionBasis === 0`: todo se comparó contra el pedido del cliente. | "Revisión incompleta · Pedido sin vincular". |
-| V6 | `unresolvedInputs === 0`. Un requisito en `conflict` impide el verde **aunque la imagen coincida con el valor del cliente**. | "Revisión incompleta · Conflicto de fuentes" o "Dato inválido en el pedido". |
-| V7 | `blockingNotices === 0`. Los avisos `info`, como `offer_name_equivalence` u `offer_alias_applied`, no impiden el verde. Un `offer_name_partial` sí lo impide hasta que una persona confirme la equivalencia. | "Revisión incompleta · Vinculación por confirmar". |
-| V8 | `modelControls === visualRequested`: si se pidió algún control visual, todos pasaron por el modelo. Una revisión con solo formato y dimensiones nunca es verde cuando se pidió algo visual. | "Revisión incompleta · Solo controles técnicos". |
+| #   | Condición                                                                                                                                                                                                    | Si no se cumple                                                              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| V1  | El trabajo técnico terminó (`completed`).                                                                                                                                                                    | "Error de análisis" o el estado en curso.                                    |
+| V2  | El resultado está vigente: su `inputHash` coincide con `display.inputHash`.                                                                                                                                  | "Desactualizada", en tono neutro.                                            |
+| V3  | `requested ≥ 1`.                                                                                                                                                                                             | "Revisión incompleta · Pedido sin vincular".                                 |
+| V4  | `pass === requested`: ningún `fail`, `unverifiable` ni control sin ejecutar.                                                                                                                                 | "Con hallazgos" si hay algún `fail`. Si no, "Revisión incompleta".           |
+| V5  | `productionBasis === 0`: todo se comparó contra el pedido del cliente.                                                                                                                                       | "Revisión incompleta · Pedido sin vincular".                                 |
+| V6  | `unresolvedInputs === 0`. Un requisito en `conflict` impide el verde **aunque la imagen coincida con el valor del cliente**.                                                                                 | "Revisión incompleta · Conflicto de fuentes" o "Dato inválido en el pedido". |
+| V7  | `blockingNotices === 0`. Los avisos `info`, como `offer_name_equivalence` u `offer_alias_applied`, no impiden el verde. Un `offer_name_partial` sí lo impide hasta que una persona confirme la equivalencia. | "Revisión incompleta · Vinculación por confirmar".                           |
+| V8  | `modelControls === visualRequested`: si se pidió algún control visual, todos pasaron por el modelo. Una revisión con solo formato y dimensiones nunca es verde cuando se pidió algo visual.                  | "Revisión incompleta · Solo controles técnicos".                             |
 
 **Dictamen y prioridad de etiquetas:**
 
@@ -900,13 +942,13 @@ Cuando hay más de un motivo de "Revisión incompleta", se muestra el primero de
 
 **Clasificación de la pieza:** un `fail` basta para "Con hallazgos", incluso si otro control sigue sin verificarse. Cuatro `pass` y una omisión legible son **5/5 controles verificados, 1 hallazgo**. Cuatro `pass` y un texto realmente ilegible son **4/5 controles verificados, revisión incompleta**. El número de comentarios no determina el dictamen: los comentarios incluyen hallazgos, controles no verificables y avisos de fuente. Resolver una conversación no cambia el resultado de IA ni aprueba la pieza.
 
-| Dictamen | Tono |
-| --- | --- |
-| `validated` | Éxito (verde). Es el único dictamen de IA que puede ser verde. |
-| `findings` | Advertencia, o peligro si algún `fail` es `blocking`. |
-| `partial` | Advertencia. |
-| Desactualizada | Neutro. |
-| Error de análisis | Peligro. |
+| Dictamen          | Tono                                                           |
+| ----------------- | -------------------------------------------------------------- |
+| `validated`       | Éxito (verde). Es el único dictamen de IA que puede ser verde. |
+| `findings`        | Advertencia, o peligro si algún `fail` es `blocking`.          |
+| `partial`         | Advertencia.                                                   |
+| Desactualizada    | Neutro.                                                        |
+| Error de análisis | Peligro.                                                       |
 
 `model/verdict.ts` es una función pura y tiene una prueba por fila de la tabla de condiciones, más los casos combinados: `fail` junto con `unverifiable`, conflicto en el que la imagen coincide con el cliente, solo controles técnicos, aviso `info` frente a `warning`, y resultado desactualizado.
 
@@ -934,11 +976,11 @@ Cada intento guarda: proveedor, modelo, `ANALYSIS_POLICY_VERSION`, tiempo en col
 >
 > **Experiencia de uso:** conservar la entrega progresiva de resultados: cada pieza aparece al terminar, sin esperar a toda la campaña. Workpool se apoya en el scheduler y permite iniciar trabajos en cuanto hay capacidad; sustituirlo por el scheduler no elimina los límites de Convex ni aporta por sí solo reintentos y recuperación. El cambio de proveedor ante fallos es independiente del límite de concurrencia.
 
-| Pool | Paralelismo | Reintento propio de Workpool | Uso |
-| --- | --- | --- | --- |
-| `qaVisualImportPool` | 2 | 3 intentos, espera exponencial desde 2 s | Importaciones y reprocesamientos. |
-| `qaVisualImagePool` | 4 | 3 intentos | Una tarea por versión de imagen sin preparar. |
-| `qaVisualAnalysisPool` | Global configurable por entorno, según cuotas y capacidad medidas (comentario de decisión anterior) | Ninguno: la política está en `retryPolicy` | Un intento de análisis por tarea. |
+| Pool                   | Paralelismo                                                                                         | Reintento propio de Workpool               | Uso                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------- |
+| `qaVisualImportPool`   | 2                                                                                                   | 3 intentos, espera exponencial desde 2 s   | Importaciones y reprocesamientos.             |
+| `qaVisualImagePool`    | 4                                                                                                   | 3 intentos                                 | Una tarea por versión de imagen sin preparar. |
+| `qaVisualAnalysisPool` | Global configurable por entorno, según cuotas y capacidad medidas (comentario de decisión anterior) | Ninguno: la política está en `retryPolicy` | Un intento de análisis por tarea.             |
 
 ### 10.2 Ciclo de una corrida
 
@@ -973,15 +1015,15 @@ Cada intento guarda: proveedor, modelo, `ANALYSIS_POLICY_VERSION`, tiempo en col
 
 ### 10.3 Política de reintentos (`model/retryPolicy.ts`)
 
-| Causa (código) | Mismo proveedor | Cambio a OpenAI | Espera |
-| --- | --- | --- | --- |
-| `timeout` (75 s), `http_5xx`, `network` | Hasta 3 intentos con Gemini | Sí, hasta 2 intentos | 2 s y 4 s |
-| `http_429` (cuota) | Hasta 3 intentos, respetando `Retry-After` | Sí | `Retry-After` o 10 s y 30 s |
-| `invalid_output` (esquema o controles faltantes) | 1 reintento | Sí | 2 s |
-| `safety_blocked` | No | Sí, 1 intento | — |
-| `http_400` o `image_rejected` | No | No (es un error de entrada) | `fatal` |
-| `image_unavailable` o `image_too_large` | No | No | `fatal`. La imagen se informa en la tarjeta. |
-| Excepción no prevista | Se trata como `network` | Sí | 2 s |
+| Causa (código)                                   | Mismo proveedor                            | Cambio a OpenAI             | Espera                                       |
+| ------------------------------------------------ | ------------------------------------------ | --------------------------- | -------------------------------------------- |
+| `timeout` (75 s), `http_5xx`, `network`          | Hasta 3 intentos con Gemini                | Sí, hasta 2 intentos        | 2 s y 4 s                                    |
+| `http_429` (cuota)                               | Hasta 3 intentos, respetando `Retry-After` | Sí                          | `Retry-After` o 10 s y 30 s                  |
+| `invalid_output` (esquema o controles faltantes) | 1 reintento                                | Sí                          | 2 s                                          |
+| `safety_blocked`                                 | No                                         | Sí, 1 intento               | —                                            |
+| `http_400` o `image_rejected`                    | No                                         | No (es un error de entrada) | `fatal`                                      |
+| `image_unavailable` o `image_too_large`          | No                                         | No                          | `fatal`. La imagen se informa en la tarjeta. |
+| Excepción no prevista                            | Se trata como `network`                    | Sí                          | 2 s                                          |
 
 El total máximo es de cinco llamadas al modelo por pieza, más una de localización por intento.
 
@@ -1012,14 +1054,14 @@ Una vez al día, borra los blobs de Storage huérfanos (originales sin `qaVisual
 
 ### 11.1 Consultas
 
-| Función | Lee | Devuelve |
-| --- | --- | --- |
-| `campaigns.list({ paginationOpts })` | `qaVisualCampaigns` por `by_status` | `{ id, name, summary, import: { state, stage?, error?, lastImportedAt }, run?: { done, total } }` |
-| `editor.campaign({ campaignId })` | La campaña, su importación vigente, la activa y la corrida activa | Cabecera, banner de importación, `sources` (Excel, CSV y elección pendiente), `issues` de campaña, `counts`, `parserOutdated` y `run.counts`. |
-| `editor.pieces({ campaignId })` | `qaVisualPieces` por `by_campaign_order` (≤ 1000 documentos chicos) | `PieceCard[]` |
-| `editor.piece({ pieceId, version? })` | Pieza, versiones, `importPiece`, últimas revisiones de esa versión, hilos con comentarios y decisiones | Todo lo que necesita la pieza seleccionada: requisitos, avisos, hallazgos, resultado previo y estado de desactualización. |
-| `editor.history({ pieceId, paginationOpts })` | Revisiones, decisiones, versiones y comentarios de la pieza | Línea de tiempo paginada. |
-| `campaigns.serviceAccount()` | Variable de entorno (solo `client_email`) | El correo para compartir la carpeta. |
+| Función                                       | Lee                                                                                                    | Devuelve                                                                                                                                      |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaigns.list({ paginationOpts })`          | `qaVisualCampaigns` por `by_status`                                                                    | `{ id, name, summary, import: { state, stage?, error?, lastImportedAt }, run?: { done, total } }`                                             |
+| `editor.campaign({ campaignId })`             | La campaña, su importación vigente, la activa y la corrida activa                                      | Cabecera, banner de importación, `sources` (Excel, CSV y elección pendiente), `issues` de campaña, `counts`, `parserOutdated` y `run.counts`. |
+| `editor.pieces({ campaignId })`               | `qaVisualPieces` por `by_campaign_order` (≤ 1000 documentos chicos)                                    | `PieceCard[]`                                                                                                                                 |
+| `editor.piece({ pieceId, version? })`         | Pieza, versiones, `importPiece`, últimas revisiones de esa versión, hilos con comentarios y decisiones | Todo lo que necesita la pieza seleccionada: requisitos, avisos, hallazgos, resultado previo y estado de desactualización.                     |
+| `editor.history({ pieceId, paginationOpts })` | Revisiones, decisiones, versiones y comentarios de la pieza                                            | Línea de tiempo paginada.                                                                                                                     |
+| `campaigns.serviceAccount()`                  | Variable de entorno (solo `client_email`)                                                              | El correo para compartir la carpeta.                                                                                                          |
 
 ### 11.2 Mutaciones y acciones públicas
 
@@ -1062,12 +1104,12 @@ Los errores esperados se devuelven como `ConvexError({ code, message })`, y el c
 
 ### 12.3 Decisión humana
 
-| Estado visible | Cómo se obtiene |
-| --- | --- |
-| Pendiente | Sin decisión y sin actividad humana. |
-| En revisión | **Se deriva**: hay hilos humanos o respuestas en esta versión y todavía no hay decisión. No es un botón ni muestra un spinner. |
-| Cambios solicitados | `decide({ decision: "changesRequested", note })`. Exige siempre un comentario explícito y no vacío que explique qué debe corregirse, aunque ya existan hilos abiertos. La decisión y un hilo interno con ese comentario se guardan en la misma operación para la pieza y versión seleccionadas; el texto queda visible en Comentarios y en el historial. |
-| Aprobada | `decide({ decision: "approved" })` cuando la IA está en `validated` y vigente. |
+| Estado visible         | Cómo se obtiene                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pendiente              | Sin decisión y sin actividad humana.                                                                                                                                                                                                                                                                                                                         |
+| En revisión            | **Se deriva**: hay hilos humanos o respuestas en esta versión y todavía no hay decisión. No es un botón ni muestra un spinner.                                                                                                                                                                                                                               |
+| Cambios solicitados    | `decide({ decision: "changesRequested", note })`. Exige siempre un comentario explícito y no vacío que explique qué debe corregirse, aunque ya existan hilos abiertos. La decisión y un hilo interno con ese comentario se guardan en la misma operación para la pieza y versión seleccionadas; el texto queda visible en Comentarios y en el historial.     |
+| Aprobada               | `decide({ decision: "approved" })` cuando la IA está en `validated` y vigente.                                                                                                                                                                                                                                                                               |
 | Aprobada con excepción | `decide({ decision: "approved", exception: { reason, note } })` cuando la IA tiene hallazgos, una revisión incompleta, un error, está desactualizada o no existe. `reason` es uno de: `acceptedFinding` (hallazgo aceptado por el cliente), `falsePositive` (la IA se equivocó), `notApplicable` (el requisito no aplica) u `other`. La nota es obligatoria. |
 
 - **Concurrencia:** `decide` recibe `expectedCurrentDecisionId`. Si otra persona decidió antes, devuelve `ConvexError({ code: "decision_conflict" })` y la UI muestra la decisión nueva antes de permitir otra.
@@ -1134,17 +1176,17 @@ El original no se copia. Se sirve en streaming desde Drive solo para "Descargar 
 
 ## 15 Observabilidad, métricas y costos
 
-| Métrica | Fuente |
-| --- | --- |
-| Tiempo de importación por etapa | `qaVisualImports.stage`, con la marca de tiempo de cada transición en el log. |
-| Tiempo hasta el primer resultado y duración de la corrida | `qaVisualRuns.firstResultAt` y `finishedAt`. |
-| Espera en cola, tiempo de preparación y tiempo del modelo por pieza | `attempts[].queuedMs` y `elapsedMs`, más la duración de `phase`. |
-| Tokens y costo estimado | `attempts[].inputTokens` y `outputTokens` × la tarifa configurada en `model/llm.ts`. |
-| Cobertura | `result.coverage` agregado por corrida. |
-| Calidad de vinculación | Cantidad de piezas por nivel (`exact`, `connectors`, `contained`, `alias`, `manual`), ambiguas y sin vincular. |
-| Tasa de localización | `locationStatus` agregado. |
-| Discrepancias entre el código y el modelo | Precio y fecha cuyo `outcome` difiere entre ambos. |
-| Fallos por código | `error.code` y `attempts[].code`. |
+| Métrica                                                             | Fuente                                                                                                         |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Tiempo de importación por etapa                                     | `qaVisualImports.stage`, con la marca de tiempo de cada transición en el log.                                  |
+| Tiempo hasta el primer resultado y duración de la corrida           | `qaVisualRuns.firstResultAt` y `finishedAt`.                                                                   |
+| Espera en cola, tiempo de preparación y tiempo del modelo por pieza | `attempts[].queuedMs` y `elapsedMs`, más la duración de `phase`.                                               |
+| Tokens y costo estimado                                             | `attempts[].inputTokens` y `outputTokens` × la tarifa configurada en `model/llm.ts`.                           |
+| Cobertura                                                           | `result.coverage` agregado por corrida.                                                                        |
+| Calidad de vinculación                                              | Cantidad de piezas por nivel (`exact`, `connectors`, `contained`, `alias`, `manual`), ambiguas y sin vincular. |
+| Tasa de localización                                                | `locationStatus` agregado.                                                                                     |
+| Discrepancias entre el código y el modelo                           | Precio y fecha cuyo `outcome` difiere entre ambos.                                                             |
+| Fallos por código                                                   | `error.code` y `attempts[].code`.                                                                              |
 
 Los logs se emiten como una línea JSON con `{ area: "qa-visual", event, campaignId, runId, reviewId, ms, code }`, para filtrarlos en los log streams de Convex.
 
@@ -1159,12 +1201,12 @@ Los logs se emiten como una línea JSON con `{ area: "qa-visual", event, campaig
 
 ## 16 Pruebas y evaluación
 
-| Nivel | Herramienta | Qué cubre |
-| --- | --- | --- |
-| Unitarias del dominio | `node --test` con `tsx`, que ya se usa en `tests/` | `workbook` (celdas combinadas, fechas, fórmulas, límites), `productionCsv` (BOM, `;`, duplicados), `linking` (todos los niveles, ambigüedad, pieza 16), `offers` (las pruebas actuales de precios), `requirements` (estados), `verdict` (todas las combinaciones), `hashing` (estabilidad del `inputHash`), `retryPolicy` (tabla completa), `drive` (solo GET). |
-| Funciones de Convex | `convex-test`, que hay que agregar como dependencia de desarrollo | Importación por lotes y publicación atómica. `fillSlots` respeta el máximo de 4 por corrida. Idempotencia de `onAttemptComplete`. Cancelación. Agregar una pieza a una corrida activa. Conflicto de decisiones. Permisos en cada función pública. |
-| UI | Pruebas de componentes y una prueba de extremo a extremo de los flujos principales | Navegación con flechas (sin interferir con campos de texto). Clic en un marcador que abre el comentario, quita filtros y lo realza. Popover sobre la imagen. Decisión con excepción. Temas claro y oscuro. |
-| Evaluación con piezas reales | Script `qaVisual/eval:run` (acción interna) | Las 61 piezas de Semana de Locura, etiquetadas por una persona con el resultado esperado por control y la caja de cada elemento. Mide la precisión y la exhaustividad de los hallazgos, la tasa de `unverifiable` y el IoU de las cajas. Se ejecuta antes de cambiar el prompt, el modelo o `ANALYSIS_POLICY_VERSION`. |
+| Nivel                        | Herramienta                                                                        | Qué cubre                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unitarias del dominio        | `node --test` con `tsx`, que ya se usa en `tests/`                                 | `workbook` (celdas combinadas, fechas, fórmulas, límites), `productionCsv` (BOM, `;`, duplicados), `linking` (todos los niveles, ambigüedad, pieza 16), `offers` (las pruebas actuales de precios), `requirements` (estados), `verdict` (todas las combinaciones), `hashing` (estabilidad del `inputHash`), `retryPolicy` (tabla completa), `drive` (solo GET). |
+| Funciones de Convex          | `convex-test`, que hay que agregar como dependencia de desarrollo                  | Importación por lotes y publicación atómica. `fillSlots` respeta el máximo de 4 por corrida. Idempotencia de `onAttemptComplete`. Cancelación. Agregar una pieza a una corrida activa. Conflicto de decisiones. Permisos en cada función pública.                                                                                                               |
+| UI                           | Pruebas de componentes y una prueba de extremo a extremo de los flujos principales | Navegación con flechas (sin interferir con campos de texto). Clic en un marcador que abre el comentario, quita filtros y lo realza. Popover sobre la imagen. Decisión con excepción. Temas claro y oscuro.                                                                                                                                                      |
+| Evaluación con piezas reales | Script `qaVisual/eval:run` (acción interna)                                        | Las 61 piezas de Semana de Locura, etiquetadas por una persona con el resultado esperado por control y la caja de cada elemento. Mide la precisión y la exhaustividad de los hallazgos, la tasa de `unverifiable` y el IoU de las cajas. Se ejecuta antes de cambiar el prompt, el modelo o `ANALYSIS_POLICY_VERSION`.                                          |
 
 ---
 
@@ -1186,15 +1228,15 @@ QA Visual solo funciona en Dev (`NODE_ENV === "development"`), así que no hay d
 
 Cada etapa se puede publicar por separado y deja el sistema funcionando.
 
-| Etapa | Contenido | Criterios de aceptación |
-| --- | --- | --- |
-| **1. Dominio puro y vinculación** | `model/`: `normalize`, `offers` (código actual), `linking` por niveles, `requirements` con estado, `issues`, `verdict` con cobertura, `hashing` por pieza, `workbook` (celdas combinadas y fechas) y `productionCsv` (BOM, `;`, duplicados). Pruebas de §8.8. | Las pruebas pasan. La pieza 16 vincula con la oferta 7 y emite un aviso. Agregar una imagen no cambia el `inputHash` de otra. |
-| **2. Datos e importación** | Tablas nuevas, `importPool`, importación por lotes, publicación atómica, identidad de pieza y versión, selección de fuentes, reprocesamiento desde Storage, alta en dos pasos y todos los casos de §7.6. | Importar Semana de Locura da 61 piezas. Repetir sin cambios no escribe nada. Reemplazar una imagen crea v2 solo en esa pieza. Una carpeta incompleta muestra la lista de verificación correcta. |
-| **3. Imágenes y medios** | `imagePool`, imágenes por versión y caché `immutable`. | Al volver a entrar, ninguna imagen se descarga de nuevo (verificado en la pestaña Network). Una imagen de 25 MB falla solo en su pieza. |
-| **4. Análisis y orquestación** | `analysisPool`, máquina de estados, `retryPolicy`, el modelo lee y el código compara, localización sin bloqueo, evidencia cruda, cancelación, pieza al frente de la cola, cron de vigilancia y configuración LLM propia. | Hay como máximo 4 piezas por corrida y se respeta el límite global configurable, cuyo valor se documenta y valida con carga concurrente según §10.1. Matar una acción no deja piezas colgadas. Un fallo de localización conserva la conclusión. La pieza 16 pasa por Gemini. |
-| **5. UI sobre los datos nuevos** | Hooks nuevos, tarjetas con proyección, detalle con requisitos y cadena de origen, avisos agrupados, progreso con desglose, menú de **Analizar piezas**, banner de importación, campañas con estado, enlace profundo. | Se cumplen los casos de §21 relacionados con la UI. El diseño en ambos temas coincide con el aprobado. |
-| **6. Colaboración guardada** | Hilos, comentarios, anclas, resolución, decisiones con excepción y control de concurrencia, versiones e historial. | Al recargar, todo sigue ahí. Dos personas que deciden a la vez reciben el aviso de conflicto. Una versión nueva empieza en Pendiente. |
-| **7. Evaluación y producción** | Dataset de evaluación, métricas, alertas, bandera de producción, credenciales por entorno y migración final (§17). | Se alcanzan las metas acordadas de precisión e IoU. La lista de verificación de §14 está completa. |
+| Etapa                             | Contenido                                                                                                                                                                                                                                                     | Criterios de aceptación                                                                                                                                                                                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. Dominio puro y vinculación** | `model/`: `normalize`, `offers` (código actual), `linking` por niveles, `requirements` con estado, `issues`, `verdict` con cobertura, `hashing` por pieza, `workbook` (celdas combinadas y fechas) y `productionCsv` (BOM, `;`, duplicados). Pruebas de §8.8. | Las pruebas pasan. La pieza 16 vincula con la oferta 7 y emite un aviso. Agregar una imagen no cambia el `inputHash` de otra.                                                                                                                                                |
+| **2. Datos e importación**        | Tablas nuevas, `importPool`, importación por lotes, publicación atómica, identidad de pieza y versión, selección de fuentes, reprocesamiento desde Storage, alta en dos pasos y todos los casos de §7.6.                                                      | Importar Semana de Locura da 61 piezas. Repetir sin cambios no escribe nada. Reemplazar una imagen crea v2 solo en esa pieza. Una carpeta incompleta muestra la lista de verificación correcta.                                                                              |
+| **3. Imágenes y medios**          | `imagePool`, imágenes por versión y caché `immutable`.                                                                                                                                                                                                        | Al volver a entrar, ninguna imagen se descarga de nuevo (verificado en la pestaña Network). Una imagen de 25 MB falla solo en su pieza.                                                                                                                                      |
+| **4. Análisis y orquestación**    | `analysisPool`, máquina de estados, `retryPolicy`, el modelo lee y el código compara, localización sin bloqueo, evidencia cruda, cancelación, pieza al frente de la cola, cron de vigilancia y configuración LLM propia.                                      | Hay como máximo 4 piezas por corrida y se respeta el límite global configurable, cuyo valor se documenta y valida con carga concurrente según §10.1. Matar una acción no deja piezas colgadas. Un fallo de localización conserva la conclusión. La pieza 16 pasa por Gemini. |
+| **5. UI sobre los datos nuevos**  | Hooks nuevos, tarjetas con proyección, detalle con requisitos y cadena de origen, avisos agrupados, progreso con desglose, menú de **Analizar piezas**, banner de importación, campañas con estado, enlace profundo.                                          | Se cumplen los casos de §21 relacionados con la UI. El diseño en ambos temas coincide con el aprobado.                                                                                                                                                                       |
+| **6. Colaboración guardada**      | Hilos, comentarios, anclas, resolución, decisiones con excepción y control de concurrencia, versiones e historial.                                                                                                                                            | Al recargar, todo sigue ahí. Dos personas que deciden a la vez reciben el aviso de conflicto. Una versión nueva empieza en Pendiente.                                                                                                                                        |
+| **7. Evaluación y producción**    | Dataset de evaluación, métricas, alertas, bandera de producción, credenciales por entorno y migración final (§17).                                                                                                                                            | Se alcanzan las metas acordadas de precisión e IoU. La lista de verificación de §14 está completa.                                                                                                                                                                           |
 
 Las etapas de la revisión del cliente, la galería, el carrusel y la voz siguen en §23.15.
 
@@ -1218,7 +1260,7 @@ El diálogo tiene el mismo tamaño en todos los pasos (hasta 1120 × 820 px) par
 
 - **Enlace:** se pega la URL. Debajo se muestra el correo de la cuenta de servicio con un botón para copiarlo. A la derecha, qué tiene que tener la carpeta (RECURSOS, EDITABLES, DESPLIEGUE o VISUALES).
 - **Fuentes:** lista de verificación con RECURSOS (1 Excel ✓), EDITABLES (1 CSV ✓), DESPLIEGUE (61 imágenes ✓) y archivos ignorados. Cada fila muestra lo encontrado a la izquierda y, a la derecha, la carpeta y el archivo elegidos. Si hay varios candidatos, se elige ahí mismo. Debajo, un resumen del mapeo de piezas. **Siguiente** se habilita cuando la lista está completa.
-- **Piezas** (§5.5 de la especificación): a la izquierda, las piezas sin vincular agrupadas por problema, con búsqueda y el prefijo común de los nombres mostrado una sola vez; a la derecha, el detalle de la pieza elegida. Las filas libres del CSV se ofrecen como lista ordenada por parecido con el nombre del archivo, con búsqueda, y se resaltan las palabras que no están en el otro nombre. Los pedidos de la matriz se comparan columna por columna con la fila del CSV. Abajo, una barra con los cambios elegidos (**Revisar y aplicar**) y las piezas marcadas para excluir. **Agregar campaña** se habilita aunque haya piezas sin vincular; el análisis se habilita cuando todas estén vinculadas o excluidas.
+- **Piezas** (§5.5 de la especificación): a la izquierda, las piezas sin vincular agrupadas por problema, con búsqueda y el prefijo común de los nombres mostrado una sola vez; a la derecha, el detalle de la pieza elegida. Cada pieza es una pregunta con una opción sugerida y botones: sin fila, «¿Cuál es la fila de esta pieza en el CSV?» con la fila más parecida a su nombre y **Usar esta fila** (las demás, con búsqueda, en «No es esta: ver otras filas»); sin pedido, «¿Cómo lo corregimos?» con el pedido sugerido, solo sus diferencias en palabras («Formato: el CSV dice POST y la matriz dice Post Estático») y **Corregir el CSV** o **Son lo mismo**. Al elegir se muestra una confirmación con **Cambiar** y **Siguiente pieza**. Abajo, una barra con los cambios elegidos (**Revisar y aplicar**) y las piezas marcadas para excluir. **Agregar campaña** se habilita aunque haya piezas sin vincular; el análisis se habilita cuando todas estén vinculadas o excluidas.
 
 Al editar una campaña registrada, el diálogo muestra solo **Fuentes** y **Piezas**, y abre directamente en **Piezas** cuando el mapeo bloquea el análisis.
 
@@ -1255,56 +1297,56 @@ Al editar una campaña registrada, el diálogo muestra solo **Fuentes** y **Piez
 
 ## 20 Catálogo consolidado de errores y reintentos
 
-| Ámbito | Código | Reintento automático | Acción en la UI |
-| --- | --- | --- | --- |
-| Alta | `invalid_url`, `not_a_folder`, `no_access`, `trashed`, `missing_subfolder`, `duplicate_subfolder`, `already_registered`, `archived` | No | Mensaje en el diálogo y lista de verificación. |
-| Importación | `drive_unavailable`, `file_changed` | Sí (3) | Reintentar. |
-| Importación | `access_lost` | No | Instrucción para volver a compartir y Reintentar. |
-| Importación | `needs_source` | No | Elegir la matriz o el CSV. |
-| Importación | `workbook_unreadable`, `template_unrecognized`, `file_too_large`, `csv_missing_columns`, `too_many_pieces` | No | Mensaje con el detalle. Se conserva la importación anterior. |
-| Importación | `stalled` (vigilancia) | No | Reintentar. |
-| Imagen | `image_too_large`, `image_unreadable`, `image_changed` | Sí (3) para `image_changed` | Estado en la tarjeta. Se resuelve al actualizar desde Drive. |
-| Análisis | `timeout`, `http_5xx`, `http_429`, `invalid_output`, `safety_blocked`, `network` | Según §10.3 | Al final: Reintentar fallidas o Volver a analizar esta versión. |
-| Análisis | `image_unavailable`, `http_400` | No | Mensaje en la pieza. |
-| Análisis | `lost_work` (vigilancia) | No | Reintentar fallidas. |
-| Decisión | `decision_conflict` | No | Mostrar la decisión nueva y permitir decidir otra vez. |
-| Hilos | `not_author`, `thread_not_found` | No | Mensaje breve. |
+| Ámbito      | Código                                                                                                                              | Reintento automático        | Acción en la UI                                                 |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------- |
+| Alta        | `invalid_url`, `not_a_folder`, `no_access`, `trashed`, `missing_subfolder`, `duplicate_subfolder`, `already_registered`, `archived` | No                          | Mensaje en el diálogo y lista de verificación.                  |
+| Importación | `drive_unavailable`, `file_changed`                                                                                                 | Sí (3)                      | Reintentar.                                                     |
+| Importación | `access_lost`                                                                                                                       | No                          | Instrucción para volver a compartir y Reintentar.               |
+| Importación | `needs_source`                                                                                                                      | No                          | Elegir la matriz o el CSV.                                      |
+| Importación | `workbook_unreadable`, `template_unrecognized`, `file_too_large`, `csv_missing_columns`, `too_many_pieces`                          | No                          | Mensaje con el detalle. Se conserva la importación anterior.    |
+| Importación | `stalled` (vigilancia)                                                                                                              | No                          | Reintentar.                                                     |
+| Imagen      | `image_too_large`, `image_unreadable`, `image_changed`                                                                              | Sí (3) para `image_changed` | Estado en la tarjeta. Se resuelve al actualizar desde Drive.    |
+| Análisis    | `timeout`, `http_5xx`, `http_429`, `invalid_output`, `safety_blocked`, `network`                                                    | Según §10.3                 | Al final: Reintentar fallidas o Volver a analizar esta versión. |
+| Análisis    | `image_unavailable`, `http_400`                                                                                                     | No                          | Mensaje en la pieza.                                            |
+| Análisis    | `lost_work` (vigilancia)                                                                                                            | No                          | Reintentar fallidas.                                            |
+| Decisión    | `decision_conflict`                                                                                                                 | No                          | Mostrar la decisión nueva y permitir decidir otra vez.          |
+| Hilos       | `not_author`, `thread_not_found`                                                                                                    | No                          | Mensaje breve.                                                  |
 
 ---
 
 ## 21 Correspondencia con los criterios de aceptación de la especificación
 
-| Caso (§21 de la especificación) | Cómo lo resuelve esta arquitectura |
-| --- | --- |
-| Agregar una URL válida y compartida | Alta en tres pasos (§7.1 y §19.2) e importación encolada en la misma transacción. |
-| URL inválida o carpeta sin permisos | `inspectFolder` falla sin escribir (§7.6). |
-| Misma carpeta registrada dos veces | `by_drive_folder` y control dentro de la mutación. |
-| Dos campañas con archivos de igual nombre | Todo se asocia a `campaignId` y `pieceId`, nunca a un nombre global. |
-| Recargar el editor o abrir Detalles | Se lee `qaVisualImportPieces`; no se vuelve a interpretar nada. |
-| Actualizar sin cambios | El `fingerprint` coincide y no se escribe nada. |
-| Actualizar con fuentes nuevas | Importación nueva y motivo de desactualización por pieza (§6). |
-| Cambiar el algoritmo de extracción | `PARSER_VERSION` en el `fingerprint` y reprocesamiento automático desde Storage (§7.7). |
-| Originales pesados | Miniatura WebP e imagen de análisis con caché `immutable` (§13). |
-| Analizar campaña | Máximo 4 piezas por corrida y concurrencia global configurable según §10.1. Los resultados aparecen a medida que termina cada pieza (§10). |
-| Falla una pieza o un proveedor | `retryPolicy` y resultados parciales conservados. |
-| Reintentar una pieza | Corrida `piece` o ítem al frente de la cola. La revisión anterior se conserva. |
-| El cliente no exige CTA | `notRequested` → `notApplicable`. No afecta la cobertura. |
-| El cliente exige CTA de descarga y aparece un cierre genérico | El modelo juzga el CTA con el criterio de P16 y marca la caja de `A DOMICILIO POR KFC APP`. |
-| Story con oferta en una fila que debería estar vacía | Se analiza y aparece el aviso `stories_offer_filled`. |
-| `FESTIN LOCURA` frente a `FESTIN DE LOCURA` | Nivel `connectors` y aviso `offer_name_equivalence` (§8.7). |
-| Precio 1 vacío y precio 2 con $5,99 | Algoritmo por numeral conservado y prueba de regresión. |
-| Dos precios con el mismo numeral | `price_duplicate_ordinal` y estado `invalid`. |
-| Precio diferente entre Excel y CSV | Estado `conflict` con las dos fuentes. El código compara contra ambas. |
-| Un fallo de vinculación afecta a tres controles | Un solo aviso con `affects[]` y ningún texto repetido. |
-| Hallazgo sobre una región visible | `box_2d` sobre la imagen de análisis y evaluación de IoU. |
-| Aviso solo documental | Comentario general sin marcador. |
-| Clic en un marcador | Se mantiene el comportamiento actual (`selectComment` con realce). |
-| Flechas de teclado | Se mantiene `use-piece-keyboard-navigation`. |
-| Aprobación humana | `qaVisualDecisions` por versión, con autor, motivo y sin spinner. |
-| Recargar tras comentar o aprobar | Hilos y decisiones guardados (§12). |
-| Nueva versión de una pieza | `qaVisualPieceVersions`. No hereda la decisión y conserva el historial. |
-| La corrida llega al 100 % | Barra segmentada y resumen por dictamen. |
-| Tema claro y oscuro | Tokens de `review.css`. La propuesta se ve en los dos temas en el HTML. |
+| Caso (§21 de la especificación)                               | Cómo lo resuelve esta arquitectura                                                                                                         |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Agregar una URL válida y compartida                           | Alta en tres pasos (§7.1 y §19.2) e importación encolada en la misma transacción.                                                          |
+| URL inválida o carpeta sin permisos                           | `inspectFolder` falla sin escribir (§7.6).                                                                                                 |
+| Misma carpeta registrada dos veces                            | `by_drive_folder` y control dentro de la mutación.                                                                                         |
+| Dos campañas con archivos de igual nombre                     | Todo se asocia a `campaignId` y `pieceId`, nunca a un nombre global.                                                                       |
+| Recargar el editor o abrir Detalles                           | Se lee `qaVisualImportPieces`; no se vuelve a interpretar nada.                                                                            |
+| Actualizar sin cambios                                        | El `fingerprint` coincide y no se escribe nada.                                                                                            |
+| Actualizar con fuentes nuevas                                 | Importación nueva y motivo de desactualización por pieza (§6).                                                                             |
+| Cambiar el algoritmo de extracción                            | `PARSER_VERSION` en el `fingerprint` y reprocesamiento automático desde Storage (§7.7).                                                    |
+| Originales pesados                                            | Miniatura WebP e imagen de análisis con caché `immutable` (§13).                                                                           |
+| Analizar campaña                                              | Máximo 4 piezas por corrida y concurrencia global configurable según §10.1. Los resultados aparecen a medida que termina cada pieza (§10). |
+| Falla una pieza o un proveedor                                | `retryPolicy` y resultados parciales conservados.                                                                                          |
+| Reintentar una pieza                                          | Corrida `piece` o ítem al frente de la cola. La revisión anterior se conserva.                                                             |
+| El cliente no exige CTA                                       | `notRequested` → `notApplicable`. No afecta la cobertura.                                                                                  |
+| El cliente exige CTA de descarga y aparece un cierre genérico | El modelo juzga el CTA con el criterio de P16 y marca la caja de `A DOMICILIO POR KFC APP`.                                                |
+| Story con oferta en una fila que debería estar vacía          | Se analiza y aparece el aviso `stories_offer_filled`.                                                                                      |
+| `FESTIN LOCURA` frente a `FESTIN DE LOCURA`                   | Nivel `connectors` y aviso `offer_name_equivalence` (§8.7).                                                                                |
+| Precio 1 vacío y precio 2 con $5,99                           | Algoritmo por numeral conservado y prueba de regresión.                                                                                    |
+| Dos precios con el mismo numeral                              | `price_duplicate_ordinal` y estado `invalid`.                                                                                              |
+| Precio diferente entre Excel y CSV                            | Estado `conflict` con las dos fuentes. El código compara contra ambas.                                                                     |
+| Un fallo de vinculación afecta a tres controles               | Un solo aviso con `affects[]` y ningún texto repetido.                                                                                     |
+| Hallazgo sobre una región visible                             | `box_2d` sobre la imagen de análisis y evaluación de IoU.                                                                                  |
+| Aviso solo documental                                         | Comentario general sin marcador.                                                                                                           |
+| Clic en un marcador                                           | Se mantiene el comportamiento actual (`selectComment` con realce).                                                                         |
+| Flechas de teclado                                            | Se mantiene `use-piece-keyboard-navigation`.                                                                                               |
+| Aprobación humana                                             | `qaVisualDecisions` por versión, con autor, motivo y sin spinner.                                                                          |
+| Recargar tras comentar o aprobar                              | Hilos y decisiones guardados (§12).                                                                                                        |
+| Nueva versión de una pieza                                    | `qaVisualPieceVersions`. No hereda la decisión y conserva el historial.                                                                    |
+| La corrida llega al 100 %                                     | Barra segmentada y resumen por dictamen.                                                                                                   |
+| Tema claro y oscuro                                           | Tokens de `review.css`. La propuesta se ve en los dos temas en el HTML.                                                                    |
 
 ---
 
@@ -1312,20 +1354,20 @@ Al editar una campaña registrada, el diálogo muestra solo **Fuentes** y **Piez
 
 Cada punto incluye la opción recomendada, que se puede aplicar mientras el equipo no decida otra cosa.
 
-| # | Pregunta | Recomendación |
-| --- | --- | --- |
-| 1 | ¿Qué equivalencias se aceptan automáticamente? | Los niveles `exact` y `connectors` se aceptan automáticamente, con un aviso informativo. `contained` se acepta con una advertencia. Lo fuzzy requiere confirmación humana. |
-| 2 | Si no se puede vincular el pedido del cliente, ¿se compara contra el CSV? | Sí, con `basis: production` visible y sin poder llegar a "Validada por IA". Así se cumple "analizar siempre" sin ocultar la falta del pedido. |
-| 3 | ¿`JUEVES 22` equivale a `22 de octubre`? ¿Y `HOY` a una fecha? | **Resuelta el 13/11/2026 (§9.2.1):** no se completa el mes desde el calendario de la campaña. Si se exige día y mes, `JUEVES 22` tiene un hallazgo por omitir el mes. `HOY` y una fecha concreta no son equivalentes. Sí se aceptan formatos que conservan toda la información solicitada, como `22/10`. |
-| 4 | Cobertura mínima para "Validada por IA" | Todos los controles solicitados ejecutados y cumplidos, con base en el cliente. |
-| 5 | ¿Quién puede aprobar con excepción? | Por ahora, `super_admin`. Más adelante, el rol `approver`. |
-| 6 | Subcarpetas dentro de DESPLIEGUE | En v1 se informan sin analizarse. Si el equipo organiza por formato, se pueden recorrer hasta dos niveles con `path` en la pieza. |
-| 7 | ¿Se admite Google Sheets como matriz? | Sí, mediante la exportación a XLSX de Drive, que es de solo lectura. Es poco esfuerzo y evita un error común. |
-| 8 | Carruseles | Agrupar los slides por prefijo de nombre como una pieza con varias imágenes. Requiere ejemplos reales. Queda fuera de v1. |
-| 9 | Retención | Conservar todas las importaciones referenciadas por corridas. Purgar las importaciones `failed` y `superseded` sin referencias después de 90 días. Las imágenes viven mientras exista su versión. |
-| 10 | ¿Sincronización automática con Drive? | Manual en v1. Más adelante, un cron diario que solo lista y compara el `fingerprint`, sin descargar si nada cambió. |
-| 11 | Valor del límite global de análisis y presupuesto | La política ya está decidida (§10.1): concurrencia global configurable según cuotas y capacidad medidas, sin fijar ocho como requisito. Queda por determinar y validar el valor operativo en la etapa 4. Se mantiene la alerta de costo por corrida. |
-| 12 | ¿Revisar la importación antes de analizar? | No como paso obligatorio. La pestaña Resumen ya muestra los avisos de campaña y las piezas bloqueadas antes de presionar **Analizar piezas**. |
+| #   | Pregunta                                                                  | Recomendación                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | ¿Qué equivalencias se aceptan automáticamente?                            | Los niveles `exact` y `connectors` se aceptan automáticamente, con un aviso informativo. `contained` se acepta con una advertencia. Lo fuzzy requiere confirmación humana.                                                                                                                               |
+| 2   | Si no se puede vincular el pedido del cliente, ¿se compara contra el CSV? | Sí, con `basis: production` visible y sin poder llegar a "Validada por IA". Así se cumple "analizar siempre" sin ocultar la falta del pedido.                                                                                                                                                            |
+| 3   | ¿`JUEVES 22` equivale a `22 de octubre`? ¿Y `HOY` a una fecha?            | **Resuelta el 13/11/2026 (§9.2.1):** no se completa el mes desde el calendario de la campaña. Si se exige día y mes, `JUEVES 22` tiene un hallazgo por omitir el mes. `HOY` y una fecha concreta no son equivalentes. Sí se aceptan formatos que conservan toda la información solicitada, como `22/10`. |
+| 4   | Cobertura mínima para "Validada por IA"                                   | Todos los controles solicitados ejecutados y cumplidos, con base en el cliente.                                                                                                                                                                                                                          |
+| 5   | ¿Quién puede aprobar con excepción?                                       | Por ahora, `super_admin`. Más adelante, el rol `approver`.                                                                                                                                                                                                                                               |
+| 6   | Subcarpetas dentro de DESPLIEGUE                                          | En v1 se informan sin analizarse. Si el equipo organiza por formato, se pueden recorrer hasta dos niveles con `path` en la pieza.                                                                                                                                                                        |
+| 7   | ¿Se admite Google Sheets como matriz?                                     | Sí, mediante la exportación a XLSX de Drive, que es de solo lectura. Es poco esfuerzo y evita un error común.                                                                                                                                                                                            |
+| 8   | Carruseles                                                                | Agrupar los slides por prefijo de nombre como una pieza con varias imágenes. Requiere ejemplos reales. Queda fuera de v1.                                                                                                                                                                                |
+| 9   | Retención                                                                 | Conservar todas las importaciones referenciadas por corridas. Purgar las importaciones `failed` y `superseded` sin referencias después de 90 días. Las imágenes viven mientras exista su versión.                                                                                                        |
+| 10  | ¿Sincronización automática con Drive?                                     | Manual en v1. Más adelante, un cron diario que solo lista y compara el `fingerprint`, sin descargar si nada cambió.                                                                                                                                                                                      |
+| 11  | Valor del límite global de análisis y presupuesto                         | La política ya está decidida (§10.1): concurrencia global configurable según cuotas y capacidad medidas, sin fijar ocho como requisito. Queda por determinar y validar el valor operativo en la etapa 4. Se mantiene la alerta de costo por corrida.                                                     |
+| 12  | ¿Revisar la importación antes de analizar?                                | No como paso obligatorio. La pestaña Resumen ya muestra los avisos de campaña y las piezas bloqueadas antes de presionar **Analizar piezas**.                                                                                                                                                            |
 
 ---
 
@@ -1335,26 +1377,26 @@ Esta sección extiende la arquitectura anterior sin reemplazarla. Agrega la revi
 
 ### 23.1 Principios
 
-| Principio | Consecuencia |
-| --- | --- |
-| Tres revisiones independientes | **IA** (asistente) → **interna** (control de calidad de la agencia) → **cliente** (definitoria). Cada una tiene sus propios estados y registros. Ninguna sobrescribe a otra. |
-| El cliente solo ve lo que se le envió | El cliente accede a versiones publicadas explícitamente en una **ronda de entrega**. Nunca ve el editor interno, los resultados de IA, los avisos de fuente, las celdas del Excel, el CSV, los comentarios internos ni los nombres técnicos de archivo. |
-| Todo lo del cliente se ve internamente | Cada comentario, audio, transcripción, visita y decisión del cliente aparece en el editor interno, en tiempo real. |
-| Versiones hasta aprobar | Si el cliente pide cambios, la siguiente entrega de esa pieza es una **versión nueva del cliente** (V2, V3…). Las anteriores quedan visibles en modo lectura con sus comentarios. El ciclo termina cuando el cliente aprueba cada pieza. |
-| Una sola interfaz adaptable | El portal del cliente reutiliza los componentes del editor (visor, marcadores, compositor, galería y carrusel) con una propiedad `audience: "internal" \| "client"` y un diseño responsive. No es otra aplicación, y queda lista para convertirse en PWA. |
-| Frontera de datos en el backend | Ocultar cosas en la UI no alcanza. El cliente consume un módulo de Convex propio que solo lee tablas y campos permitidos, con validadores de retorno explícitos. |
+| Principio                              | Consecuencia                                                                                                                                                                                                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tres revisiones independientes         | **IA** (asistente) → **interna** (control de calidad de la agencia) → **cliente** (definitoria). Cada una tiene sus propios estados y registros. Ninguna sobrescribe a otra.                                                                              |
+| El cliente solo ve lo que se le envió  | El cliente accede a versiones publicadas explícitamente en una **ronda de entrega**. Nunca ve el editor interno, los resultados de IA, los avisos de fuente, las celdas del Excel, el CSV, los comentarios internos ni los nombres técnicos de archivo.   |
+| Todo lo del cliente se ve internamente | Cada comentario, audio, transcripción, visita y decisión del cliente aparece en el editor interno, en tiempo real.                                                                                                                                        |
+| Versiones hasta aprobar                | Si el cliente pide cambios, la siguiente entrega de esa pieza es una **versión nueva del cliente** (V2, V3…). Las anteriores quedan visibles en modo lectura con sus comentarios. El ciclo termina cuando el cliente aprueba cada pieza.                  |
+| Una sola interfaz adaptable            | El portal del cliente reutiliza los componentes del editor (visor, marcadores, compositor, galería y carrusel) con una propiedad `audience: "internal" \| "client"` y un diseño responsive. No es otra aplicación, y queda lista para convertirse en PWA. |
+| Frontera de datos en el backend        | Ocultar cosas en la UI no alcanza. El cliente consume un módulo de Convex propio que solo lee tablas y campos permitidos, con validadores de retorno explícitos.                                                                                          |
 
 ### 23.2 Conceptos nuevos
 
-| Concepto | Significado |
-| --- | --- |
-| Ronda de entrega | Conjunto de versiones de piezas que la agencia publica juntas para el cliente: Ronda 1, Ronda 2… |
-| Ítem entregado | Una versión concreta de una pieza dentro de una ronda. Es lo que el cliente revisa y aprueba. |
-| Versión del cliente | Numeración que ve el cliente (V1, V2…). Es independiente de la interna: si internamente hubo v1, v2 y v3 y solo se enviaron v1 y v3, el cliente ve V1 y V2. |
-| Ficha del pedido | Resumen para el cliente de lo que pidió (producto, precio, vigencia, formato y medidas, canal, CTA). Se **congela** al publicar, para que el cliente siempre vea con qué se comparó esa versión. |
-| Hilo del cliente | Conversación visible para el cliente, iniciada por él o por la agencia. |
-| Nota interna | Comentario de la agencia **dentro** de un hilo del cliente que el cliente no ve. |
-| Decisión del cliente | `approved` o `changesRequested` sobre un ítem entregado. |
+| Concepto             | Significado                                                                                                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ronda de entrega     | Conjunto de versiones de piezas que la agencia publica juntas para el cliente: Ronda 1, Ronda 2…                                                                                                 |
+| Ítem entregado       | Una versión concreta de una pieza dentro de una ronda. Es lo que el cliente revisa y aprueba.                                                                                                    |
+| Versión del cliente  | Numeración que ve el cliente (V1, V2…). Es independiente de la interna: si internamente hubo v1, v2 y v3 y solo se enviaron v1 y v3, el cliente ve V1 y V2.                                      |
+| Ficha del pedido     | Resumen para el cliente de lo que pidió (producto, precio, vigencia, formato y medidas, canal, CTA). Se **congela** al publicar, para que el cliente siempre vea con qué se comparó esa versión. |
+| Hilo del cliente     | Conversación visible para el cliente, iniciada por él o por la agencia.                                                                                                                          |
+| Nota interna         | Comentario de la agencia **dentro** de un hilo del cliente que el cliente no ve.                                                                                                                 |
+| Decisión del cliente | `approved` o `changesRequested` sobre un ítem entregado.                                                                                                                                         |
 
 ### 23.3 Flujo completo
 
@@ -1400,13 +1442,13 @@ Esta sección extiende la arquitectura anterior sin reemplazarla. Agrega la revi
 
 Cada ítem entregado tiene su propio estado del cliente. La tarjeta interna muestra el estado del **último ítem activo** de la pieza.
 
-| Estado | Lo que ve la agencia | Lo que ve el cliente | Tono |
-| --- | --- | --- | --- |
-| `notSent` (sin ítem) | "Cliente · sin enviar" | No ve la pieza | Neutro |
-| `sent` | "Enviada · Ronda 2 · V2" | "Por revisar", con la insignia "Nueva versión" si es V2 o posterior | En curso |
-| `viewed` | "Vista por el cliente · 12/11 15:20" | "Por revisar" (el cliente no necesita ver este estado) | En curso |
-| `changesRequested` | "El cliente pidió cambios" | "Cambios solicitados · esperando una nueva versión" | Peligro |
-| `approved` | "Aprobada por el cliente" | "Aprobada" | Éxito (verde) |
+| Estado               | Lo que ve la agencia                 | Lo que ve el cliente                                                | Tono          |
+| -------------------- | ------------------------------------ | ------------------------------------------------------------------- | ------------- |
+| `notSent` (sin ítem) | "Cliente · sin enviar"               | No ve la pieza                                                      | Neutro        |
+| `sent`               | "Enviada · Ronda 2 · V2"             | "Por revisar", con la insignia "Nueva versión" si es V2 o posterior | En curso      |
+| `viewed`             | "Vista por el cliente · 12/11 15:20" | "Por revisar" (el cliente no necesita ver este estado)              | En curso      |
+| `changesRequested`   | "El cliente pidió cambios"           | "Cambios solicitados · esperando una nueva versión"                 | Peligro       |
+| `approved`           | "Aprobada por el cliente"            | "Aprobada"                                                          | Éxito (verde) |
 
 Indicadores adicionales en la tarjeta interna, que no se muestran al cliente:
 
@@ -1431,13 +1473,13 @@ Hay cambios en tablas existentes y cuatro tablas nuevas.
 
 **Cambios en tablas existentes:**
 
-| Tabla | Campos nuevos |
-| --- | --- |
-| `qaVisualCampaigns` | `client?: { clientId: Id<"corClients">, brandId?: Id<"clientBrands"> }`. `clientReview: { enabled, approverIds?: Id<"users">[] (≤ 20), agencyLabel, showAgencyFirstNames, briefFields: string[], allowOriginalDownload }`. `summary.client: { notSent, pending, changesRequested, approved }`. |
-| `qaVisualPieces.card` | `client: { state, clientVersion, deliveryNumber, at, internalAhead, changedAfterApproval }` y `openClientThreads`. |
-| `qaVisualThreads` | `audience: "internal" \| "client"`, `deliveryItemId?` (solo en hilos del cliente) y el valor `{ kind: "client" }` en `origin`. Índices nuevos: `by_version_audience [pieceVersionId, audience, status]` y `by_item [deliveryItemId, status]`. |
-| `qaVisualComments` | `visibility: "internal" \| "client"`, `authorKind: "internal" \| "client"`, `audio?: { storageId, mimeType, durationMs, bytes }` y `transcript?: { status: "pending" \| "done" \| "failed", text?, language? }`. Índice: `by_thread_visibility [threadId, visibility]`. |
-| `qaVisualDecisions` | `party: "internal" \| "client"` y `deliveryItemId?`. Índice: `by_item [deliveryItemId]`. |
+| Tabla                 | Campos nuevos                                                                                                                                                                                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `qaVisualCampaigns`   | `client?: { clientId: Id<"corClients">, brandId?: Id<"clientBrands"> }`. `clientReview: { enabled, approverIds?: Id<"users">[] (≤ 20), agencyLabel, showAgencyFirstNames, briefFields: string[], allowOriginalDownload }`. `summary.client: { notSent, pending, changesRequested, approved }`. |
+| `qaVisualPieces.card` | `client: { state, clientVersion, deliveryNumber, at, internalAhead, changedAfterApproval }` y `openClientThreads`.                                                                                                                                                                             |
+| `qaVisualThreads`     | `audience: "internal" \| "client"`, `deliveryItemId?` (solo en hilos del cliente) y el valor `{ kind: "client" }` en `origin`. Índices nuevos: `by_version_audience [pieceVersionId, audience, status]` y `by_item [deliveryItemId, status]`.                                                  |
+| `qaVisualComments`    | `visibility: "internal" \| "client"`, `authorKind: "internal" \| "client"`, `audio?: { storageId, mimeType, durationMs, bytes }` y `transcript?: { status: "pending" \| "done" \| "failed", text?, language? }`. Índice: `by_thread_visibility [threadId, visibility]`.                        |
+| `qaVisualDecisions`   | `party: "internal" \| "client"` y `deliveryItemId?`. Índice: `by_item [deliveryItemId]`.                                                                                                                                                                                                       |
 
 Reglas de visibilidad:
 
@@ -1449,43 +1491,43 @@ Reglas de visibilidad:
 
 `qaVisualDeliveries`
 
-| Campo | Nota |
-| --- | --- |
-| `campaignId`, `number` | Ronda 1, 2… |
-| `status` | `published` \| `withdrawn`. No hace falta un borrador: la selección vive en el diálogo hasta publicar. |
-| `message?`, `createdBy`, `publishedAt`, `itemCount`, `requestId` | `requestId` vuelve idempotente la publicación. |
+| Campo                                                            | Nota                                                                                                   |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `campaignId`, `number`                                           | Ronda 1, 2…                                                                                            |
+| `status`                                                         | `published` \| `withdrawn`. No hace falta un borrador: la selección vive en el diálogo hasta publicar. |
+| `message?`, `createdBy`, `publishedAt`, `itemCount`, `requestId` | `requestId` vuelve idempotente la publicación.                                                         |
 
 Índices: `by_campaign_number [campaignId, number]` y `by_request [createdBy, requestId]`.
 
 `qaVisualDeliveryItems`
 
-| Campo | Nota |
-| --- | --- |
-| `deliveryId`, `campaignId`, `pieceId`, `pieceVersionId`, `order` | |
-| `clientVersion` | V1, V2… por pieza. |
-| `status` | `active` (versión vigente para el cliente) \| `superseded` (versión anterior, en modo lectura) \| `withdrawn`. |
-| `brief` | `{ title, format, fields: [{ key, label, value }] (≤ 12), requirementsHash }`, congelado. |
-| `image` | `{ width, height }` de la imagen de análisis, para reservar el espacio sin saltos de diseño. |
-| `clientState` | `sent` \| `viewed` \| `changesRequested` \| `approved`. |
-| `currentDecisionId?`, `firstViewedAt?`, `firstViewedBy?`, `publishedAt` | |
+| Campo                                                                   | Nota                                                                                                           |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `deliveryId`, `campaignId`, `pieceId`, `pieceVersionId`, `order`        |                                                                                                                |
+| `clientVersion`                                                         | V1, V2… por pieza.                                                                                             |
+| `status`                                                                | `active` (versión vigente para el cliente) \| `superseded` (versión anterior, en modo lectura) \| `withdrawn`. |
+| `brief`                                                                 | `{ title, format, fields: [{ key, label, value }] (≤ 12), requirementsHash }`, congelado.                      |
+| `image`                                                                 | `{ width, height }` de la imagen de análisis, para reservar el espacio sin saltos de diseño.                   |
+| `clientState`                                                           | `sent` \| `viewed` \| `changesRequested` \| `approved`.                                                        |
+| `currentDecisionId?`, `firstViewedAt?`, `firstViewedBy?`, `publishedAt` |                                                                                                                |
 
 Índices: `by_campaign_status_order [campaignId, status, order]` (galería del cliente), `by_piece [pieceId, clientVersion]`, `by_delivery [deliveryId, order]` y `by_version [pieceVersionId]`.
 
 `qaVisualUploads` registra de quién es cada audio subido, para que nadie pueda adjuntar el `storageId` de otra persona.
 
-| Campo | Nota |
-| --- | --- |
-| `storageId`, `userId`, `kind: "audio"`, `createdAt`, `usedAt?` | |
+| Campo                                                          | Nota |
+| -------------------------------------------------------------- | ---- |
+| `storageId`, `userId`, `kind: "audio"`, `createdAt`, `usedAt?` |      |
 
 Índices: `by_storage [storageId]` y `by_unused [usedAt, createdAt]`, que usa el cron de limpieza.
 
 `qaVisualNotifications`
 
-| Campo | Nota |
-| --- | --- |
-| `userId`, `campaignId`, `kind` | `deliveryPublished` \| `clientComment` \| `clientDecision` \| `agencyReply`. |
-| `refId`, `read`, `createdAt` | |
-| `email: { state: "pending" \| "sending" \| "sent" \| "failed" \| "skipped", attempts, nextAttemptAt? }` | Mismo patrón que `commentNotifications`. |
+| Campo                                                                                                   | Nota                                                                         |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `userId`, `campaignId`, `kind`                                                                          | `deliveryPublished` \| `clientComment` \| `clientDecision` \| `agencyReply`. |
+| `refId`, `read`, `createdAt`                                                                            |                                                                              |
+| `email: { state: "pending" \| "sending" \| "sent" \| "failed" \| "skipped", attempts, nextAttemptAt? }` | Mismo patrón que `commentNotifications`.                                     |
 
 Índices: `by_user_read [userId, read]` y `by_email_state [email.state, email.nextAttemptAt]`.
 
@@ -1599,12 +1641,12 @@ app/hooks/qa-visual/                use-carousel.ts · use-swipe.ts · use-voice
 
 ### 23.10 Diseño responsive y PWA
 
-| Ancho | Interno | Cliente |
-| --- | --- | --- |
-| ≥ 1280 px | Editor de tres paneles y galería de 4 a 6 columnas | Galería de 4 a 5 columnas. Carrusel con panel lateral de 380 px. |
-| 1024–1279 px | El panel derecho se superpone y se puede plegar | Galería de 3 a 4 columnas. Carrusel con panel lateral de 340 px. |
-| 768–1023 px | Galería y carrusel con hoja lateral. El editor de tres paneles se desaconseja. | Galería de 3 columnas. Carrusel con hoja inferior. |
-| < 768 px | Galería de 2 columnas y carrusel con hoja inferior (revisión rápida) | Galería de 2 columnas. Carrusel a pantalla completa con hoja inferior en tres alturas: **mínima** (estado y botones), **media** (ficha) y **completa** (comentarios). |
+| Ancho        | Interno                                                                        | Cliente                                                                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ≥ 1280 px    | Editor de tres paneles y galería de 4 a 6 columnas                             | Galería de 4 a 5 columnas. Carrusel con panel lateral de 380 px.                                                                                                      |
+| 1024–1279 px | El panel derecho se superpone y se puede plegar                                | Galería de 3 a 4 columnas. Carrusel con panel lateral de 340 px.                                                                                                      |
+| 768–1023 px  | Galería y carrusel con hoja lateral. El editor de tres paneles se desaconseja. | Galería de 3 columnas. Carrusel con hoja inferior.                                                                                                                    |
+| < 768 px     | Galería de 2 columnas y carrusel con hoja inferior (revisión rápida)           | Galería de 2 columnas. Carrusel a pantalla completa con hoja inferior en tres alturas: **mínima** (estado y botones), **media** (ficha) y **completa** (comentarios). |
 
 - Los tokens de `review.css` se mueven a `qa-tokens.css` y se comparten. Se usan **container queries** (`@container`) en lugar de componentes duplicados para celulares.
 - Áreas táctiles de al menos 44 px, `env(safe-area-inset-*)`, `100dvh` y nada que dependa solo de pasar el mouse. La etiqueta "Comentarios generales", que en escritorio aparece al pasar el mouse, en celulares se muestra en la hoja inferior.
@@ -1618,95 +1660,95 @@ app/hooks/qa-visual/                use-carousel.ts · use-swipe.ts · use-voice
 
 ### 23.11 Notificaciones
 
-| Evento | Destinatarios | Canal |
-| --- | --- | --- |
-| Ronda publicada | Usuarios externos asignados a la campaña | Un email por ronda, con la cantidad de piezas y el enlace. Más un aviso en la app. |
-| Comentario del cliente | Equipo interno de la campaña (por ahora, los `super_admin` que sigan la campaña) | Aviso en la app al instante y email en resumen cada 10 minutos. |
-| Decisión del cliente | Equipo interno | Aviso en la app y email en resumen. "Cambios solicitados" se marca como prioritario. |
-| Respuesta de la agencia al cliente | Autor del hilo del cliente | Email en resumen cada 30 minutos. |
+| Evento                             | Destinatarios                                                                    | Canal                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Ronda publicada                    | Usuarios externos asignados a la campaña                                         | Un email por ronda, con la cantidad de piezas y el enlace. Más un aviso en la app.   |
+| Comentario del cliente             | Equipo interno de la campaña (por ahora, los `super_admin` que sigan la campaña) | Aviso en la app al instante y email en resumen cada 10 minutos.                      |
+| Decisión del cliente               | Equipo interno                                                                   | Aviso en la app y email en resumen. "Cambios solicitados" se marca como prioritario. |
+| Respuesta de la agencia al cliente | Autor del hilo del cliente                                                       | Email en resumen cada 30 minutos.                                                    |
 
 Los envíos usan Workpool con reintentos y siguen el patrón de estados de email de `commentNotifications`.
 
 ### 23.12 Casos límite
 
-| Caso | Comportamiento |
-| --- | --- |
-| El cliente comenta en V1 mientras se publica V2 | El comentario queda en V1, porque los hilos pertenecen a una versión. La agencia lo ve como "Comentario en una versión anterior". V2 muestra "Lo que pediste en V1". |
-| Dos personas del cliente deciden a la vez | `expectedDecisionId` detecta el conflicto y la segunda ve la decisión vigente antes de confirmar la suya. |
-| La agencia detecta un error después de la aprobación del cliente | No puede revertir la decisión. Sube la corrección, que pasa por IA y revisión interna, y la envía: se reabre la revisión del cliente con V+1. |
-| Se revoca la aprobación interna de una versión ya enviada | El ítem sigue visible para el cliente. La agencia ve una alerta y puede retirarlo si todavía no tiene decisión. |
-| La pieza se borra de Drive después de enviarla | El cliente la sigue viendo, porque las imágenes están en Convex Storage. La agencia ve que la pieza está `removed`. |
-| Duplicados | Solo se pueden enviar piezas que no estén `excluded`. Un duplicado sin resolver no es elegible. |
-| El Excel cambia después del envío | La ficha del cliente no cambia sola. La agencia ve "El pedido cambió después del envío" y puede usar **Actualizar ficha**. |
-| El cliente no tiene permiso para aprobar | Ve los botones de comentario y el texto "La aprobación la realiza [equipo]". |
-| Falla la subida del audio o se corta la conexión | La grabación se conserva en memoria con "Reintentar". El texto escrito no se pierde. |
-| El micrófono no está disponible o se niega el permiso | Se oculta el botón o se explica cómo habilitarlo. Se puede seguir comentando por escrito. |
-| La campaña se archiva | El portal muestra la campaña en modo lectura con "Revisión cerrada". No se aceptan comentarios ni decisiones. |
-| Un usuario externo de otra empresa o de otra marca abre el enlace | "No encontrado". No se revela si la campaña existe. |
-| Se intenta responder a un hilo interno desde el portal | `client/threads.reply` valida `audience === "client"` y, si no, responde "No encontrado". |
-| Se retira una ronda completa | Los ítems sin decisión pasan a `withdrawn` y el cliente vuelve a ver la versión anterior activa, si la hay. Los ítems con decisión no se pueden retirar. |
+| Caso                                                              | Comportamiento                                                                                                                                                       |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| El cliente comenta en V1 mientras se publica V2                   | El comentario queda en V1, porque los hilos pertenecen a una versión. La agencia lo ve como "Comentario en una versión anterior". V2 muestra "Lo que pediste en V1". |
+| Dos personas del cliente deciden a la vez                         | `expectedDecisionId` detecta el conflicto y la segunda ve la decisión vigente antes de confirmar la suya.                                                            |
+| La agencia detecta un error después de la aprobación del cliente  | No puede revertir la decisión. Sube la corrección, que pasa por IA y revisión interna, y la envía: se reabre la revisión del cliente con V+1.                        |
+| Se revoca la aprobación interna de una versión ya enviada         | El ítem sigue visible para el cliente. La agencia ve una alerta y puede retirarlo si todavía no tiene decisión.                                                      |
+| La pieza se borra de Drive después de enviarla                    | El cliente la sigue viendo, porque las imágenes están en Convex Storage. La agencia ve que la pieza está `removed`.                                                  |
+| Duplicados                                                        | Solo se pueden enviar piezas que no estén `excluded`. Un duplicado sin resolver no es elegible.                                                                      |
+| El Excel cambia después del envío                                 | La ficha del cliente no cambia sola. La agencia ve "El pedido cambió después del envío" y puede usar **Actualizar ficha**.                                           |
+| El cliente no tiene permiso para aprobar                          | Ve los botones de comentario y el texto "La aprobación la realiza [equipo]".                                                                                         |
+| Falla la subida del audio o se corta la conexión                  | La grabación se conserva en memoria con "Reintentar". El texto escrito no se pierde.                                                                                 |
+| El micrófono no está disponible o se niega el permiso             | Se oculta el botón o se explica cómo habilitarlo. Se puede seguir comentando por escrito.                                                                            |
+| La campaña se archiva                                             | El portal muestra la campaña en modo lectura con "Revisión cerrada". No se aceptan comentarios ni decisiones.                                                        |
+| Un usuario externo de otra empresa o de otra marca abre el enlace | "No encontrado". No se revela si la campaña existe.                                                                                                                  |
+| Se intenta responder a un hilo interno desde el portal            | `client/threads.reply` valida `audience === "client"` y, si no, responde "No encontrado".                                                                            |
+| Se retira una ronda completa                                      | Los ítems sin decisión pasan a `withdrawn` y el cliente vuelve a ver la versión anterior activa, si la hay. Los ítems con decisión no se pueden retirar.             |
 
 ### 23.13 Funciones
 
 **Internas** (requieren `super_admin`):
 
-| Función | Uso |
-| --- | --- |
-| `campaigns.configureClientReview` | Asociar cliente y marca, habilitar la revisión y definir aprobadores, etiqueta y campos de la ficha. |
-| `deliveries.preview({ campaignId })` | Piezas elegibles y no elegibles con su motivo, más la ficha propuesta. |
-| `deliveries.publish({ campaignId, pieceVersionIds, message?, requestId })` | Publicación idempotente. |
-| `deliveries.withdrawItem` y `deliveries.withdrawRound` | Retirar ítems o rondas sin decisión. |
-| `deliveries.updateBrief({ itemId })` | Volver a congelar la ficha con el pedido actual. |
-| `deliveries.list({ campaignId, paginationOpts })` | Historial de rondas. |
-| `threads.reply({ threadId, body?, audio?, visibility })` | Responder en un hilo. `visibility` es obligatorio en los hilos del cliente. |
+| Función                                                                    | Uso                                                                                                  |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `campaigns.configureClientReview`                                          | Asociar cliente y marca, habilitar la revisión y definir aprobadores, etiqueta y campos de la ficha. |
+| `deliveries.preview({ campaignId })`                                       | Piezas elegibles y no elegibles con su motivo, más la ficha propuesta.                               |
+| `deliveries.publish({ campaignId, pieceVersionIds, message?, requestId })` | Publicación idempotente.                                                                             |
+| `deliveries.withdrawItem` y `deliveries.withdrawRound`                     | Retirar ítems o rondas sin decisión.                                                                 |
+| `deliveries.updateBrief({ itemId })`                                       | Volver a congelar la ficha con el pedido actual.                                                     |
+| `deliveries.list({ campaignId, paginationOpts })`                          | Historial de rondas.                                                                                 |
+| `threads.reply({ threadId, body?, audio?, visibility })`                   | Responder en un hilo. `visibility` es obligatorio en los hilos del cliente.                          |
 
 **Del cliente** (`requireClientCampaign`):
 
-| Función | Uso |
-| --- | --- |
-| `client/portal.campaigns()` | Campañas con revisión habilitada para el usuario, con su progreso. |
-| `client/portal.gallery({ campaignId, filter, paginationOpts })` | Ítems `active`: imagen, título, formato, versión del cliente y estado. |
-| `client/portal.piece({ itemId })` | Ficha, versiones anteriores de la pieza, hilos y comentarios del cliente, decisión y `canApprove`. |
-| `client/portal.markViewed({ itemId })` | Idempotente. Registra solo la primera vista. |
-| `client/threads.create`, `reply`, `edit`, `remove` | Solo sobre comentarios propios del cliente. |
-| `client/decisions.decide({ itemId, decision, comment?, expectedDecisionId })` | Aprobar o solicitar cambios. |
-| `client/audio.generateUploadUrl()` | URL de subida para un audio. |
+| Función                                                                       | Uso                                                                                                |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `client/portal.campaigns()`                                                   | Campañas con revisión habilitada para el usuario, con su progreso.                                 |
+| `client/portal.gallery({ campaignId, filter, paginationOpts })`               | Ítems `active`: imagen, título, formato, versión del cliente y estado.                             |
+| `client/portal.piece({ itemId })`                                             | Ficha, versiones anteriores de la pieza, hilos y comentarios del cliente, decisión y `canApprove`. |
+| `client/portal.markViewed({ itemId })`                                        | Idempotente. Registra solo la primera vista.                                                       |
+| `client/threads.create`, `reply`, `edit`, `remove`                            | Solo sobre comentarios propios del cliente.                                                        |
+| `client/decisions.decide({ itemId, decision, comment?, expectedDecisionId })` | Aprobar o solicitar cambios.                                                                       |
+| `client/audio.generateUploadUrl()`                                            | URL de subida para un audio.                                                                       |
 
 ### 23.14 Impacto en el resto del documento
 
-| Sección | Cambio |
-| --- | --- |
-| §3.1 Carpetas | Se agregan `convex/qaVisual/client/`, `deliveries.ts`, `notifications.ts` y `transcriptionJob.ts` (Node), además de `model/clientBrief.ts` y `model/clientState.ts`. En el frontend, `app/workspace/reviews/` (con `layout.tsx` que exige el perfil externo, `page.tsx`, `[campaignId]/page.tsx`, `media/route.ts` y `audio/route.ts`) y los componentes y hooks de §23.9. |
-| §3.2 Componentes | Se agrega `qaVisualTranscriptionPool` (paralelismo 2) y un pool de notificaciones (paralelismo 2). |
-| §12.3 Decisión humana | Pasa a llamarse "decisión **interna**" (`party: "internal"`). La aprobación interna es un requisito para enviar al cliente, pero no es la aprobación final. |
-| §12.4 Permisos | El acceso del cliente se resuelve con `clientUserAssignments`. No hace falta una tabla de miembros nueva para el cliente. |
-| §13.1 Imágenes | Se agrega la variante de vista previa en WebP de 640 px. |
-| §14 Seguridad | Nueva bandera `QA_VISUAL_CLIENT_REVIEW_ENABLED`, prueba de frontera de datos, límites de uso y control de propiedad de las subidas. |
-| §15 Métricas | Tiempo desde el envío hasta la primera vista y hasta la decisión, rondas por pieza, porcentaje aprobado en la primera ronda y motivos de cambio (a partir de las transcripciones y los comentarios). |
-| §16 Pruebas | Frontera de datos, permisos de cliente y marca, idempotencia de la publicación, numeración de versiones del cliente, conflicto de decisiones, grabadora (con `MediaRecorder` simulado), carrusel (teclado y deslizamiento) y pruebas visuales en celular. |
+| Sección               | Cambio                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §3.1 Carpetas         | Se agregan `convex/qaVisual/client/`, `deliveries.ts`, `notifications.ts` y `transcriptionJob.ts` (Node), además de `model/clientBrief.ts` y `model/clientState.ts`. En el frontend, `app/workspace/reviews/` (con `layout.tsx` que exige el perfil externo, `page.tsx`, `[campaignId]/page.tsx`, `media/route.ts` y `audio/route.ts`) y los componentes y hooks de §23.9. |
+| §3.2 Componentes      | Se agrega `qaVisualTranscriptionPool` (paralelismo 2) y un pool de notificaciones (paralelismo 2).                                                                                                                                                                                                                                                                         |
+| §12.3 Decisión humana | Pasa a llamarse "decisión **interna**" (`party: "internal"`). La aprobación interna es un requisito para enviar al cliente, pero no es la aprobación final.                                                                                                                                                                                                                |
+| §12.4 Permisos        | El acceso del cliente se resuelve con `clientUserAssignments`. No hace falta una tabla de miembros nueva para el cliente.                                                                                                                                                                                                                                                  |
+| §13.1 Imágenes        | Se agrega la variante de vista previa en WebP de 640 px.                                                                                                                                                                                                                                                                                                                   |
+| §14 Seguridad         | Nueva bandera `QA_VISUAL_CLIENT_REVIEW_ENABLED`, prueba de frontera de datos, límites de uso y control de propiedad de las subidas.                                                                                                                                                                                                                                        |
+| §15 Métricas          | Tiempo desde el envío hasta la primera vista y hasta la decisión, rondas por pieza, porcentaje aprobado en la primera ronda y motivos de cambio (a partir de las transcripciones y los comentarios).                                                                                                                                                                       |
+| §16 Pruebas           | Frontera de datos, permisos de cliente y marca, idempotencia de la publicación, numeración de versiones del cliente, conflicto de decisiones, grabadora (con `MediaRecorder` simulado), carrusel (teclado y deslizamiento) y pruebas visuales en celular.                                                                                                                  |
 
 ### 23.15 Plan por etapas, continuación de §18
 
-| Etapa | Contenido | Criterios de aceptación |
-| --- | --- | --- |
-| **8. Galería y carrusel internos** | Variante de vista previa de 640 px, `PieceGallery`, `PieceCarousel` interno y selector Revisión / Galería. | Se recorren 61 piezas con ← y → sin esperas visibles. La URL abre la pieza exacta. El editor sigue sin carrusel inferior. |
-| **9. Entregas y frontera del cliente** | Configuración de la revisión del cliente, `qaVisualDeliveries` y `qaVisualDeliveryItems`, `deliveries.*`, módulo `client/` con validadores de retorno y su prueba, rutas de medios del cliente y tercer estado en las tarjetas. | Un usuario externo asignado ve solo los ítems enviados. Uno de otra empresa o marca recibe "no encontrado". La prueba de frontera pasa. |
-| **10. Portal del cliente** | `ClientShell`, galería y carrusel del cliente, ficha, comentarios con anclas, decisiones, versiones V1/V2 con "Lo que pediste en V1" y diseño para celulares con hoja inferior. | Flujo completo de V1 a cambios, V2 y aprobación en escritorio y en celular. Los comentarios del cliente aparecen al instante en el editor interno. |
-| **11. Voz y notificaciones** | Grabadora, subida con propiedad verificada, transcripción, notificaciones en la app y por email, y cron de limpieza. | Un audio de 1 minuto grabado en iOS Safari y en Chrome Android se reproduce y se transcribe. Si se niega el micrófono, se puede seguir con texto. Llega un email por ronda. |
-| **12. PWA (futuro)** | Manifest, service worker y Web Push. | Se instala en iOS y Android y abre directamente en el portal. |
+| Etapa                                  | Contenido                                                                                                                                                                                                                       | Criterios de aceptación                                                                                                                                                     |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **8. Galería y carrusel internos**     | Variante de vista previa de 640 px, `PieceGallery`, `PieceCarousel` interno y selector Revisión / Galería.                                                                                                                      | Se recorren 61 piezas con ← y → sin esperas visibles. La URL abre la pieza exacta. El editor sigue sin carrusel inferior.                                                   |
+| **9. Entregas y frontera del cliente** | Configuración de la revisión del cliente, `qaVisualDeliveries` y `qaVisualDeliveryItems`, `deliveries.*`, módulo `client/` con validadores de retorno y su prueba, rutas de medios del cliente y tercer estado en las tarjetas. | Un usuario externo asignado ve solo los ítems enviados. Uno de otra empresa o marca recibe "no encontrado". La prueba de frontera pasa.                                     |
+| **10. Portal del cliente**             | `ClientShell`, galería y carrusel del cliente, ficha, comentarios con anclas, decisiones, versiones V1/V2 con "Lo que pediste en V1" y diseño para celulares con hoja inferior.                                                 | Flujo completo de V1 a cambios, V2 y aprobación en escritorio y en celular. Los comentarios del cliente aparecen al instante en el editor interno.                          |
+| **11. Voz y notificaciones**           | Grabadora, subida con propiedad verificada, transcripción, notificaciones en la app y por email, y cron de limpieza.                                                                                                            | Un audio de 1 minuto grabado en iOS Safari y en Chrome Android se reproduce y se transcribe. Si se niega el micrófono, se puede seguir con texto. Llega un email por ronda. |
+| **12. PWA (futuro)**                   | Manifest, service worker y Web Push.                                                                                                                                                                                            | Se instala en iOS y Android y abre directamente en el portal.                                                                                                               |
 
 ### 23.16 Decisiones abiertas de la revisión del cliente
 
-| # | Pregunta | Recomendación |
-| --- | --- | --- |
-| C1 | ¿Se puede enviar al cliente una pieza aprobada internamente con excepción? | Sí. La excepción es interna y el cliente no la ve. |
-| C2 | ¿Qué campos de la ficha ve el cliente? | Producto, precio, vigencia, formato y medidas, canal y texto del CTA, configurables por campaña. Nunca celdas, CSV ni avisos. |
-| C3 | ¿Quién aprueba del lado del cliente? | Una lista explícita de aprobadores por campaña. Si está vacía, cualquier usuario asignado. |
-| C4 | ¿El cliente ve los nombres de las personas de la agencia? | "PTO99" más el nombre de pila, configurable. |
-| C5 | ¿Recordatorios automáticos al cliente? | Opcional: un recordatorio a las 48 horas si quedan piezas por revisar. Por defecto, apagado. |
-| C6 | ¿El cliente puede descargar el original? | Desactivado por defecto. Se habilita por campaña. |
-| C7 | ¿Se puede usar la IA para verificar que una versión nueva atendió los comentarios del cliente? | Sí, como mejora posterior: un control "Cambios pedidos en V1" que compara las transcripciones y comentarios con la imagen nueva. No reemplaza a la revisión interna. |
-| C8 | ¿Cuánto tiempo se conservan los audios? | Mientras exista la campaña. Al archivarla, se aplica la misma retención que al resto (§22, punto 9). |
+| #   | Pregunta                                                                                       | Recomendación                                                                                                                                                        |
+| --- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | ¿Se puede enviar al cliente una pieza aprobada internamente con excepción?                     | Sí. La excepción es interna y el cliente no la ve.                                                                                                                   |
+| C2  | ¿Qué campos de la ficha ve el cliente?                                                         | Producto, precio, vigencia, formato y medidas, canal y texto del CTA, configurables por campaña. Nunca celdas, CSV ni avisos.                                        |
+| C3  | ¿Quién aprueba del lado del cliente?                                                           | Una lista explícita de aprobadores por campaña. Si está vacía, cualquier usuario asignado.                                                                           |
+| C4  | ¿El cliente ve los nombres de las personas de la agencia?                                      | "PTO99" más el nombre de pila, configurable.                                                                                                                         |
+| C5  | ¿Recordatorios automáticos al cliente?                                                         | Opcional: un recordatorio a las 48 horas si quedan piezas por revisar. Por defecto, apagado.                                                                         |
+| C6  | ¿El cliente puede descargar el original?                                                       | Desactivado por defecto. Se habilita por campaña.                                                                                                                    |
+| C7  | ¿Se puede usar la IA para verificar que una versión nueva atendió los comentarios del cliente? | Sí, como mejora posterior: un control "Cambios pedidos en V1" que compara las transcripciones y comentarios con la imagen nueva. No reemplaza a la revisión interna. |
+| C8  | ¿Cuánto tiempo se conservan los audios?                                                        | Mientras exista la campaña. Al archivarla, se aplica la misma retención que al resto (§22, punto 9).                                                                 |
 
 ---
 
@@ -1793,14 +1835,14 @@ Las casillas marcadas identifican funcionalidades implementadas dentro del alcan
 
 ### 24.4 Variables de entorno nuevas
 
-| Variable | Dónde | Valor |
-| --- | --- | --- |
-| `QA_VISUAL_ANALYSIS_CONCURRENCY` | Convex | Concurrencia global de análisis (1–100; por defecto 24). |
-| `QA_VISUAL_GEMINI_MODEL` | Convex | Modelo principal de QA (por defecto `gemini-3.7-flash`). |
-| `QA_VISUAL_OPENAI_MODEL` | Convex | Modelo de respaldo de QA (por defecto `gpt-6-luna`). |
-| `QA_VISUAL_CSV_FIX_MODEL` | Convex | Modelo que explica las diferencias del mapeo de piezas y propone cómo corregirlas, sin cambiar nada (por defecto `gemini-4-neon`, especificación §5.5). Recibe los nombres de las piezas, las filas del CSV y, de la matriz, solo la identidad, las medidas y la fecha de los pedidos candidatos. |
-| `QA_VISUAL_ENABLED` | Next | `true` habilita QA fuera de desarrollo. |
-| `QA_VISUAL_ENABLED` | Convex | `false` desactiva todas las funciones de QA. |
+| Variable                         | Dónde  | Valor                                                                                                                                                                                                                                                                                             |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QA_VISUAL_ANALYSIS_CONCURRENCY` | Convex | Concurrencia global de análisis (1–100; por defecto 24).                                                                                                                                                                                                                                          |
+| `QA_VISUAL_GEMINI_MODEL`         | Convex | Modelo principal de QA (por defecto `gemini-3.7-flash`).                                                                                                                                                                                                                                          |
+| `QA_VISUAL_OPENAI_MODEL`         | Convex | Modelo de respaldo de QA (por defecto `gpt-6-luna`).                                                                                                                                                                                                                                              |
+| `QA_VISUAL_CSV_FIX_MODEL`        | Convex | Modelo que explica las diferencias del mapeo de piezas y propone cómo corregirlas, sin cambiar nada (por defecto `gemini-4-neon`, especificación §5.5). Recibe los nombres de las piezas, las filas del CSV y, de la matriz, solo la identidad, las medidas y la fecha de los pedidos candidatos. |
+| `QA_VISUAL_ENABLED`              | Next   | `true` habilita QA fuera de desarrollo.                                                                                                                                                                                                                                                           |
+| `QA_VISUAL_ENABLED`              | Convex | `false` desactiva todas las funciones de QA.                                                                                                                                                                                                                                                      |
 
 Las transcripciones usan `SPEECH_KEY` y `SPEECH_REGION`, que la app ya tiene configuradas para Azure.
 
@@ -1820,18 +1862,18 @@ Las transcripciones usan `SPEECH_KEY` y `SPEECH_REGION`, que la app ya tiene con
 
 Hoy el sistema funciona bien con piezas promocionales de comida rápida: una oferta numerada, un precio, una fecha o "HOY", un canal (Domicilio, Express o Auto Rápido) y, a veces, un CTA. Ese supuesto aparece en todas las capas:
 
-| Capa | Archivo | Supuesto fijo | Qué pasa con otra pieza |
-| --- | --- | --- | --- |
-| Catálogo de controles | `convex/qaVisual/model/requirements.ts` (`ids`), `analysisInput.node.ts` (`baseline`) | Siempre los mismos 6 controles: `format`, `dimensions`, `product`, `price`, `date`, `cta`. | Una pieza institucional, de marca o de evento queda con `product`, `price` y `date` en "sin referencia" o "no verificable". El veredicto sale "incompleta" aunque la pieza esté bien, y no se controla lo que sí importa (titular, legales, logo, hashtag, URL, dirección, horario). |
-| Lectura de la matriz | `requirements.ts`, `clientMatrix.node.ts` | Pestañas `PRODUCCION`, `LEYENDA` y `REGLAS`, y celdas fijas: A–E identidad de la fila, G formato, I/J dimensiones, K ofertas numeradas, L precios numerados, P notas/CTA, `LEYENDA!C11` y `REGLAS!B6`. | Si la matriz de otro cliente u otra campaña usa otras columnas u otro idioma, los requisitos quedan vacíos o, peor, se leen de una columna equivocada. |
-| Lectura del CSV | `model/productionCsv.ts` | Columnas `TXT_PRODUCTO`, `TXT_PRECIO`, `SLOT_CTA`, `SLOT_FECHA`, `CAMPAÑA`, `FASE`, `CANAL`, `MEDIO_PLATAFORMA`, `FORMATO_TIPO`, `ANCHO_PX` y `ALTO_PX`, mapeadas a un tipo `ProductionFields` cerrado. | Cualquier otra columna del CSV (`TXT_TITULAR`, `TXT_LEGAL`, `URL`, `HASHTAG`…) se ignora. |
-| Vinculación de oferta | `model/linking.ts`, `model/offers.ts`, `model/normalize.ts` | Ofertas como lista numerada `1. …`, prefijos de canal `DOMICILIO\|EXPRESS\|AUTORAPIDO` y fechas en español (`temporal`, meses en español). | Sin lista numerada no hay vínculo. Otros canales u otros idiomas no se reconocen. |
-| Comparadores deterministas | `model/controls.ts`, `model/offers.ts` (`priceAmount`), `model/visibleDate.ts` | Solo `price` (formato `$8,99`) y `date` (día/mes en español). | Montos con miles, otras monedas, porcentajes ("-30 %"), cuotas ("12 cuotas sin interés") o rangos horarios no tienen comparador. |
-| Prompt | `model/prompt.ts` | Rol de "piezas publicitarias" con ejemplos de precio, fecha, "JUEVES 15", la app y "descargar". | El modelo recibe instrucciones irrelevantes y sesgos ("mencionar la app no equivale a invitar a descargarla") en piezas que no tienen nada de eso. |
-| Veredicto | `model/verdict.ts` | Un control es visual si no es `format` ni `dimensions`. | Un control técnico nuevo (peso, perfil de color, transparencia) se contaría como visual. |
-| Ficha del cliente | `model/clientBrief.ts` | Campos `product`, `price`, `date`, `cta` y canales `DOMICILIO/EXPRESS/AUTORAPIDO` para título y canal. | La ficha queda vacía o con títulos mal armados. |
-| Frontend | `app/lib/qa-visual/piece-inventory.ts`, `review-model.ts`, `PieceDetails.tsx`, `CommentCard.tsx`, `FilesPanel.tsx` | El tipo de pieza tiene `product`, `price`, `validity`, `cta`, `channel` y `phase`, con etiquetas fijas ("Oferta del cliente", "Precio solicitado", "Vigencia solicitada"). La selección manual de candidatos se llama "Oferta del cliente". | Los paneles muestran "—" en campos sin sentido para la pieza y no muestran los requisitos reales. |
-| Configuración heredada | `QA_VISUAL_RULES_JSON` + `QA_VISUAL_GOOGLE_FOLDER_ID` | Reglas extra por variable de entorno y para una sola carpeta. | No escala a varias campañas ni a varios clientes. |
+| Capa                       | Archivo                                                                                                            | Supuesto fijo                                                                                                                                                                                                                               | Qué pasa con otra pieza                                                                                                                                                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Catálogo de controles      | `convex/qaVisual/model/requirements.ts` (`ids`), `analysisInput.node.ts` (`baseline`)                              | Siempre los mismos 6 controles: `format`, `dimensions`, `product`, `price`, `date`, `cta`.                                                                                                                                                  | Una pieza institucional, de marca o de evento queda con `product`, `price` y `date` en "sin referencia" o "no verificable". El veredicto sale "incompleta" aunque la pieza esté bien, y no se controla lo que sí importa (titular, legales, logo, hashtag, URL, dirección, horario). |
+| Lectura de la matriz       | `requirements.ts`, `clientMatrix.node.ts`                                                                          | Pestañas `PRODUCCION`, `LEYENDA` y `REGLAS`, y celdas fijas: A–E identidad de la fila, G formato, I/J dimensiones, K ofertas numeradas, L precios numerados, P notas/CTA, `LEYENDA!C11` y `REGLAS!B6`.                                      | Si la matriz de otro cliente u otra campaña usa otras columnas u otro idioma, los requisitos quedan vacíos o, peor, se leen de una columna equivocada.                                                                                                                               |
+| Lectura del CSV            | `model/productionCsv.ts`                                                                                           | Columnas `TXT_PRODUCTO`, `TXT_PRECIO`, `SLOT_CTA`, `SLOT_FECHA`, `CAMPAÑA`, `FASE`, `CANAL`, `MEDIO_PLATAFORMA`, `FORMATO_TIPO`, `ANCHO_PX` y `ALTO_PX`, mapeadas a un tipo `ProductionFields` cerrado.                                     | Cualquier otra columna del CSV (`TXT_TITULAR`, `TXT_LEGAL`, `URL`, `HASHTAG`…) se ignora.                                                                                                                                                                                            |
+| Vinculación de oferta      | `model/linking.ts`, `model/offers.ts`, `model/normalize.ts`                                                        | Ofertas como lista numerada `1. …`, prefijos de canal `DOMICILIO\|EXPRESS\|AUTORAPIDO` y fechas en español (`temporal`, meses en español).                                                                                                  | Sin lista numerada no hay vínculo. Otros canales u otros idiomas no se reconocen.                                                                                                                                                                                                    |
+| Comparadores deterministas | `model/controls.ts`, `model/offers.ts` (`priceAmount`), `model/visibleDate.ts`                                     | Solo `price` (formato `$8,99`) y `date` (día/mes en español).                                                                                                                                                                               | Montos con miles, otras monedas, porcentajes ("-30 %"), cuotas ("12 cuotas sin interés") o rangos horarios no tienen comparador.                                                                                                                                                     |
+| Prompt                     | `model/prompt.ts`                                                                                                  | Rol de "piezas publicitarias" con ejemplos de precio, fecha, "JUEVES 15", la app y "descargar".                                                                                                                                             | El modelo recibe instrucciones irrelevantes y sesgos ("mencionar la app no equivale a invitar a descargarla") en piezas que no tienen nada de eso.                                                                                                                                   |
+| Veredicto                  | `model/verdict.ts`                                                                                                 | Un control es visual si no es `format` ni `dimensions`.                                                                                                                                                                                     | Un control técnico nuevo (peso, perfil de color, transparencia) se contaría como visual.                                                                                                                                                                                             |
+| Ficha del cliente          | `model/clientBrief.ts`                                                                                             | Campos `product`, `price`, `date`, `cta` y canales `DOMICILIO/EXPRESS/AUTORAPIDO` para título y canal.                                                                                                                                      | La ficha queda vacía o con títulos mal armados.                                                                                                                                                                                                                                      |
+| Frontend                   | `app/lib/qa-visual/piece-inventory.ts`, `review-model.ts`, `PieceDetails.tsx`, `CommentCard.tsx`, `FilesPanel.tsx` | El tipo de pieza tiene `product`, `price`, `validity`, `cta`, `channel` y `phase`, con etiquetas fijas ("Oferta del cliente", "Precio solicitado", "Vigencia solicitada"). La selección manual de candidatos se llama "Oferta del cliente". | Los paneles muestran "—" en campos sin sentido para la pieza y no muestran los requisitos reales.                                                                                                                                                                                    |
+| Configuración heredada     | `QA_VISUAL_RULES_JSON` + `QA_VISUAL_GOOGLE_FOLDER_ID`                                                              | Reglas extra por variable de entorno y para una sola carpeta.                                                                                                                                                                               | No escala a varias campañas ni a varios clientes.                                                                                                                                                                                                                                    |
 
 Lo que **no** está acoplado y se conserva tal cual: lectura de Drive en solo lectura, inventario de carpetas, identidad de piezas y versiones por `contentHash`, preparación de imágenes, los pools de análisis y el runner, la política de reintentos, la localización de comentarios (`box_2d` → región), los hilos, las aprobaciones, la revisión del cliente, la galería y el carrusel.
 
@@ -1845,10 +1887,10 @@ Todo lo demás pasa a ser **configuración por campaña** o **contenido extraíd
 
 ### 25.3 Principios del rediseño
 
-1. **El pedido define los controles; el código no.** Una pieza se evalúa contra los elementos que el pedido exige para *esa* pieza, no contra una lista fija. Si el pedido no pide precio, no existe el control de precio (ni siquiera como "no aplica").
-2. **Tipos de control, no controles con nombre de dominio.** El código conoce *tipos* genéricos (texto requerido, importe, fecha o vigencia, llamado a la acción, logo o marca, texto legal, URL o contacto, elemento visual, técnico…). Cada requisito de una pieza es una *instancia* de un tipo, con una etiqueta legible que viene del pedido ("Titular", "Precio", "Hashtag de la campaña").
+1. **El pedido define los controles; el código no.** Una pieza se evalúa contra los elementos que el pedido exige para _esa_ pieza, no contra una lista fija. Si el pedido no pide precio, no existe el control de precio (ni siquiera como "no aplica").
+2. **Tipos de control, no controles con nombre de dominio.** El código conoce _tipos_ genéricos (texto requerido, importe, fecha o vigencia, llamado a la acción, logo o marca, texto legal, URL o contacto, elemento visual, técnico…). Cada requisito de una pieza es una _instancia_ de un tipo, con una etiqueta legible que viene del pedido ("Titular", "Precio", "Hashtag de la campaña").
 3. **Mapeo de fuentes declarativo.** Cómo se lee la matriz y el CSV se describe en un **perfil de fuentes** (datos), no en `if` con letras de columna. El comportamiento actual pasa a ser el perfil `promo-ofertas-v1`.
-4. **Determinista cuando se puede, semántico cuando no.** Los comparadores deterministas quedan como *mejoras opcionales* por tipo. Si no reconocen el formato, se conserva la evaluación del modelo (misma política de §9.2.1).
+4. **Determinista cuando se puede, semántico cuando no.** Los comparadores deterministas quedan como _mejoras opcionales_ por tipo. Si no reconocen el formato, se conserva la evaluación del modelo (misma política de §9.2.1).
 5. **Prompt compuesto.** Un prompt base sin ejemplos de dominio, más bloques por tipo de control presente en la pieza. Nada de "la app", "descargar" ni "JUEVES 15" en el prompt base.
 6. **Mismo contrato de salida.** El modelo sigue devolviendo un control por `ruleId` con `outcome`, `evidenceStatus`, `visibleText`, `missingElements` y `box_2d`. El runner, la validación de salida y la localización no cambian.
 7. **Paso a paso y reversible.** La primera etapa reproduce exactamente el comportamiento actual con la arquitectura nueva; las pruebas existentes deben seguir pasando sin cambios de resultado.
@@ -1860,32 +1902,39 @@ Archivo nuevo: `convex/qaVisual/model/controlTypes.ts`. Cada tipo declara:
 
 ```ts
 type ControlType = {
-  kind: string;                    // "text" | "amount" | "date" | ...
-  family: "technical" | "visual";  // reemplaza el if de verdict.ts
+  kind: string; // "text" | "amount" | "date" | ...
+  family: "technical" | "visual"; // reemplaza el if de verdict.ts
   defaultSeverity: "warning" | "blocking";
-  defaultLabel: string;            // "Texto requerido"
-  promptBlock: string;             // instrucciones específicas del tipo (§25.7)
-  compare?: (expected: string, visible: string, ctx: CompareContext) => Comparison | undefined;
-  technical?: (expected: string, snapshot: ImageSnapshot) => { outcome: "pass" | "fail"; observed: string };
+  defaultLabel: string; // "Texto requerido"
+  promptBlock: string; // instrucciones específicas del tipo (§25.7)
+  compare?: (
+    expected: string,
+    visible: string,
+    ctx: CompareContext,
+  ) => Comparison | undefined;
+  technical?: (
+    expected: string,
+    snapshot: ImageSnapshot,
+  ) => { outcome: "pass" | "fail"; observed: string };
 };
 ```
 
 Tipos iniciales:
 
-| `kind` | Familia | Qué controla | Comparador determinista | Notas |
-| --- | --- | --- | --- | --- |
-| `format` | technical | Formato real del archivo | Sí (actual) | Igual que hoy. |
-| `dimensions` | technical | Ancho × alto reales | Sí (actual) | Igual que hoy. Admitir tolerancia opcional. |
-| `fileSize` | technical | Peso máximo | Sí | Opcional, desde el perfil o una regla de la campaña. |
-| `text` | visual | Un texto que debe aparecer (titular, subtítulo, hashtag, nombre de producto o servicio) | Normalización opcional (mayúsculas, tildes, espacios) | `params.match`: `semantic` (por defecto), `exact` o `contains`. |
-| `amount` | visual | Importes, precios, porcentajes, cuotas, cantidades | Sí, con locale y moneda | Generaliza `priceAmount`: separadores de miles, `$`, `USD`, `€`, `%`, "x2". |
-| `date` | visual | Fecha, rango, vigencia, horario | Sí, con locale | Generaliza `visibleDate`: meses en varios idiomas, rangos "del 1 al 15", horarios. Mantiene la regla "no inferir el mes o año ausente". |
-| `cta` | visual | Llamado a la acción por intención | No | Evalúa la intención pedida (comprar, descargar, reservar, visitar). Sin ejemplos de dominio fijos. |
-| `legal` | visual | Texto legal, condiciones, bases | Opcional (presencia de frases clave) | Suele ser chico: el bloque del prompt pide indicar `unreadable` si no se puede leer y no inventar. |
-| `contact` | visual | URL, teléfono, dirección, @usuario | Sí (normalización de URL y teléfono) | |
-| `brand` | visual | Presencia de un logo o marca | No | Sin imagen de referencia, se evalúa por descripción ("logo de la marca X arriba a la derecha"). Con referencia, ver §25.6.3. |
-| `visual` | visual | Un elemento visual pedido ("foto del producto", "mostrar a dos personas") | No | Evaluación semántica pura. |
-| `prohibited` | visual | Algo que **no** debe aparecer (precio viejo, marca competidora, texto de otra campaña) | Opcional | Invierte la lógica: presencia confirmada = `fail`. |
+| `kind`       | Familia   | Qué controla                                                                            | Comparador determinista                               | Notas                                                                                                                                   |
+| ------------ | --------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`     | technical | Formato real del archivo                                                                | Sí (actual)                                           | Igual que hoy.                                                                                                                          |
+| `dimensions` | technical | Ancho × alto reales                                                                     | Sí (actual)                                           | Igual que hoy. Admitir tolerancia opcional.                                                                                             |
+| `fileSize`   | technical | Peso máximo                                                                             | Sí                                                    | Opcional, desde el perfil o una regla de la campaña.                                                                                    |
+| `text`       | visual    | Un texto que debe aparecer (titular, subtítulo, hashtag, nombre de producto o servicio) | Normalización opcional (mayúsculas, tildes, espacios) | `params.match`: `semantic` (por defecto), `exact` o `contains`.                                                                         |
+| `amount`     | visual    | Importes, precios, porcentajes, cuotas, cantidades                                      | Sí, con locale y moneda                               | Generaliza `priceAmount`: separadores de miles, `$`, `USD`, `€`, `%`, "x2".                                                             |
+| `date`       | visual    | Fecha, rango, vigencia, horario                                                         | Sí, con locale                                        | Generaliza `visibleDate`: meses en varios idiomas, rangos "del 1 al 15", horarios. Mantiene la regla "no inferir el mes o año ausente". |
+| `cta`        | visual    | Llamado a la acción por intención                                                       | No                                                    | Evalúa la intención pedida (comprar, descargar, reservar, visitar). Sin ejemplos de dominio fijos.                                      |
+| `legal`      | visual    | Texto legal, condiciones, bases                                                         | Opcional (presencia de frases clave)                  | Suele ser chico: el bloque del prompt pide indicar `unreadable` si no se puede leer y no inventar.                                      |
+| `contact`    | visual    | URL, teléfono, dirección, @usuario                                                      | Sí (normalización de URL y teléfono)                  |                                                                                                                                         |
+| `brand`      | visual    | Presencia de un logo o marca                                                            | No                                                    | Sin imagen de referencia, se evalúa por descripción ("logo de la marca X arriba a la derecha"). Con referencia, ver §25.6.3.            |
+| `visual`     | visual    | Un elemento visual pedido ("foto del producto", "mostrar a dos personas")               | No                                                    | Evaluación semántica pura.                                                                                                              |
+| `prohibited` | visual    | Algo que **no** debe aparecer (precio viejo, marca competidora, texto de otra campaña)  | Opcional                                              | Invierte la lógica: presencia confirmada = `fail`.                                                                                      |
 
 El `ruleId` de cada requisito pasa a ser un identificador estable por pieza (`text:titular`, `amount:precio`, `legal:bases`), y el `kind` determina el tipo. Los `ruleId` actuales (`product`, `price`, `date`, `cta`) se conservan en el perfil `promo-ofertas-v1` como alias de `text`, `amount`, `date` y `cta` para no invalidar el historial.
 
@@ -1959,7 +2008,7 @@ Puntos clave:
 
 - En la verificación de la carpeta (`campaignRegistration.ts`, `driveSource.node.ts`) se **detecta** el perfil: se prueban los perfiles conocidos contra los encabezados del CSV y las pestañas y encabezados de la matriz, y se elige el de mayor coincidencia.
 - Si ninguno supera el umbral, la campaña se registra con el perfil `generico-csv-v1`: solo controles técnicos más las columnas `TXT_*` del CSV, más la extracción asistida de §25.6.3 si está habilitada.
-- La lista de verificación del alta suma una línea "Cómo se lee el pedido: *Promoción con ofertas numeradas*" con la cantidad de requisitos detectados por pieza (mín/máx). **Nota:** esto toca la pantalla de alta, que hoy está cerrada en diseño. Se propone solo agregar esa línea a la lista de verificación existente, sin rediseñarla, y requiere tu aprobación.
+- La lista de verificación del alta suma una línea "Cómo se lee el pedido: _Promoción con ofertas numeradas_" con la cantidad de requisitos detectados por pieza (mín/máx). **Nota:** esto toca la pantalla de alta, que hoy está cerrada en diseño. Se propone solo agregar esa línea a la lista de verificación existente, sin rediseñarla, y requiere tu aprobación.
 - El perfil elegido se guarda en la campaña y entra en el `requirementsHash`; cambiarlo invalida los análisis vigentes como cualquier cambio del pedido.
 
 #### 25.6.3 Extracción asistida del pedido (matrices sin estructura fija)
@@ -2022,15 +2071,15 @@ Hay errores que importan en cualquier pieza aunque el pedido no los mencione: fa
 
 ### 25.11 Cambios en el frontend (solo QA Visual)
 
-| Archivo | Cambio |
-| --- | --- |
+| Archivo                                                   | Cambio                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app/lib/qa-visual/review-model.ts`, `piece-inventory.ts` | Se reemplazan `product`, `price`, `validity`, `cta`, `channel` y `phase` por `attributes: { key, label, value }[]` (identidad de la fila: campaña, fase, canal, plataforma, si el perfil los define) y `requirements: { ruleId, label, expected }[]`. El título de la pieza sale de una plantilla del perfil (`titleTemplate: "{product} · {channel}"`) o, si falta, del nombre del archivo. |
-| `piece/PieceDetails.tsx` | La lista "Qué se pidió" se arma dinámicamente con `label` + `expected` + cadena de origen. Se eliminan las etiquetas fijas "Oferta del cliente", "Precio solicitado" y "Vigencia solicitada". |
-| `comments/CommentCard.tsx` | "Afecta: …" usa las etiquetas de los requisitos. El selector de candidatos ("Oferta del cliente") pasa a "Elegí la referencia correcta" y solo aparece si la estrategia es `numberedList`. |
-| `campaign/FilesPanel.tsx`, galería | Los filtros por canal y fase se generan a partir de los `attributes` presentes. Si la campaña no tiene canal, el filtro no aparece. |
-| `model/clientBrief.ts` + portal del cliente | La ficha del pedido muestra los requisitos `basis: "client"` listos con su `label`, sin la lista fija `product/price/date/cta`. `availableFields` se calcula desde los requisitos de las piezas enviadas. |
-| Bloque IA del editor y del carrusel | El detalle "5 de 6 controles cumplen" no cambia. El texto de los controles agrupados ("formato, dimensiones, producto, precio y vigencia") se arma con las etiquetas reales. |
-| Detalles → requisitos extraídos | Bloque nuevo "Requisitos sugeridos por IA, sin confirmar" con **Confirmar** / **Descartar** por requisito (§25.6.3). |
+| `piece/PieceDetails.tsx`                                  | La lista "Qué se pidió" se arma dinámicamente con `label` + `expected` + cadena de origen. Se eliminan las etiquetas fijas "Oferta del cliente", "Precio solicitado" y "Vigencia solicitada".                                                                                                                                                                                                |
+| `comments/CommentCard.tsx`                                | "Afecta: …" usa las etiquetas de los requisitos. El selector de candidatos ("Oferta del cliente") pasa a "Elegí la referencia correcta" y solo aparece si la estrategia es `numberedList`.                                                                                                                                                                                                   |
+| `campaign/FilesPanel.tsx`, galería                        | Los filtros por canal y fase se generan a partir de los `attributes` presentes. Si la campaña no tiene canal, el filtro no aparece.                                                                                                                                                                                                                                                          |
+| `model/clientBrief.ts` + portal del cliente               | La ficha del pedido muestra los requisitos `basis: "client"` listos con su `label`, sin la lista fija `product/price/date/cta`. `availableFields` se calcula desde los requisitos de las piezas enviadas.                                                                                                                                                                                    |
+| Bloque IA del editor y del carrusel                       | El detalle "5 de 6 controles cumplen" no cambia. El texto de los controles agrupados ("formato, dimensiones, producto, precio y vigencia") se arma con las etiquetas reales.                                                                                                                                                                                                                 |
+| Detalles → requisitos extraídos                           | Bloque nuevo "Requisitos sugeridos por IA, sin confirmar" con **Confirmar** / **Descartar** por requisito (§25.6.3).                                                                                                                                                                                                                                                                         |
 
 ### 25.12 Formatos de pieza
 
@@ -2043,16 +2092,16 @@ Hay errores que importan en cualquier pieza aunque el pedido no los mencione: fa
 
 Ampliar el dataset de §16 y de la etapa 7 con piezas **distintas** a las de prueba actuales:
 
-| Grupo | Ejemplos | Qué mide |
-| --- | --- | --- |
-| Promoción con precio (actual) | Las piezas de Semana de Locura | Que la etapa A no cambie resultados (regresión). |
-| Marca o institucional sin precio | Titular + logo + claim | Que no aparezcan controles de precio o fecha y que se evalúe el titular. |
-| Evento | Fecha y hora, lugar, URL de entradas | `date` con horario, `contact`. |
-| Financiera o retail | "12 cuotas sin interés", "-30 %", precio anterior tachado | `amount` con varias cifras, `prohibited`. |
-| Legales largos | Bases y condiciones en letra chica | `legal` con `unreadable` correcto. |
-| Otro idioma | Pieza en inglés o portugués | Locale de comparadores y `visibleText` literal. |
-| Sin pedido | Pieza sin fila en CSV ni matriz | Solo técnicos + aviso claro, sin "Incompleta" engañosa. |
-| Story con zona segura | Texto pegado al borde | Observación `safeArea` (§25.9). |
+| Grupo                            | Ejemplos                                                  | Qué mide                                                                 |
+| -------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Promoción con precio (actual)    | Las piezas de Semana de Locura                            | Que la etapa A no cambie resultados (regresión).                         |
+| Marca o institucional sin precio | Titular + logo + claim                                    | Que no aparezcan controles de precio o fecha y que se evalúe el titular. |
+| Evento                           | Fecha y hora, lugar, URL de entradas                      | `date` con horario, `contact`.                                           |
+| Financiera o retail              | "12 cuotas sin interés", "-30 %", precio anterior tachado | `amount` con varias cifras, `prohibited`.                                |
+| Legales largos                   | Bases y condiciones en letra chica                        | `legal` con `unreadable` correcto.                                       |
+| Otro idioma                      | Pieza en inglés o portugués                               | Locale de comparadores y `visibleText` literal.                          |
+| Sin pedido                       | Pieza sin fila en CSV ni matriz                           | Solo técnicos + aviso claro, sin "Incompleta" engañosa.                  |
+| Story con zona segura            | Texto pegado al borde                                     | Observación `safeArea` (§25.9).                                          |
 
 Métricas por **tipo de control**: falsos positivos (`fail` en pieza correcta), falsos negativos, tasa de `unverifiable`, precisión de `box_2d` y costo y latencia por pieza. Un cambio de prompt o de comparador solo se activa si no empeora ninguna métrica del grupo de regresión.
 
@@ -2062,16 +2111,16 @@ Pruebas deterministas nuevas: `qaVisualControlTypes.test.ts` (catálogo y famili
 
 Cada etapa se puede publicar sola y no rompe las campañas existentes.
 
-| Etapa | Contenido | Archivos principales | Criterio de terminado |
-| --- | --- | --- | --- |
-| **A. Refactor sin cambio de comportamiento** | Catálogo de tipos (§25.4) con `format`, `dimensions`, `text`, `amount`, `date` y `cta`. Requisito con `kind` y `label`. Perfil `promo-ofertas-v1` que reproduce las reglas actuales (columnas, `numberedList`, chequeos de LEYENDA y REGLAS). `verdict.ts`, `controls.ts` y `worker.ts` despachan por `kind`. | `model/controlTypes.ts`, `model/sourceProfiles.ts`, `model/sourceStrategies.ts`, `requirements.ts`, `productionCsv.ts`, `controls.ts`, `verdict.ts`, `worker.ts`, `contracts.ts` | Todas las pruebas QA actuales pasan sin cambiar los resultados esperados. La política pasa a `qa-visual-6`. |
-| **B. Prompt compuesto** | Prompt base neutro + bloques por tipo + contexto de pieza + `promptVersion`. | `model/prompt.ts`, `worker.ts`, `commentLocalization.ts` | Prueba de prompt por tipo. Evaluación del grupo de regresión sin empeorar. |
-| **C. UI dinámica** | `attributes`/`requirements` en el modelo de pieza, Detalles, comentarios, filtros, ficha del cliente y título por plantilla. Compatibilidad con resultados viejos. | §25.11 | Una campaña con perfil genérico se ve sin campos "—" ni etiquetas de oferta. |
-| **D. Perfiles configurables y detección** | Tabla de perfiles, detección en el alta, perfil `generico-csv-v1`, columnas `TXT_*` por convención, vocabulario de canales. | `tables.ts`, `campaignRegistration.ts`, `driveSource.node.ts`, `analysisInput.node.ts` | Una carpeta con otro CSV (otras columnas `TXT_*`) genera requisitos correctos sin tocar código. |
-| **E. Tipos nuevos y comparadores** | `legal`, `contact`, `brand`, `visual`, `prohibited`, `fileSize`. Comparadores por locale. WEBP. | `model/comparators/*`, `controlTypes.ts`, `imagePreparation.node.ts` | Pruebas de comparadores y evaluación de los grupos Evento, Financiera y Otro idioma. |
-| **F. Extracción asistida y confirmación** | `extractRequirements` + bloque de confirmación en Detalles. Retiro de `QA_VISUAL_RULES_JSON`. | `extractRequirements.ts` (nuevo), `overrides.ts`, `PieceDetails.tsx` | Una matriz en texto libre produce requisitos sugeridos que, una vez confirmados, se analizan. Sin confirmación no se usan. |
-| **G. Controles generales** | `observations[]`, zona segura por formato, opción por campaña. | `prompt.ts`, `worker.ts`, `validators.ts`, UI de comentarios | Las observaciones no cambian el veredicto salvo que estén configuradas como bloqueantes. |
-| **H. Posterior** | PDF, carruseles agrupados, consistencia entre adaptaciones, brief de la app como fuente de solo lectura. | — | Según §25.15. |
+| Etapa                                        | Contenido                                                                                                                                                                                                                                                                                                     | Archivos principales                                                                                                                                                             | Criterio de terminado                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **A. Refactor sin cambio de comportamiento** | Catálogo de tipos (§25.4) con `format`, `dimensions`, `text`, `amount`, `date` y `cta`. Requisito con `kind` y `label`. Perfil `promo-ofertas-v1` que reproduce las reglas actuales (columnas, `numberedList`, chequeos de LEYENDA y REGLAS). `verdict.ts`, `controls.ts` y `worker.ts` despachan por `kind`. | `model/controlTypes.ts`, `model/sourceProfiles.ts`, `model/sourceStrategies.ts`, `requirements.ts`, `productionCsv.ts`, `controls.ts`, `verdict.ts`, `worker.ts`, `contracts.ts` | Todas las pruebas QA actuales pasan sin cambiar los resultados esperados. La política pasa a `qa-visual-6`.                |
+| **B. Prompt compuesto**                      | Prompt base neutro + bloques por tipo + contexto de pieza + `promptVersion`.                                                                                                                                                                                                                                  | `model/prompt.ts`, `worker.ts`, `commentLocalization.ts`                                                                                                                         | Prueba de prompt por tipo. Evaluación del grupo de regresión sin empeorar.                                                 |
+| **C. UI dinámica**                           | `attributes`/`requirements` en el modelo de pieza, Detalles, comentarios, filtros, ficha del cliente y título por plantilla. Compatibilidad con resultados viejos.                                                                                                                                            | §25.11                                                                                                                                                                           | Una campaña con perfil genérico se ve sin campos "—" ni etiquetas de oferta.                                               |
+| **D. Perfiles configurables y detección**    | Tabla de perfiles, detección en el alta, perfil `generico-csv-v1`, columnas `TXT_*` por convención, vocabulario de canales.                                                                                                                                                                                   | `tables.ts`, `campaignRegistration.ts`, `driveSource.node.ts`, `analysisInput.node.ts`                                                                                           | Una carpeta con otro CSV (otras columnas `TXT_*`) genera requisitos correctos sin tocar código.                            |
+| **E. Tipos nuevos y comparadores**           | `legal`, `contact`, `brand`, `visual`, `prohibited`, `fileSize`. Comparadores por locale. WEBP.                                                                                                                                                                                                               | `model/comparators/*`, `controlTypes.ts`, `imagePreparation.node.ts`                                                                                                             | Pruebas de comparadores y evaluación de los grupos Evento, Financiera y Otro idioma.                                       |
+| **F. Extracción asistida y confirmación**    | `extractRequirements` + bloque de confirmación en Detalles. Retiro de `QA_VISUAL_RULES_JSON`.                                                                                                                                                                                                                 | `extractRequirements.ts` (nuevo), `overrides.ts`, `PieceDetails.tsx`                                                                                                             | Una matriz en texto libre produce requisitos sugeridos que, una vez confirmados, se analizan. Sin confirmación no se usan. |
+| **G. Controles generales**                   | `observations[]`, zona segura por formato, opción por campaña.                                                                                                                                                                                                                                                | `prompt.ts`, `worker.ts`, `validators.ts`, UI de comentarios                                                                                                                     | Las observaciones no cambian el veredicto salvo que estén configuradas como bloqueantes.                                   |
+| **H. Posterior**                             | PDF, carruseles agrupados, consistencia entre adaptaciones, brief de la app como fuente de solo lectura.                                                                                                                                                                                                      | —                                                                                                                                                                                | Según §25.15.                                                                                                              |
 
 Orden recomendado: A → B → C (con eso, piezas sin precio ya se ven y se evalúan bien con las columnas actuales) → D → E → F → G.
 
