@@ -57,15 +57,31 @@ export const inspect = action({
   },
 });
 
-export const add = action({
+/** Exclusions and equivalences saved for a campaign or a draft, for the folder check. */
+async function savedLinks(ctx: ActionCtx, campaignId: Id<"qaVisualCampaigns">) {
+  const [excluded, overrides] = await Promise.all([
+    ctx.runQuery(internal.qaVisual.overrides.excludedKeys, { campaignId }),
+    ctx.runQuery(internal.qaVisual.equivalences.forCampaign, { campaignId }),
+  ]);
+  return { excluded: new Set(excluded), overrides };
+}
+
+/**
+ * Step 2 → 3 of the dialog: saves the verified folder as a draft campaign (or resumes the
+ * draft of the same folder), so what is decided about the pieces is saved as it happens.
+ */
+export const startDraft = action({
   args: { folderUrl: v.string(), ...selection },
   handler: async (
     ctx,
-    { folderUrl, ...chosen },
-  ): Promise<RegistrationResult> => {
+    { folderUrl: url, ...chosen },
+  ): Promise<
+    | { campaignId: Id<"qaVisualCampaigns">; inspection: FolderInspection }
+    | { error: string; inspection?: FolderInspection }
+  > => {
     await ctx.runQuery(internal.qaVisual.access.viewerIsQaAdmin, {});
     try {
-      const preview = await inspectDriveFolder(folderUrl, chosen);
+      const preview = await inspectDriveFolder(url, chosen);
       if (!("folder" in preview) || !preview.ok)
         return {
           inspection: preview,
@@ -75,7 +91,7 @@ export const add = action({
               : "La carpeta todavía no tiene todo lo necesario. Revisá la lista de verificación.",
         };
       const result = await ctx.runMutation(
-        internal.qaVisual.campaigns.register,
+        internal.qaVisual.campaigns.saveDraft,
         {
           name: preview.folder.name,
           driveFolderId: preview.folder.id,
@@ -87,7 +103,70 @@ export const add = action({
         return { error: "Esta carpeta ya está registrada." };
       if (result.status === "archived")
         return { error: "Esta carpeta pertenece a una campaña archivada." };
-      return { name: preview.folder.name, campaignId: result.campaignId };
+      // A resumed draft may already have exclusions and equivalences.
+      const links = await savedLinks(ctx, result.campaignId);
+      const inspection =
+        links.excluded.size || links.overrides.length
+          ? await inspectDriveFolder(
+              url,
+              chosen,
+              links.excluded,
+              links.overrides,
+            )
+          : preview;
+      return { campaignId: result.campaignId, inspection };
+    } catch (error) {
+      if (error instanceof DriveFolderError) return { error: error.message };
+      console.error("QA Visual: no se pudo guardar el borrador", error);
+      return {
+        error:
+          "No se pudo guardar la campaña. Revisá la conexión con Google Drive e intentá de nuevo.",
+      };
+    }
+  },
+});
+
+/** «Crear campaña»: verifies the draft's folder again, activates it and imports it. */
+export const add = action({
+  args: { campaignId: v.id("qaVisualCampaigns"), ...selection },
+  handler: async (
+    ctx,
+    { campaignId, ...chosen },
+  ): Promise<RegistrationResult> => {
+    const campaign = await ctx.runQuery(
+      internal.qaVisual.campaigns.getEditable,
+      { campaignId },
+    );
+    if (!campaign) return { error: "La campaña ya no está disponible." };
+    if (campaign.status === "active")
+      return { name: campaign.name, campaignId };
+    try {
+      const links = await savedLinks(ctx, campaignId);
+      const preview = await inspectDriveFolder(
+        folderUrl(campaign.driveFolderId),
+        chosen,
+        links.excluded,
+        links.overrides,
+      );
+      if (!("folder" in preview) || !preview.ok)
+        return {
+          inspection: preview,
+          error:
+            "error" in preview
+              ? preview.error
+              : "La carpeta todavía no tiene todo lo necesario. Revisá la lista de verificación.",
+        };
+      const result = await ctx.runMutation(
+        internal.qaVisual.campaigns.activate,
+        {
+          campaignId,
+          name: preview.folder.name,
+          sourceSelection: preview.selection,
+        },
+      );
+      if (result.status === "missing")
+        return { error: "La campaña ya no está disponible." };
+      return { name: preview.folder.name, campaignId };
     } catch (error) {
       if (error instanceof DriveFolderError) return { error: error.message };
       console.error("QA Visual: no se pudo registrar la campaña", error);
@@ -99,32 +178,28 @@ export const add = action({
   },
 });
 
-/** Lists the source candidates of a registered campaign (used by «Elegir fuentes»). */
+/** Lists the source candidates of a campaign or a draft (used by «Elegir fuentes»). */
 export const inspectCampaign = action({
   args: { campaignId: v.id("qaVisualCampaigns"), ...selection },
   handler: async (
     ctx,
     { campaignId, ...chosen },
   ): Promise<FolderInspection> => {
-    const campaign = await ctx.runQuery(internal.qaVisual.campaigns.getActive, {
-      campaignId,
-    });
+    const campaign = await ctx.runQuery(
+      internal.qaVisual.campaigns.getEditable,
+      { campaignId },
+    );
     if (!campaign)
       return { ok: false, error: "La campaña ya no está disponible." };
     try {
       // The dialog always sends its whole selection (it starts from the saved one), so a
       // cleared folder or file goes back to automatic detection.
-      const [excluded, overrides] = await Promise.all([
-        ctx.runQuery(internal.qaVisual.overrides.excludedKeys, { campaignId }),
-        ctx.runQuery(internal.qaVisual.equivalences.forCampaign, {
-          campaignId,
-        }),
-      ]);
+      const links = await savedLinks(ctx, campaignId);
       return await inspectDriveFolder(
         folderUrl(campaign.driveFolderId),
         chosen,
-        new Set(excluded),
-        overrides,
+        links.excluded,
+        links.overrides,
       );
     } catch {
       return {
@@ -185,7 +260,7 @@ export const createCsv = action({
     const current: SourceSelection = chosen;
     if (campaignId) {
       const campaign = await ctx.runQuery(
-        internal.qaVisual.campaigns.getActive,
+        internal.qaVisual.campaigns.getEditable,
         { campaignId },
       );
       if (!campaign) return { error: "La campaña ya no está disponible." };
@@ -243,18 +318,13 @@ async function mappingTarget(
     return url
       ? { url, excluded: new Set(), overrides: [] }
       : { error: "Pegá un enlace de carpeta de Google Drive." };
-  const campaign = await ctx.runQuery(internal.qaVisual.campaigns.getActive, {
+  const campaign = await ctx.runQuery(internal.qaVisual.campaigns.getEditable, {
     campaignId,
   });
   if (!campaign) return { error: "La campaña ya no está disponible." };
-  const [excluded, overrides] = await Promise.all([
-    ctx.runQuery(internal.qaVisual.overrides.excludedKeys, { campaignId }),
-    ctx.runQuery(internal.qaVisual.equivalences.forCampaign, { campaignId }),
-  ]);
   return {
     url: folderUrl(campaign.driveFolderId),
-    excluded: new Set(excluded),
-    overrides,
+    ...(await savedLinks(ctx, campaignId)),
     campaign,
   };
 }

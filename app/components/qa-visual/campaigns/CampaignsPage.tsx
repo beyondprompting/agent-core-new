@@ -12,7 +12,8 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { CampaignCardData } from "@/app/lib/qa-visual/campaign-model";
 import { CampaignCard } from "./CampaignCard";
-import { CampaignForm } from "./CampaignForm";
+import { CampaignForm, type CampaignDraft } from "./CampaignForm";
+import { DraftList } from "./DraftList";
 import "./campaigns.css";
 
 export function CampaignsPage() {
@@ -27,9 +28,12 @@ export function CampaignsPage() {
     { initialNumItems: 12 },
   );
   const counts = useQuery(api.qaVisual.campaigns.counts, {});
-  const [dialog, setDialog] = useState<"new" | CampaignCardData | null>(null);
+  const drafts = useQuery(api.qaVisual.campaigns.drafts, {});
+  const [dialog, setDialog] = useState<
+    "new" | CampaignCardData | { draft: CampaignDraft } | null
+  >(null);
   const [notice, setNotice] = useState("");
-  const adding = dialog === "new";
+  const adding = dialog === "new" || (!!dialog && "draft" in dialog);
 
   function openForm() {
     setNotice("");
@@ -80,6 +84,16 @@ export function CampaignsPage() {
             </button>
           ))}
         </div>
+        {tab === "active" && drafts && drafts.length > 0 && (
+          <DraftList
+            drafts={drafts}
+            onContinue={(draft) => {
+              setNotice("");
+              setDialog({ draft });
+            }}
+            onDiscarded={(name) => setNotice(`Se descartó ${name}.`)}
+          />
+        )}
         {status === "LoadingFirstPage" ? (
           <p role="status" className="qc-loading">
             <LoaderCircle size={16} className="qc-spin" aria-hidden />
@@ -151,7 +165,16 @@ export function CampaignsPage() {
       </main>
       {dialog && (
         <CampaignForm
-          campaign={typeof dialog === "object" ? dialog : undefined}
+          campaign={
+            typeof dialog === "object" && !("draft" in dialog)
+              ? dialog
+              : undefined
+          }
+          draft={
+            typeof dialog === "object" && "draft" in dialog
+              ? dialog.draft
+              : undefined
+          }
           onClose={() => setDialog(null)}
           onCreated={(name) => {
             setNotice(

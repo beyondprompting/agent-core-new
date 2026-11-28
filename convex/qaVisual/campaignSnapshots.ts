@@ -45,6 +45,8 @@ export async function queueSync(
   requestedBy?: Id<"users">,
 ) {
   const campaign = await ctx.db.get(campaignId);
+  // A draft is imported when it is created: its links and exclusions wait until then.
+  if (campaign?.status === "draft") return null;
   if (!campaign || (await syncIsRunning(ctx, campaign.sync)))
     throw new Error("Ya hay una importación en curso.");
   return requestImport(

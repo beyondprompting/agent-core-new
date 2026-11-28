@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAction, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import {
   ArrowRight,
   Check,
@@ -14,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import {
   campaignError,
   type CampaignCardData,
@@ -27,6 +29,9 @@ import {
 import { MappingPanel, MappingSummary } from "./MappingPanel";
 
 type Step = "link" | "sources" | "pieces";
+export type CampaignDraft = FunctionReturnType<
+  typeof api.qaVisual.campaigns.drafts
+>[number];
 const stepNames: Record<Step, string> = {
   link: "Enlace",
   sources: "Fuentes",
@@ -45,10 +50,13 @@ const selectionKey = (url: string, selection: SourceSelection) =>
 
 export function CampaignForm({
   campaign,
+  draft,
   onClose,
   onCreated,
 }: {
   campaign?: CampaignCardData;
+  /** A registration that was not finished: it opens on the pieces. */
+  draft?: CampaignDraft;
   onClose: () => void;
   onCreated: (name: string) => void;
 }) {
@@ -57,6 +65,7 @@ export function CampaignForm({
   const submitting = useRef(false);
   const started = useRef(false);
   const add = useAction(api.qaVisual.campaignRegistration.add);
+  const startDraft = useAction(api.qaVisual.campaignRegistration.startDraft);
   const inspect = useAction(api.qaVisual.campaignRegistration.inspect);
   const inspectCampaign = useAction(
     api.qaVisual.campaignRegistration.inspectCampaign,
@@ -66,23 +75,33 @@ export function CampaignForm({
   );
   const createCsv = useAction(api.qaVisual.campaignRegistration.createCsv);
   const account = useQuery(api.qaVisual.campaigns.serviceAccount, {});
-  const [url, setUrl] = useState(campaign?.folderUrl ?? "");
+  const [url, setUrl] = useState(campaign?.folderUrl ?? draft?.folderUrl ?? "");
   const [selection, setSelection] = useState<SourceSelection>(
-    campaign?.sourceSelection ?? {},
+    campaign?.sourceSelection ?? draft?.sourceSelection ?? {},
   );
+  // Going to the pieces saves the campaign as a draft: from then on every decision is saved.
+  const [draftId, setDraftId] = useState<Id<"qaVisualCampaigns"> | undefined>(
+    draft?._id,
+  );
+  const campaignId = campaign?._id ?? draftId;
   // The dialog keeps one size for every step; each step uses the whole body.
   const [step, setStep] = useState<Step>(
-    campaign ? (campaign.mapping.locked ? "pieces" : "sources") : "link",
+    campaign
+      ? campaign.mapping.locked
+        ? "pieces"
+        : "sources"
+      : draft
+        ? "pieces"
+        : "link",
   );
-  const steps: Step[] = campaign
-    ? ["sources", "pieces"]
-    : ["link", "sources", "pieces"];
+  const steps: Step[] =
+    campaign || draft ? ["sources", "pieces"] : ["link", "sources", "pieces"];
   const [inspection, setInspection] = useState<FolderInspection | null>(null);
   const [verified, setVerified] = useState("");
   const [error, setError] = useState("");
-  const [pending, setPending] = useState<"inspect" | "save" | "csv" | null>(
-    null,
-  );
+  const [pending, setPending] = useState<
+    "inspect" | "draft" | "save" | "csv" | null
+  >(null);
   const [csvNotice, setCsvNotice] = useState("");
   const [csvDownload, setCsvDownload] = useState<CsvDownload>();
   const [mappingBusy, setMappingBusy] = useState(false);
@@ -97,21 +116,22 @@ export function CampaignForm({
     if (!dialog) return;
     const trigger = document.activeElement;
     dialog.showModal();
-    if (!campaign) inputRef.current?.focus();
+    if (!campaign && !draft) inputRef.current?.focus();
     return () => {
       dialog.close();
       if (trigger instanceof HTMLElement) trigger.focus();
     };
-  }, [campaign]);
+  }, [campaign, draft]);
 
   useEffect(() => {
-    if (campaign && !started.current) {
+    const saved = campaign ?? draft;
+    if (saved && !started.current) {
       started.current = true;
-      void verify(campaign.sourceSelection);
+      void verify(saved.sourceSelection);
     }
     // Initial inspection is read-only; later checks are explicit user actions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaign]);
+  }, [campaign, draft]);
 
   async function verify(chosen: SourceSelection = selection) {
     if (submitting.current || !url.trim()) return;
@@ -121,8 +141,8 @@ export function CampaignForm({
     setError("");
     setVerified("");
     try {
-      const result = campaign
-        ? await inspectCampaign({ campaignId: campaign._id, ...chosen })
+      const result = campaignId
+        ? await inspectCampaign({ campaignId, ...chosen })
         : await inspect({ folderUrl: url.trim(), ...chosen });
       setInspection(result);
       if ("folder" in result) {
@@ -146,8 +166,8 @@ export function CampaignForm({
     setCsvDownload(undefined);
     try {
       const result = await createCsv(
-        campaign
-          ? { campaignId: campaign._id, ...selection }
+        campaignId
+          ? { campaignId, ...selection }
           : { folderUrl: url.trim(), ...selection },
       );
       const summary = result.created ?? result.download;
@@ -192,6 +212,37 @@ export function CampaignForm({
     }
   }
 
+  /**
+   * Sources → pieces. A new campaign is saved as a draft here (or its draft gets the
+   * current sources), so exclusions, equivalences and choices have where to be saved.
+   */
+  async function toPieces() {
+    if (!ready || submitting.current) return;
+    if (campaign) {
+      setStep("pieces");
+      return;
+    }
+    submitting.current = true;
+    setPending("draft");
+    setError("");
+    try {
+      const result = await startDraft({ folderUrl: url.trim(), ...selection });
+      if ("error" in result) {
+        setError(result.error);
+        if (result.inspection) adoptInspection(result.inspection);
+        return;
+      }
+      setDraftId(result.campaignId);
+      adoptInspection(result.inspection);
+      setStep("pieces");
+    } catch (cause) {
+      setError(campaignError(cause));
+    } finally {
+      submitting.current = false;
+      setPending(null);
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (campaign && updating) {
@@ -203,7 +254,7 @@ export function CampaignForm({
       return;
     }
     if (step === "sources") {
-      if (ready) setStep("pieces");
+      await toPieces();
       return;
     }
     if (submitting.current || !ready) return;
@@ -223,8 +274,8 @@ export function CampaignForm({
             setVerified("");
           }
         } else onCreated(campaign.name);
-      } else {
-        const result = await add({ folderUrl: url.trim(), ...selection });
+      } else if (draftId) {
+        const result = await add({ campaignId: draftId, ...selection });
         if ("error" in result) {
           setError(result.error);
           if (result.inspection) {
@@ -255,6 +306,10 @@ export function CampaignForm({
   }
 
   function goTo(next: Step) {
+    if (next === "pieces" && steps.indexOf(step) < steps.indexOf("pieces")) {
+      void toPieces();
+      return;
+    }
     if (next === "link") {
       setVerified("");
       setError("");
@@ -325,7 +380,9 @@ export function CampaignForm({
                 ? "Resolver el mapeo de piezas"
                 : campaign
                   ? "Elegir fuentes"
-                  : "Agregar campaña"}
+                  : draft
+                    ? `Continuar ${draft.name}`
+                    : "Agregar campaña"}
             </h2>
             <p id="qa-campaign-form-description">
               {campaign?.mapping.locked ? (
@@ -406,6 +463,7 @@ export function CampaignForm({
                     readOnly={Boolean(campaign) || Boolean(pending)}
                     onChange={(event) => {
                       setUrl(event.target.value);
+                      setDraftId(undefined);
                       setInspection(null);
                       setSelection({});
                       setVerified("");
@@ -499,7 +557,7 @@ export function CampaignForm({
                       <MappingSummary
                         mapping={inspection.mapping}
                         canContinue={Boolean(ready)}
-                        onOpen={() => setStep("pieces")}
+                        onOpen={() => void toPieces()}
                       />
                     )}
                     {!inspection.ok && serviceAccount}
@@ -522,7 +580,7 @@ export function CampaignForm({
                   <p>
                     {campaign
                       ? "No se cambiaron las fuentes."
-                      : "No se registró la campaña."}{" "}
+                      : "Todavía no se puede seguir."}{" "}
                     Cuando corrijas la carpeta en Drive, volvé a verificar.
                   </p>
                 </div>
@@ -532,14 +590,11 @@ export function CampaignForm({
 
           {step === "pieces" &&
             inspection &&
-            ("folder" in inspection && inspection.mapping ? (
+            ("folder" in inspection && inspection.mapping && campaignId ? (
               <MappingPanel
                 mapping={inspection.mapping}
-                target={
-                  campaign
-                    ? { campaignId: campaign._id }
-                    : { folderUrl: url.trim() }
-                }
+                campaignId={campaignId}
+                draft={!campaign}
                 selection={selection}
                 disabled={Boolean(pending)}
                 loading={pending === "inspect"}
@@ -556,9 +611,11 @@ export function CampaignForm({
                 <div>
                   <strong>No se puede revisar el mapeo todavía</strong>
                   <p>
-                    {"folder" in inspection
-                      ? "Hacen falta la matriz, el CSV y la carpeta de piezas con imágenes."
-                      : inspection.error}
+                    {!("folder" in inspection)
+                      ? inspection.error
+                      : inspection.mapping
+                        ? "Volvé a las fuentes y tocá «Siguiente: piezas»."
+                        : "Hacen falta la matriz, el CSV y la carpeta de piezas con imágenes."}
                   </p>
                   <button
                     type="button"
@@ -599,7 +656,7 @@ export function CampaignForm({
           )}
         </div>
         <div className="qc-dialog-footer">
-          <div>
+          <div className="qc-footer-start">
             {steps.indexOf(step) > 0 && (
               <button
                 type="button"
@@ -610,6 +667,12 @@ export function CampaignForm({
                 Volver
               </button>
             )}
+            {draftId && !campaign && (
+              <span className="qc-saved">
+                <Check size={13} aria-hidden />
+                Se guarda a medida que avanzás
+              </span>
+            )}
           </div>
           <div className="qc-dialog-actions">
             <button
@@ -618,7 +681,7 @@ export function CampaignForm({
               onClick={onClose}
               disabled={Boolean(pending)}
             >
-              Cancelar
+              {draftId && !campaign ? "Cerrar" : "Cancelar"}
             </button>
             {step === "sources" && inspection && !ready && (
               <button
@@ -645,20 +708,22 @@ export function CampaignForm({
                 <LoaderCircle size={14} className="qc-spin" aria-hidden />
               )}
               {pending === "save"
-                ? "Guardando…"
-                : pending === "csv"
-                  ? "Creando CSV…"
-                  : pending === "inspect"
-                    ? "Verificando…"
-                    : step === "link"
-                      ? "Verificar carpeta"
-                      : step === "sources"
-                        ? "Siguiente: piezas"
-                        : campaign && updating
-                          ? "Listo"
-                          : campaign
-                            ? "Guardar e importar"
-                            : "Agregar campaña"}
+                ? "Creando…"
+                : pending === "draft"
+                  ? "Guardando…"
+                  : pending === "csv"
+                    ? "Creando CSV…"
+                    : pending === "inspect"
+                      ? "Verificando…"
+                      : step === "link"
+                        ? "Verificar carpeta"
+                        : step === "sources"
+                          ? "Siguiente: piezas"
+                          : campaign && updating
+                            ? "Listo"
+                            : campaign
+                              ? "Guardar e importar"
+                              : "Crear campaña"}
               {!pending && step === "sources" && (
                 <ArrowRight size={14} aria-hidden />
               )}

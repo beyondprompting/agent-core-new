@@ -169,6 +169,13 @@ html.dark .qa-campaigns .qc-button.primary {
 .qa-campaigns .qc-button.ghost {
   color: var(--qc-muted);
 }
+.qa-campaigns .qc-button.danger {
+  background: var(--qc-danger);
+  color: #fff;
+}
+html.dark .qa-campaigns .qc-button.danger {
+  color: #2a1416;
+}
 .qa-campaigns .qc-button:not(:disabled):hover {
   filter: brightness(0.97);
 }
@@ -199,6 +206,77 @@ html.dark .qa-campaigns .qc-button.primary {
 .qa-campaigns .qc-segmented button[aria-pressed="true"] {
   background: var(--qc-primary-soft);
   color: var(--qc-primary);
+}
+/* Registrations that were not finished, above the active campaigns. */
+.qa-campaigns .qc-drafts {
+  margin-bottom: 20px;
+}
+.qa-campaigns .qc-drafts h2 {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--qc-subtle);
+}
+.qa-campaigns .qc-drafts ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.qa-campaigns .qc-draft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--qc-surface);
+  box-shadow: inset 0 0 0 1px var(--qc-line);
+  border-left: 3px solid var(--qc-warning);
+}
+.qa-campaigns .qc-draft-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--qc-warning-bg);
+  color: var(--qc-warning);
+}
+.qa-campaigns .qc-draft-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.qa-campaigns .qc-draft-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qa-campaigns .qc-draft-text span {
+  color: var(--qc-muted);
+  font-size: 12px;
+}
+.qa-campaigns .qc-draft-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.qa-campaigns .qc-footer-start {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.qa-campaigns .qc-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--qc-success);
+  font-size: 12px;
 }
 .qa-campaigns .qc-cards {
   display: grid;
@@ -888,6 +966,16 @@ html.dark .qa-campaigns .qc-stepper .current .qc-step-num {
 @media (max-width: 760px) {
   .qa-campaigns .qc-cards {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .qa-campaigns .qc-draft {
+    flex-wrap: wrap;
+  }
+  .qa-campaigns .qc-draft-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .qa-campaigns .qc-saved {
+    display: none;
   }
   .qa-campaigns .qc-page-header {
     align-items: flex-start;

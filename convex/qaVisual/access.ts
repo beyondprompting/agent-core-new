@@ -32,13 +32,18 @@ export const viewerIsQaAdmin = internalQuery({
   handler: async (ctx) => Boolean(await requireQaAdmin(ctx)),
 });
 
+/** `draft`: also accepts a campaign being registered (only the mapping functions do). */
 export async function requireCampaign(
   ctx: QueryCtx,
   campaignId: Id<"qaVisualCampaigns">,
+  { draft = false } = {},
 ) {
   const user = await requireQaAdmin(ctx);
   const campaign = await ctx.db.get(campaignId);
-  if (!campaign || campaign.status !== "active")
+  if (
+    !campaign ||
+    !(campaign.status === "active" || (draft && campaign.status === "draft"))
+  )
     throw new ConvexError({
       code: "campaign_unavailable",
       message: "La campaña ya no está disponible.",

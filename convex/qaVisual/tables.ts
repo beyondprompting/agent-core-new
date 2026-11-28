@@ -348,7 +348,13 @@ export const qaVisualTables = {
     name: v.string(),
     driveFolderId: v.string(),
     reviewKey: v.string(),
-    status: v.union(v.literal("active"), v.literal("archived")),
+    // «draft»: created when the sources are chosen, while the pieces are linked. It is not
+    // listed, imported nor visible to the client until «Crear campaña» makes it active.
+    status: v.union(
+      v.literal("draft"),
+      v.literal("active"),
+      v.literal("archived"),
+    ),
     createdBy: v.id("users"),
     currentSnapshotId: v.optional(v.id("qaVisualCampaignSnapshots")),
     currentImportId: v.optional(v.id("qaVisualImports")),
@@ -450,6 +456,23 @@ export const qaVisualTables = {
   })
     .index("by_campaign", ["campaignId"])
     .index("by_client", ["clientId"]),
+  // §5.5: rows and orders chosen in the mapping panel and not applied yet, so closing the
+  // dialog loses nothing. They only apply to the CSV version they were chosen on.
+  qaVisualMappingChoices: defineTable({
+    campaignId: v.id("qaVisualCampaigns"),
+    csvFileId: v.string(),
+    csvVersion: v.string(),
+    choices: v.array(
+      v.object({
+        piece: v.string(),
+        csvLine: v.optional(v.number()),
+        order: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("csv"), v.literal("same"))),
+        scope: v.optional(v.union(v.literal("campaign"), v.literal("client"))),
+      }),
+    ),
+    updatedBy: v.id("users"),
+  }).index("by_campaign", ["campaignId"]),
   qaVisualSourceDocuments: defineTable({
     campaign: v.string(),
     name: v.string(),

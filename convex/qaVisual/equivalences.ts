@@ -73,7 +73,9 @@ export const forCampaign = internalQuery({
 export const list = query({
   args: { campaignId: v.id("qaVisualCampaigns") },
   handler: async (ctx, { campaignId }) => {
-    const { campaign } = await requireCampaign(ctx, campaignId);
+    const { campaign } = await requireCampaign(ctx, campaignId, {
+      draft: true,
+    });
     return {
       canShare: Boolean(campaign.client?.clientId),
       items: (await active(ctx, campaign)).map((row) => ({
@@ -101,7 +103,7 @@ export const record = internalMutation({
   handler: async (ctx, { campaignId, scope, piece, items }) => {
     const user = await requireQaAdmin(ctx);
     const campaign = await ctx.db.get(campaignId);
-    if (!campaign || campaign.status !== "active")
+    if (!campaign || campaign.status === "archived")
       throw new ConvexError("La campaña ya no está disponible.");
     const clientId = campaign.client?.clientId;
     if (scope === "client" && !clientId)
@@ -153,7 +155,9 @@ export const revoke = mutation({
     equivalenceId: v.id("qaVisualEquivalences"),
   },
   handler: async (ctx, { campaignId, equivalenceId }) => {
-    const { user, campaign } = await requireCampaign(ctx, campaignId);
+    const { user, campaign } = await requireCampaign(ctx, campaignId, {
+      draft: true,
+    });
     const row = await ctx.db.get(equivalenceId);
     if (
       !row ||

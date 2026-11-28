@@ -15,7 +15,7 @@ async function editableCampaign(
   ctx: MutationCtx,
   campaignId: Id<"qaVisualCampaigns">,
 ) {
-  const access = await requireCampaign(ctx, campaignId);
+  const access = await requireCampaign(ctx, campaignId, { draft: true });
   if (access.campaign.activeImportId)
     throw new ConvexError(
       "Esperá a que termine la importación antes de confirmar un vínculo.",
@@ -305,7 +305,7 @@ export const excludedKeys = internalQuery({
 export const exclusions = query({
   args: { campaignId: v.id("qaVisualCampaigns") },
   handler: async (ctx, { campaignId }) => {
-    await requireCampaign(ctx, campaignId);
+    await requireCampaign(ctx, campaignId, { draft: true });
     return (await activeExclusions(ctx, campaignId)).map((row) => ({
       id: row._id,
       name: row.from ?? row.pieceKey ?? "",

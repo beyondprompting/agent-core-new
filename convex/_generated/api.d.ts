@@ -133,6 +133,7 @@ import type * as qaVisual_importJob from "../qaVisual/importJob.js";
 import type * as qaVisual_importPool from "../qaVisual/importPool.js";
 import type * as qaVisual_importRead from "../qaVisual/importRead.js";
 import type * as qaVisual_imports from "../qaVisual/imports.js";
+import type * as qaVisual_mappingChoices from "../qaVisual/mappingChoices.js";
 import type * as qaVisual_mediaHttp from "../qaVisual/mediaHttp.js";
 import type * as qaVisual_model_clientBrief from "../qaVisual/model/clientBrief.js";
 import type * as qaVisual_model_collaboration from "../qaVisual/model/collaboration.js";
@@ -330,6 +331,7 @@ declare const fullApi: ApiFromModules<{
   "qaVisual/importPool": typeof qaVisual_importPool;
   "qaVisual/importRead": typeof qaVisual_importRead;
   "qaVisual/imports": typeof qaVisual_imports;
+  "qaVisual/mappingChoices": typeof qaVisual_mappingChoices;
   "qaVisual/mediaHttp": typeof qaVisual_mediaHttp;
   "qaVisual/model/clientBrief": typeof qaVisual_model_clientBrief;
   "qaVisual/model/collaboration": typeof qaVisual_model_collaboration;

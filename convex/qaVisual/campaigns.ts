@@ -222,7 +222,24 @@ export const getActive = internalQuery({
   },
 });
 
-export const register = internalMutation({
+/** A campaign that is active or still a draft: the mapping panel works on both. */
+export const getEditable = internalQuery({
+  args: { campaignId: v.string() },
+  handler: async (ctx, { campaignId }) => {
+    await requireQaAdmin(ctx);
+    const id = ctx.db.normalizeId("qaVisualCampaigns", campaignId);
+    if (!id) return null;
+    const campaign = await ctx.db.get(id);
+    return campaign && campaign.status !== "archived" ? campaign : null;
+  },
+});
+
+/**
+ * Saves the folder and its sources as a draft when the user goes to the pieces, so links,
+ * exclusions and choices have a campaign from the start. The draft of the same folder is
+ * resumed; nothing is imported until `activate`.
+ */
+export const saveDraft = internalMutation({
   args: {
     name: v.string(),
     driveFolderId: v.string(),
@@ -237,6 +254,13 @@ export const register = internalMutation({
         q.eq("driveFolderId", args.driveFolderId),
       )
       .unique();
+    if (existing?.status === "draft") {
+      await ctx.db.patch(existing._id, {
+        name: args.name,
+        sourceSelection: args.sourceSelection,
+      });
+      return { status: "draft" as const, campaignId: existing._id };
+    }
     if (existing)
       return {
         status:
@@ -245,14 +269,92 @@ export const register = internalMutation({
             : ("archived" as const),
         campaignId: existing._id,
       };
-
     const campaignId = await ctx.db.insert("qaVisualCampaigns", {
       ...args,
-      status: "active",
+      status: "draft",
       createdBy,
     });
+    return { status: "draft" as const, campaignId };
+  },
+});
+
+/** «Crear campaña»: the draft becomes active with its verified sources and is imported. */
+export const activate = internalMutation({
+  args: {
+    campaignId: v.id("qaVisualCampaigns"),
+    name: v.string(),
+    sourceSelection,
+  },
+  handler: async (ctx, { campaignId, name, sourceSelection }) => {
+    await requireQaAdmin(ctx);
+    const campaign = await ctx.db.get(campaignId);
+    if (campaign?.status !== "draft")
+      return {
+        status:
+          campaign?.status === "active"
+            ? ("existing" as const)
+            : ("missing" as const),
+      };
+    await ctx.db.patch(campaignId, { status: "active", name, sourceSelection });
+    for (const row of await ctx.db
+      .query("qaVisualMappingChoices")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+      .collect())
+      await ctx.db.delete(row._id);
     await queueSync(ctx, campaignId);
-    return { status: "created" as const, campaignId };
+    return { status: "created" as const };
+  },
+});
+
+/** Campaigns whose registration was not finished, to continue or discard them. */
+export const drafts = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireQaAdmin(ctx);
+    const rows = await ctx.db
+      .query("qaVisualCampaigns")
+      .withIndex("by_status", (q) => q.eq("status", "draft"))
+      .order("desc")
+      .take(50);
+    return rows.map((campaign) => ({
+      _id: campaign._id,
+      name: campaign.name,
+      createdAt: campaign._creationTime,
+      folderUrl: `https://drive.google.com/drive/folders/${campaign.driveFolderId}`,
+      sourceSelection: campaign.sourceSelection ?? {},
+    }));
+  },
+});
+
+/**
+ * Deletes a draft with what was saved for it: exclusions, equivalences and choices. The CSV
+ * corrections already written in Drive stay, and so does their audit (without the draft).
+ */
+export const discardDraft = mutation({
+  args: { campaignId: v.id("qaVisualCampaigns") },
+  handler: async (ctx, { campaignId }) => {
+    await requireQaAdmin(ctx);
+    const campaign = await ctx.db.get(campaignId);
+    if (campaign?.status !== "draft")
+      throw new ConvexError(
+        "Solo se puede descartar una campaña sin terminar.",
+      );
+    for (const table of [
+      "qaVisualLinkOverrides",
+      "qaVisualEquivalences",
+      "qaVisualMappingChoices",
+    ] as const)
+      for (const row of await ctx.db
+        .query(table)
+        .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+        .collect())
+        await ctx.db.delete(row._id);
+    for (const row of await ctx.db
+      .query("qaVisualCsvEdits")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+      .collect())
+      await ctx.db.patch(row._id, { campaignId: undefined });
+    await ctx.db.delete(campaignId);
   },
 });
 

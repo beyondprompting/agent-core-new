@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { convexTest } from "convex-test";
+import { getFunctionName } from "convex/server";
 import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import type { ActionCtx } from "../convex/_generated/server";
 import { folderMime, type DriveFile } from "../convex/qaVisual/driveClient";
 import { inspectDriveFolder } from "../convex/qaVisual/driveSource.node";
-import { add, inspect } from "../convex/qaVisual/campaignRegistration";
+import {
+  add,
+  inspect,
+  startDraft,
+} from "../convex/qaVisual/campaignRegistration";
 import { ANALYSIS_POLICY_VERSION } from "../convex/qaVisual/model/contracts";
 import { summarizeCampaignPieces } from "../app/lib/qa-visual/campaign-model";
 
@@ -144,62 +149,100 @@ test("ambiguous sources and missing folders stay visible until the user resolves
   assert.equal(fixed.selection.excelFileId, "excel-2");
 });
 
-test("a source disappearing after inspection prevents registration instead of silently switching files", async (t) => {
+/** Answers of the Convex functions an action calls, by function name. */
+function actionCtx(
+  answers: Record<string, (args: Record<string, unknown>) => unknown>,
+  calls: string[] = [],
+) {
+  const answer = (fn: unknown, args: Record<string, unknown>) => {
+    const name = getFunctionName(fn as Parameters<typeof getFunctionName>[0]);
+    calls.push(name);
+    const handler = answers[name];
+    if (!handler) assert.fail(`unexpected call to ${name}`);
+    return handler(args ?? {});
+  };
+  return {
+    runQuery: async (fn: unknown, args: Record<string, unknown>) =>
+      answer(fn, args),
+    runMutation: async (fn: unknown, args: Record<string, unknown>) =>
+      answer(fn, args),
+  } as unknown as ActionCtx;
+}
+type Handler<A, R> = { _handler(ctx: ActionCtx, args: A): Promise<R> };
+const draftAction = startDraft as unknown as Handler<
+  { folderUrl: string; excelFileId?: string; csvFileId?: string },
+  { campaignId?: string; error?: string; inspection?: { ok: boolean } }
+>;
+const addAction = add as unknown as Handler<
+  { campaignId: string },
+  { name?: string; error?: string; inspection?: { ok: boolean } }
+>;
+const noLinks = {
+  "qaVisual/overrides:excludedKeys": () => [],
+  "qaVisual/equivalences:forCampaign": () => [],
+};
+
+test("a source disappearing after inspection prevents saving the draft instead of silently switching files", async (t) => {
   const d = drive(t);
   const preview = await inspectDriveFolder(url);
   assert.ok("folder" in preview && preview.ok);
   d.listings.resources = [{ ...excel, id: "replacement" }];
-  const ctx = {
-    runQuery: async () => true,
-    runMutation: async () =>
-      assert.fail("an unverified folder must not be registered"),
-  } as unknown as ActionCtx;
-  const action = add as unknown as {
-    _handler(
-      ctx: ActionCtx,
-      args: { folderUrl: string; excelFileId?: string; csvFileId?: string },
-    ): Promise<{ error?: string; inspection?: { ok: boolean } }>;
-  };
-  const result = await action._handler(ctx, {
-    folderUrl: url,
-    ...preview.selection,
-  });
+  const result = await draftAction._handler(
+    actionCtx({ "qaVisual/access:viewerIsQaAdmin": () => true }),
+    { folderUrl: url, ...preview.selection },
+  );
   assert.ok(result.error);
   assert.equal(result.inspection?.ok, false);
 });
 
-test("confirmed registration sends the inspected files to Convex and rejects a folder changed before confirmation", async (t) => {
+test("going to the pieces saves a draft with the inspected files, and «Crear campaña» activates it only if the folder still matches", async (t) => {
   const d = drive(t);
-  let writes = 0;
-  const ctx = {
-    runQuery: async () => true,
-    runMutation: async (
-      _fn: unknown,
-      args: { driveFolderId: string; sourceSelection: unknown },
-    ) => {
-      writes++;
-      assert.equal(args.driveFolderId, "root");
-      assert.deepEqual(args.sourceSelection, {
-        excelFileId: "excel",
-        csvFileId: "csv",
-      });
-      return { status: "created", campaignId: "campaign" };
+  const calls: string[] = [];
+  const ctx = actionCtx(
+    {
+      "qaVisual/access:viewerIsQaAdmin": () => true,
+      "qaVisual/campaigns:saveDraft": (args) => {
+        assert.equal(args.driveFolderId, "root");
+        assert.deepEqual(args.sourceSelection, {
+          excelFileId: "excel",
+          csvFileId: "csv",
+        });
+        return { status: "draft", campaignId: "campaign" };
+      },
+      "qaVisual/campaigns:getEditable": () => ({
+        _id: "campaign",
+        name: root.name,
+        status: "draft",
+        driveFolderId: "root",
+      }),
+      "qaVisual/campaigns:activate": (args) => {
+        assert.deepEqual(args.sourceSelection, {
+          excelFileId: "excel",
+          csvFileId: "csv",
+        });
+        return { status: "created" };
+      },
+      ...noLinks,
     },
-  } as unknown as ActionCtx;
-  const action = add as unknown as {
-    _handler(
-      ctx: ActionCtx,
-      args: { folderUrl: string },
-    ): Promise<{ name?: string; error?: string }>;
-  };
+    calls,
+  );
+  const draft = await draftAction._handler(ctx, { folderUrl: url });
+  assert.equal(draft.campaignId, "campaign");
+  assert.ok(!calls.includes("qaVisual/campaigns:activate"));
   assert.equal(
-    (await action._handler(ctx, { folderUrl: url })).name,
+    (await addAction._handler(ctx, { campaignId: "campaign" })).name,
     root.name,
   );
-  assert.equal(writes, 1);
+  assert.equal(
+    calls.filter((name) => name === "qaVisual/campaigns:activate").length,
+    1,
+  );
   d.listings.editables = [];
-  assert.ok((await action._handler(ctx, { folderUrl: url })).error);
-  assert.equal(writes, 1);
+  assert.ok((await addAction._handler(ctx, { campaignId: "campaign" })).error);
+  assert.equal(
+    calls.filter((name) => name === "qaVisual/campaigns:activate").length,
+    1,
+  );
 });
 
 test("an empty deployment can be registered, while more than 1000 images is a visible blocking check", async (t) => {
@@ -225,6 +268,12 @@ const modules = {
     import("../convex/qaVisual/campaigns"),
   "../convex/qaVisual/campaignSnapshots.ts": () =>
     import("../convex/qaVisual/campaignSnapshots"),
+  "../convex/qaVisual/overrides.ts": () =>
+    import("../convex/qaVisual/overrides"),
+  "../convex/qaVisual/equivalences.ts": () =>
+    import("../convex/qaVisual/equivalences"),
+  "../convex/qaVisual/mappingChoices.ts": () =>
+    import("../convex/qaVisual/mappingChoices"),
 };
 async function setup() {
   const t = convexTest(schema, modules);
@@ -314,6 +363,141 @@ test("campaign queries separate active and archived rows and reject unauthentica
       campaignId: s.archivedId,
     }),
   );
+});
+
+test("a draft keeps what is decided about its pieces, stays out of the lists and the import, and can be discarded", async () => {
+  const s = await setup();
+  const draft = {
+    name: "Borrador",
+    driveFolderId: "draft-folder",
+    reviewKey: "draft",
+    sourceSelection: { excelFileId: "excel", csvFileId: "csv" },
+  };
+  const saved = await s.user.mutation(
+    internal.qaVisual.campaigns.saveDraft,
+    draft,
+  );
+  assert.equal(saved.status, "draft");
+  const campaignId = saved.campaignId;
+  // The same folder resumes its draft with the new sources; a registered folder is refused.
+  const again = await s.user.mutation(internal.qaVisual.campaigns.saveDraft, {
+    ...draft,
+    sourceSelection: { excelFileId: "excel", csvFileId: "other" },
+  });
+  assert.equal(again.campaignId, campaignId);
+  assert.equal(
+    (
+      await s.user.mutation(internal.qaVisual.campaigns.saveDraft, {
+        ...draft,
+        driveFolderId: "root",
+      })
+    ).status,
+    "existing",
+  );
+  assert.deepEqual(
+    (await s.user.query(api.qaVisual.campaigns.drafts, {})).map((d) => [
+      d.name,
+      d.sourceSelection.csvFileId,
+    ]),
+    [["Borrador", "other"]],
+  );
+  const listed = await s.user.query(api.qaVisual.campaigns.list, {
+    status: "active",
+    paginationOpts: { cursor: null, numItems: 12 },
+  });
+  assert.deepEqual(
+    listed.page.map((row) => row.name),
+    ["Actual"],
+  );
+  assert.equal(
+    (await s.user.query(api.qaVisual.campaigns.counts, {})).active.value,
+    1,
+  );
+  // Only the mapping functions accept a draft.
+  await assert.rejects(
+    s.user.query(api.qaVisual.campaigns.analysisInstructions, { campaignId }),
+  );
+
+  // Exclusions and equivalences are saved at once, without importing anything.
+  await s.user.mutation(api.qaVisual.overrides.excludePieces, {
+    campaignId,
+    fileNames: ["logo.png"],
+    note: "Es el logo",
+  });
+  await s.user.mutation(internal.qaVisual.equivalences.record, {
+    campaignId,
+    scope: "campaign",
+    piece: "pieza.png",
+    items: [{ column: "FORMATO_TIPO", csvValue: "POST", matrixValue: "Post" }],
+  });
+  assert.deepEqual(
+    (await s.user.query(api.qaVisual.overrides.exclusions, { campaignId })).map(
+      (row) => row.name,
+    ),
+    ["logo.png"],
+  );
+  assert.equal(
+    (await s.user.query(api.qaVisual.equivalences.list, { campaignId })).items
+      .length,
+    1,
+  );
+
+  // Choices come back only on the CSV version they were made on.
+  const file = { csvFileId: "csv", csvVersion: "7" };
+  await s.user.mutation(api.qaVisual.mappingChoices.save, {
+    campaignId,
+    ...file,
+    choices: [
+      { piece: "pieza.png", csvLine: 4 },
+      { piece: "otra.png", order: "12", mode: "csv" },
+    ],
+  });
+  assert.equal(
+    (
+      await s.user.query(api.qaVisual.mappingChoices.get, {
+        campaignId,
+        ...file,
+      })
+    ).length,
+    2,
+  );
+  assert.deepEqual(
+    await s.user.query(api.qaVisual.mappingChoices.get, {
+      campaignId,
+      ...file,
+      csvVersion: "8",
+    }),
+    [],
+  );
+
+  const stored = await s.t.run(async (ctx) => ({
+    campaign: await ctx.db.get(campaignId),
+    imports: await ctx.db.query("qaVisualImports").collect(),
+  }));
+  assert.equal(stored.campaign?.status, "draft");
+  assert.equal(stored.campaign?.activeImportId, undefined);
+  assert.equal(stored.imports.length, 0);
+
+  // An active campaign is never discarded as a draft.
+  await assert.rejects(
+    s.user.mutation(api.qaVisual.campaigns.discardDraft, {
+      campaignId: s.campaignId,
+    }),
+  );
+  await s.user.mutation(api.qaVisual.campaigns.discardDraft, { campaignId });
+  const left = await s.t.run(async (ctx) => ({
+    campaign: await ctx.db.get(campaignId),
+    overrides: await ctx.db.query("qaVisualLinkOverrides").collect(),
+    equivalences: await ctx.db.query("qaVisualEquivalences").collect(),
+    choices: await ctx.db.query("qaVisualMappingChoices").collect(),
+  }));
+  assert.deepEqual(left, {
+    campaign: null,
+    overrides: [],
+    equivalences: [],
+    choices: [],
+  });
+  assert.deepEqual(await s.user.query(api.qaVisual.campaigns.drafts, {}), []);
 });
 
 test("card totals include every current piece, excluding old hashes, old policies and superseded results", async () => {
@@ -436,7 +620,14 @@ test("card totals include every current piece, excluding old hashes, old policie
     done: 2,
     notices: 1,
     // Approved by the team but not sent: none has the client's final approval yet.
-    stages: { internal: 1, ready: 4, sent: 0, viewed: 0, clientChanges: 0, final: 0 },
+    stages: {
+      internal: 1,
+      ready: 4,
+      sent: 0,
+      viewed: 0,
+      clientChanges: 0,
+      final: 0,
+    },
   });
   await s.t.run((ctx) => ctx.db.patch(pieceIds[0], { status: "removed" }));
   const removed = await s.user.query(api.qaVisual.campaigns.pieceSummaries, {

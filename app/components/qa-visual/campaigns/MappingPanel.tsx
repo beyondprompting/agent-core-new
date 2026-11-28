@@ -283,7 +283,8 @@ export function MappingSummary({
  */
 export function MappingPanel({
   mapping,
-  target,
+  campaignId,
+  draft,
   selection,
   disabled,
   loading = false,
@@ -291,7 +292,9 @@ export function MappingPanel({
   onChanged,
 }: {
   mapping: Mapping;
-  target: { folderUrl: string } | { campaignId: string };
+  campaignId: Id<"qaVisualCampaigns">;
+  /** The campaign is being registered: nothing is imported until it is created. */
+  draft: boolean;
   selection: SourceSelection;
   disabled: boolean;
   /** The folder is being inspected again. */
@@ -300,13 +303,7 @@ export function MappingPanel({
   /** The CSV, the exclusions or the equivalences changed: verify again. */
   onChanged: (inspection?: FolderInspection) => void;
 }) {
-  const campaignId =
-    "campaignId" in target
-      ? (target.campaignId as Id<"qaVisualCampaigns">)
-      : undefined;
-  const where = campaignId
-    ? { campaignId }
-    : { folderUrl: "folderUrl" in target ? target.folderUrl : "" };
+  const where = { campaignId };
   const reviewMapping = useAction(
     api.qaVisual.campaignRegistration.reviewMapping,
   );
@@ -318,14 +315,13 @@ export function MappingPanel({
   const exclude = useMutation(api.qaVisual.overrides.excludePieces);
   const include = useMutation(api.qaVisual.overrides.includePiece);
   const revoke = useMutation(api.qaVisual.equivalences.revoke);
-  const exclusions = useQuery(
-    api.qaVisual.overrides.exclusions,
-    campaignId ? { campaignId } : "skip",
-  );
-  const equivalences = useQuery(
-    api.qaVisual.equivalences.list,
-    campaignId ? { campaignId } : "skip",
-  );
+  const exclusions = useQuery(api.qaVisual.overrides.exclusions, {
+    campaignId,
+  });
+  const equivalences = useQuery(api.qaVisual.equivalences.list, {
+    campaignId,
+  });
+  const saveChoices = useMutation(api.qaVisual.mappingChoices.save);
   const [pending, setPending] = useState<
     "check" | "apply" | "exclude" | "approve" | "refresh" | null
   >(null);
@@ -375,6 +371,49 @@ export function MappingPanel({
   }, [pending, reviewing, onBusy]);
 
   const ready = mapping.status === "ready" ? mapping : undefined;
+
+  // Choices are saved as they are made and come back when the panel opens again on the
+  // same CSV version, so closing the dialog loses nothing.
+  const csvFile = ready
+    ? { csvFileId: selection.csvFileId ?? "", csvVersion: ready.csv.version }
+    : undefined;
+  const csvKey = csvFile ? JSON.stringify(csvFile) : "";
+  const saved = useQuery(
+    api.qaVisual.mappingChoices.get,
+    csvFile ? { campaignId, ...csvFile } : "skip",
+  );
+  const restored = useRef("");
+  const lastSaved = useRef("");
+  useEffect(() => {
+    if (!saved || !ready || restored.current === csvKey) return;
+    // Another CSV version: its lines may have moved, so earlier choices do not apply.
+    const changed = Boolean(restored.current);
+    restored.current = csvKey;
+    const list = saved.map(({ piece, ...choice }) => ({ piece, ...choice }));
+    lastSaved.current = JSON.stringify(list);
+    const open = new Set(ready.problems.map((p) => p.piece));
+    if (changed) fromGemini.current.clear();
+    const next = changed ? {} : { ...choicesRef.current };
+    for (const { piece, ...choice } of saved)
+      if (open.has(piece) && !next[piece]) next[piece] = choice;
+    choicesRef.current = next;
+    setChoices(next);
+  }, [saved, ready, csvKey]);
+  useEffect(() => {
+    if (!csvFile || restored.current !== csvKey) return;
+    const list = Object.entries(choices).map(([piece, choice]) => ({
+      piece,
+      ...choice,
+    }));
+    const key = JSON.stringify(list);
+    if (key === lastSaved.current) return;
+    lastSaved.current = key;
+    // Saving is a convenience: a failure must not interrupt the work in the panel.
+    saveChoices({ campaignId, ...csvFile, choices: list }).catch(() => {
+      lastSaved.current = "";
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices, csvKey, campaignId, saveChoices]);
   const edits = useMemo(
     () =>
       ready
@@ -557,9 +596,9 @@ export function MappingPanel({
       setView(undefined);
       setNotice(
         `Se aplicaron ${result.applied} ${result.applied === 1 ? "cambio" : "cambios"} en «${ready.csv.name}». Drive guarda la versión anterior.` +
-          (campaignId
-            ? " La campaña se está actualizando con el CSV corregido."
-            : ""),
+          (draft
+            ? ""
+            : " La campaña se está actualizando con el CSV corregido."),
       );
       onChanged(result.inspection);
     });
@@ -567,7 +606,7 @@ export function MappingPanel({
   const approveSame = (problem: Problem, choice: Choice) =>
     run("approve", async () => {
       const order = problem.candidates?.find((c) => c.row === choice.order);
-      if (!campaignId || !order) return;
+      if (!order) return;
       const result = await approve({
         campaignId,
         ...selection,
@@ -579,20 +618,22 @@ export function MappingPanel({
       if (result.error) return setError(result.error);
       choose(problem.piece, undefined);
       setNotice(
-        `Equivalencia aprobada ${choice.scope === "client" ? "para todas las campañas del cliente" : "para esta campaña"}. El CSV no se modificó. La campaña se está actualizando.`,
+        `Equivalencia aprobada ${choice.scope === "client" ? "para todas las campañas del cliente" : "para esta campaña"}. El CSV no se modificó.${draft ? "" : " La campaña se está actualizando."}`,
       );
       onChanged(result.inspection);
     });
 
+  // Reads Drive again. The choices stay while the CSV is the same version.
   const refresh = () =>
     run("refresh", async () => {
-      reset();
+      setSuggestions(new Map());
+      setChecked(undefined);
+      setAuthorized(false);
       onChanged();
     });
 
   const excludeChosen = () =>
     run("exclude", async () => {
-      if (!campaignId) return;
       const { excluded } = await exclude({
         campaignId,
         fileNames: chosen,
@@ -602,7 +643,7 @@ export function MappingPanel({
       setChosen([]);
       setReason("");
       setNotice(
-        `${excluded} ${excluded === 1 ? "pieza excluida" : "piezas excluidas"} del análisis. La campaña se está actualizando.`,
+        `${excluded} ${excluded === 1 ? "pieza excluida" : "piezas excluidas"} del análisis.${draft ? "" : " La campaña se está actualizando."}`,
       );
       onChanged();
     });
@@ -957,7 +998,7 @@ export function MappingPanel({
         </div>
       );
 
-    if (choice.order === order.row && choice.mode === "same" && campaignId)
+    if (choice.order === order.row && choice.mode === "same")
       return (
         <section className="qc-detail-section">
           <h4 className="qc-question">
@@ -1041,12 +1082,8 @@ export function MappingPanel({
             <button
               type="button"
               className="qc-button secondary small"
-              disabled={busy || !campaignId}
-              title={
-                campaignId
-                  ? "El CSV queda como está y los valores se toman como iguales"
-                  : "Disponible después de agregar la campaña"
-              }
+              disabled={busy}
+              title="El CSV queda como está y los valores se toman como iguales"
               onClick={() =>
                 choose(problem.piece, {
                   order: order.row,
@@ -1061,8 +1098,7 @@ export function MappingPanel({
           <p className="qc-mapping-note">
             «Corregir el CSV» copia{" "}
             {order.differences.length === 1 ? "el valor" : "los valores"} de la
-            matriz en la línea {line}. «Son lo mismo» deja el CSV como está
-            {campaignId ? "" : " (disponible después de agregar la campaña)"}.
+            matriz en la línea {line}. «Son lo mismo» deja el CSV como está.
           </p>
         </div>
         {candidates.length > 1 &&
@@ -1137,17 +1173,15 @@ export function MappingPanel({
                 {problem.width}×{problem.height}
               </span>
             ) : null}
-            {campaignId && (
-              <button
-                type="button"
-                className="qc-button ghost small qc-detail-exclude"
-                disabled={busy}
-                onClick={() => toggleChosen(problem.piece, state !== "exclude")}
-              >
-                <EyeOff size={14} aria-hidden />
-                {state === "exclude" ? "No excluir" : "Excluir del análisis"}
-              </button>
-            )}
+            <button
+              type="button"
+              className="qc-button ghost small qc-detail-exclude"
+              disabled={busy}
+              onClick={() => toggleChosen(problem.piece, state !== "exclude")}
+            >
+              <EyeOff size={14} aria-hidden />
+              {state === "exclude" ? "No excluir" : "Excluir del análisis"}
+            </button>
           </div>
           <h3 className="qc-detail-name">
             <Name text={stem(problem.piece)} />
@@ -1178,9 +1212,7 @@ export function MappingPanel({
             )}
             <div>
               <strong>
-                {suggestion.source === "ai"
-                  ? "Gemini"
-                  : "Revisión automática"}
+                {suggestion.source === "ai" ? "Gemini" : "Revisión automática"}
               </strong>
               <p>{suggestion.explanation}</p>
               {suggestion.rejected && (
@@ -1484,7 +1516,6 @@ export function MappingPanel({
                   disabled={locked}
                   onClick={() =>
                     void run("approve", async () => {
-                      if (!campaignId) return;
                       await revoke({ campaignId, equivalenceId: row.id });
                       setNotice(
                         "Se quitó la equivalencia. La campaña se está actualizando.",
@@ -1626,10 +1657,8 @@ export function MappingPanel({
       </header>
       {!complete && (
         <p className="qc-mapping-note">
-          Gemini propone sin cambiar nada. Solo se modifica el CSV, nunca
-          la matriz del cliente.
-          {!campaignId &&
-            " Excluir piezas y aprobar equivalencias se habilita después de agregar la campaña."}
+          Gemini propone sin cambiar nada. Solo se modifica el CSV, nunca la
+          matriz del cliente. Lo que elegís se guarda solo.
         </p>
       )}
       {notice && (
@@ -1688,18 +1717,16 @@ export function MappingPanel({
                           key={piece}
                           className={`qc-piece${active ? " active" : ""}`}
                         >
-                          {campaignId && (
-                            <input
-                              type="checkbox"
-                              aria-label={`Marcar ${piece} para excluir`}
-                              title="Marcar para excluir del análisis"
-                              checked={state === "exclude"}
-                              disabled={busy}
-                              onChange={(event) =>
-                                toggleChosen(piece, event.target.checked)
-                              }
-                            />
-                          )}
+                          <input
+                            type="checkbox"
+                            aria-label={`Marcar ${piece} para excluir`}
+                            title="Marcar para excluir del análisis"
+                            checked={state === "exclude"}
+                            disabled={busy}
+                            onChange={(event) =>
+                              toggleChosen(piece, event.target.checked)
+                            }
+                          />
                           <button
                             type="button"
                             aria-current={active || undefined}
@@ -1798,9 +1825,9 @@ export function MappingPanel({
         </div>
       </div>
 
-      {((campaignId && chosen.length > 0) || edits.length > 0) && (
+      {(chosen.length > 0 || edits.length > 0) && (
         <div className="qc-mapping-bars">
-          {campaignId && chosen.length > 0 && (
+          {chosen.length > 0 && (
             <div className="qc-mapping-bar">
               <EyeOff size={15} aria-hidden />
               <strong>
